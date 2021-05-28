@@ -1,0 +1,325 @@
+--- Draw lines on directionalisers (unit stands) to signal unit upgrads.
+-- @author Darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    -- Nested tables are considered cross script.  Make a local copy.
+    local function copyTable(t)
+        if t and type(t) == 'table' then
+            local copy = {}
+            for k, v in pairs(t) do
+                copy[k] = type(v) == 'table' and copyTable(v) or v
+            end
+            t = copy
+        end
+        return t
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return copyTable(helperObject.call(functionName, parameters)) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local _waitId = false
+
+-------------------------------------------------------------------------------
+
+function onLoad()
+    createUi()
+    delayedHighlightUnitUpgrades()
+end
+
+function onDestroy()
+    if _waitId then
+        Wait.stop(_waitId)
+        _waitId = false
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if string.match(object.getName(), '^Directionaliser %(.*%)$') then
+            object.setVectorLines({})
+        end
+    end
+end
+
+function onPlayerTurnStart(player_color_start, player_color_previous)
+    delayedHighlightUnitUpgrades()
+end
+
+-------------------------------------------------------------------------------
+
+function createUi()
+    local fontSize = 44
+    local labelFontSize = 90
+    local buttonFontSize = 90
+    local finePrintFontSize = 35
+    local scaleUpDown = 2
+    local y = 0.21
+
+    self.createButton({
+        click_function = 'doNothing',
+        function_owner = self,
+        label          = 'TI4 Highlight\nUnit Upgrades',
+        position       = { x = 0, y = y, z = -0.65 },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = { x = 1/scaleUpDown, y = 1, z = 1/scaleUpDown },
+        width          = 0,
+        height         = 0,
+        font_size      = labelFontSize * scaleUpDown,
+        tooltip        = nil,
+    })
+    self.createButton({
+        click_function = 'delayedHighlightUnitUpgrades',
+        function_owner = self,
+        label          = 'Update',
+        position       = { x = 0, y = y, z = 0.1 },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = { x = 1/scaleUpDown, y = 1, z = 1/scaleUpDown },
+        width          = 1200,
+        height         = 500,
+        font_size      = buttonFontSize * scaleUpDown,
+        tooltip        = nil,
+    })
+    self.createButton({
+        click_function = 'doNothing',
+        function_owner = self,
+        label          = '(Automatically updates between turns)',
+        position       = { x = 0, y = y, z = 0.85 },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = { x = 1/scaleUpDown, y = 1, z = 1/scaleUpDown },
+        width          = 0,
+        height         = 0,
+        font_size      = finePrintFontSize * scaleUpDown,
+        tooltip        = nil,
+    })
+end
+
+function doNothing()
+end
+
+-------------------------------------------------------------------------------
+
+function onNewTechnologyResearched(params)
+	delayedHighlightUnitUpgrades()
+end
+
+function delayedHighlightUnitUpgrades()
+    if _waitId then
+        Wait.stop(_waitId)
+        _waitId = false
+    end
+    local function wrapper()
+        _waitId = false
+        startLuaCoroutine(self, '_highlightUnitUpgradesCoroutine')
+    end
+    _waitId = Wait.time(wrapper, 0.25 + math.random() * 0.25)
+end
+
+function _highlightUnitUpgradesCoroutine()
+    local colorToUnitOverrides = _unitHelper.getColorToUnitOverrides()
+    coroutine.yield(0)
+
+    local colorToUnitAttributes = {}
+    for color, unitOverrides in pairs(colorToUnitOverrides) do
+        colorToUnitAttributes[color] = _unitHelper.getUnitAttributes(unitOverrides)
+    end
+    coroutine.yield(0)
+
+    -- Map from unit bag name to {upgrade, color} values.
+    local unitBagNameToUpgradeAndColor = {}
+    for color, unitAttributes in pairs(colorToUnitAttributes) do
+        for unitType, attrs in pairs(unitAttributes) do
+            unitBagNameToUpgradeAndColor[color .. ' ' .. unitType] = {
+                upgrade = attrs.upgrade,
+                color = color,
+            }
+        end
+        -- Copy flagship value to specific name.
+        local faction = _factionHelper.fromColor(color)
+        if faction and faction.flagship then
+            unitBagNameToUpgradeAndColor[faction.flagship] = unitBagNameToUpgradeAndColor[color .. ' Flagship']
+        end
+    end
+    coroutine.yield(0)
+
+    -- Find directionalisers and all unit bags in one pass.
+    local directionaliserNameToColor = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        directionaliserNameToColor['Directionaliser (' .. color .. ')'] = color
+    end
+    local colorToDirectionaliser = {}
+    local unitBagGuidToUpgradeAndColor = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        local directionaliserColor = directionaliserNameToColor[name]
+        if directionaliserColor then
+            colorToDirectionaliser[directionaliserColor] = object.getGUID()
+        end
+        local upgradeAndColor = (object.tag == 'Bag') and unitBagNameToUpgradeAndColor[name]
+        if upgradeAndColor then
+            unitBagGuidToUpgradeAndColor[object.getGUID()] = upgradeAndColor
+        end
+    end
+    coroutine.yield(0)
+
+    -- At this point have directionalisers, unit bags, and upgrade/color.
+    -- Could go in many different directions, in this case get bottom of
+    -- upgraded unit positions in world space.
+    local colorToUpgradedUnitPositions = {}
+    for guid, upgradeAndColor in pairs(unitBagGuidToUpgradeAndColor) do
+        if upgradeAndColor.upgrade then
+            local object = getObjectFromGUID(guid)
+            if object then
+                local p = object.getPosition()
+                local bounds = object.getBoundsNormalized()
+                local scale = object.getScale()
+                local entry = colorToUpgradedUnitPositions[upgradeAndColor.color]
+                if not entry then
+                    entry = {}
+                    colorToUpgradedUnitPositions[upgradeAndColor.color] = entry
+                end
+                table.insert(entry, {
+                    x = p.x - bounds.offset.x,
+                    y = p.y - (bounds.size.y / 2) - bounds.offset.y,
+                    z = p.z
+                })
+            end
+        end
+    end
+
+    -- Draw lines on the directionalisers.
+    for color, guid in pairs(colorToDirectionaliser) do
+        local directionaliser = getObjectFromGUID(guid)
+        local unitPositions = colorToUpgradedUnitPositions[color]
+        local rgb = directionaliser.getColorTint()
+        local hsl = ColorUtil.rgbToHsl(rgb)
+        if hsl.l < 0.8 then
+            hsl.l = hsl.l + 0.2
+        else
+            hsl.l = hsl.l - 0.2
+        end
+        hsl.a = 0.8
+        local lineColor = ColorUtil.hslToRgb(hsl)
+        local thickness = 1
+        if directionaliser then
+            local bounds = self.getBoundsNormalized()
+            local midY = directionaliser.getPosition().y + 0.22
+            local midZ = 1.2
+            local lines = {}
+            for _, unitPosition in ipairs(unitPositions or {}) do
+                local p0 = unitPosition
+                local points = {
+                    { x = p0.x, y = midY, z = p0.z + midZ },
+                    { x = p0.x, y = midY, z = p0.z - midZ },
+                }
+                for i, point in ipairs(points) do
+                    points[i] = directionaliser.positionToLocal(point)
+                end
+                table.insert(lines, {
+                    points = points,
+                    thickness = thickness,
+                    color = {r=0,g=0,b=0}, --lineColor, -- try simple black
+                    loop = false,
+                    square = true,
+                })
+            end
+            directionaliser.setVectorLines(lines)
+        end
+    end
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+--- https://dev.fandom.com/wiki/Module:Colors
+ColorUtil = {}
+
+function ColorUtil._circle(val, max)
+    if val < 0 then        -- negative; below cycle minimum
+        val = val + max
+    elseif val > max then  -- exceeds cycle maximum
+        val = val - max
+    end
+    return val
+end
+
+function ColorUtil._hueToRgb(p, q, t)
+    t = ColorUtil._circle(t, 1)
+    if t < 1/6 then
+        return p + (q - p) * 6 * t
+    elseif t < 1/2 then
+        return q
+    elseif t < 2/3 then
+        return p + (q - p) * (2/3 - t) * 6
+    else
+        return p
+    end
+end
+
+function ColorUtil.rgbToHsl(rgb)
+    assert(type(rgb) == 'table')
+    assert(type(rgb.r) == 'number' and 0 <= rgb.r and rgb.r <= 1)
+    assert(type(rgb.g) == 'number' and 0 <= rgb.g and rgb.g <= 1)
+    assert(type(rgb.b) == 'number' and 0 <= rgb.b and rgb.b <= 1)
+    local r,g,b = rgb.r, rgb.g, rgb.b
+    local min = math.min(r, g, b)
+    local max = math.max(r, g, b)
+    local d = max - min
+    local h, s, l = 0, 0, ((min + max) / 2)
+    if d > 0 then
+        s = l < 0.5 and d / (max + min) or d / (2 - max - min)
+        h = max == r and (g - b) / d or
+            max == g and 2 + (b - r) / d or
+            max == b and 4 + (r - g) / d
+        h = ColorUtil._circle(h / 6, 1)
+    end
+    local hsl = { h = h * 360, s = s, l = l, a = rgb.a }
+    assert(type(hsl.h) == 'number' and 0 <= hsl.h and hsl.h <= 360)
+    assert(type(hsl.s) == 'number' and 0 <= hsl.s and hsl.s <= 1)
+    assert(type(hsl.l) == 'number' and 0 <= hsl.l and hsl.l <= 1)
+    return hsl
+end
+
+function ColorUtil.hslToRgb(hsl)
+    assert(type(hsl) == 'table')
+    assert(type(hsl.h) == 'number' and 0 <= hsl.h and hsl.h <= 360)
+    assert(type(hsl.s) == 'number' and 0 <= hsl.s and hsl.s <= 1)
+    assert(type(hsl.l) == 'number' and 0 <= hsl.l and hsl.l <= 1)
+    local h, s, l = hsl.h / 360, hsl.s, hsl.l
+    local r, g, b, p, q
+    if s == 0 then
+        r, g, b = l, l, l
+    else
+        q = l < 0.5 and l * (1 + s) or l + s - l * s
+        p = 2 * l - q
+        r = ColorUtil._hueToRgb(p, q, h + 1/3)
+        g = ColorUtil._hueToRgb(p, q, h)
+        b = ColorUtil._hueToRgb(p, q, h - 1/3)
+    end
+    local rgb = { r = r, g = g, b = b, a = hsl.a }
+    assert(type(rgb.r) == 'number' and 0 <= rgb.r and rgb.r <= 1)
+    assert(type(rgb.g) == 'number' and 0 <= rgb.g and rgb.g <= 1)
+    assert(type(rgb.b) == 'number' and 0 <= rgb.b and rgb.b <= 1)
+    return rgb
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

@@ -1,0 +1,159 @@
+--- Reset system tiles to use ThatRobHuman's new mesh / UV map.
+-- @author darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local TILE = {
+    SCALE = { x = 1.36, y = 2.00, z = 1.36 },
+    MODEL = 'file:////Users/darrell/Downloads/tiles_v2/tile_normal_msh.obj',
+    COLLIDER = 'file:////Users/darrell/Downloads/tiles_v2/tile_normal_col.obj',
+    IMAGE_PREFIX = 'http://localhost:8080/mutatesystem?image=',
+    IMAGE_SUFFIX = '&v=2&unique='
+}
+
+local _deletedItems = false
+local _deletePendingSet = {}
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    _deletedItems = getDeletedItems()
+    self.addContextMenuItem('Mutate', mutate)
+end
+
+function onObjectDestroy(dyingObject)
+    _deletePendingSet[dyingObject.getGUID()] = nil
+end
+
+function getDeletedItems()
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' and object.getName() == 'TI4 Deleted Items' then
+            return object
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function mutate()
+    startLuaCoroutine(self, 'mutateCoroutine')
+end
+
+local function mutateJson(json)
+    assert(type(json) == 'string')
+    json = JSON.decode(json)
+    for k, v in pairs(json) do print(k .. ' ' .. tostring(v)) end
+
+    json.Transform.scaleX = TILE.SCALE.x
+    json.Transform.scaleY = TILE.SCALE.y
+    json.Transform.scaleZ = TILE.SCALE.z
+
+    json.CustomMesh.MeshURL = TILE.MODEL
+    json.CustomMesh.ColliderURL = TILE.COLLIDER
+    json.CustomMesh.DiffuseURL = TILE.IMAGE_PREFIX .. json.CustomMesh.DiffuseURL .. TILE.IMAGE_SUFFIX .. json.GUID
+
+    return JSON.encode_pretty(json)
+end
+
+local function mutateObject(object)
+    local guid = object.getGUID()
+    local json = object.getJSON()
+    local originalLock = object.getLock() or false
+
+    json = mutateJson(json)
+    local spawnParams = {
+        json              = json,
+        position          = object.getPosition(),
+        rotation          = object.getRotation(),
+        scale             = TILE.SCALE,
+        callback_function = nil,
+        sound             = false,
+        params            = nil,
+        snap_to_grid      = object.use_grid
+    }
+
+    -- Delete object, wait for delete to actually happen before reusing guid!
+    if _deletedItems then
+        _deletedItems.call('ignoreGuid', guid)
+    end
+    _deletePendingSet[guid] = true
+    destroyObject(object)
+    object = nil
+    while _deletePendingSet[guid] do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    local object = spawnObjectJSON(spawnParams)
+    assert(object.getGUID() == guid)
+
+    -- Wait for spawn, plus extra time for texture to load.
+    object.setLock(true)
+    while object.spawning do
+        coroutine.yield(0)
+    end
+    local waitUntil = Time.time + 3
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+    object.setLock(originalLock)
+
+    return object
+end
+
+function mutateCoroutine()
+    local container = getObjectFromGUID('f8c88f')
+    local pos = container.getPosition()
+
+    for _, entry in ipairs(container.getObjects()) do
+        local object = assert(container.takeObject({
+            guid = entry.guid,
+            position = { x = pos.x, y = pos.y + 12, z = pos.z },
+            smooth = false,
+        }))
+        coroutine.yield(0)
+        assert(object.getGUID() == entry.guid)
+        object = mutateObject(object)
+        assert(object.getGUID() == entry.guid)
+        coroutine.yield(0)
+
+        -- Wait for the put to finish (object get deleted) b/c of guid reuse.
+        _deletePendingSet[entry.guid] = true
+        container.putObject(object)
+        while _deletePendingSet[entry.guid] do
+            coroutine.yield(0)
+        end
+        coroutine.yield(0)
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

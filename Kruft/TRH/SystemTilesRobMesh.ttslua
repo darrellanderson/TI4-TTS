@@ -1,0 +1,257 @@
+--- Reset system tiles to use ThatRobHuman's new mesh / UV map.
+-- @author darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+
+local TILE = {
+    SCALE = { x = 1.36, y = 2.00, z = 1.36 },
+    MODEL = 'file:////Users/darrell/Downloads/tiles_v2/tile_normal_msh.obj',
+    COLLIDER = 'file:////Users/darrell/Downloads/tiles_v2/tile_normal_col.obj',
+    IMAGE_PREFIX = 'http://localhost:8080/mutatesystem?image=',
+    IMAGE_SUFFIX = '&v=2&unique='
+}
+
+local _tileGuidToContainers = false
+local _deletedItems = false
+local _deletePendingSet = {}
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    _deletedItems = getDeletedItems()
+    self.addContextMenuItem('Tile Search', tileSearch)
+    self.addContextMenuItem('Mutate', mutate)
+end
+
+function onObjectDestroy(dyingObject)
+    _deletePendingSet[dyingObject.getGUID()] = nil
+end
+
+function getDeletedItems()
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' and object.getName() == 'TI4 Deleted Items' then
+            return object
+        end
+    end
+end
+
+function getGuidToSystem()
+    local guidToSystem = _systemHelper.systems()
+
+    for i, guid in ipairs({ '508131', 'b40a21', '286304', '97eaec', '6f3057', 'a2c12f', 'eb402c' }) do
+        guidToSystem[guid] = {
+            guid = guid,
+            string = 'Alister system',
+            tile = 10000 + i
+        }
+    end
+
+    -- Regenerate only home systems? (they got clobbered via unrelated work).
+    if false then
+        local onlyHome = {}
+        for guid, system in pairs(guidToSystem) do
+            if system.home then
+                onlyHome[guid] = system
+            end
+        end
+        guidToSystem = onlyHome
+    end
+
+    return guidToSystem
+end
+
+
+-------------------------------------------------------------------------------
+
+function tileSearch()
+    _tileGuidToContainers = {}
+    local total = 0
+    local function addTile(guid, container)
+        local containers = _tileGuidToContainers[guid]
+        if not containers then
+            containers = {}
+            _tileGuidToContainers[guid] = containers
+        end
+        table.insert(containers, container)
+        total = total + 1
+    end
+
+    local guidToSystem = getGuidToSystem()
+
+    for _, object in ipairs(getAllObjects()) do
+        local guid = object.getGUID()
+        if object.tag == 'Generic' and guidToSystem[guid] then
+            addTile(guid, false)
+        elseif object.tag == 'Bag' then
+            for _, entry in ipairs(object.getObjects()) do
+                if guidToSystem[entry.guid] then
+                    addTile(entry.guid, object)
+                end
+            end
+        end
+    end
+
+    local systemCount = 0
+    for guid, system in pairs(guidToSystem) do
+        if not _tileGuidToContainers[guid] then
+            print('missing ' .. system.string)
+        end
+        systemCount = systemCount + 1
+    end
+    print('found ' .. total .. ' of ' .. systemCount)
+
+    for guid, containers in pairs(_tileGuidToContainers) do
+        if containers and #containers > 1 then
+            local system = guidToSystem[guid]
+            print(#containers .. ' dups of ' .. system.string)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function mutate()
+    startLuaCoroutine(self, 'mutateCoroutine')
+end
+
+local function mutateJson(json, system)
+    assert(type(json) == 'string')
+    json = JSON.decode(json)
+
+    json.Transform.scaleX = TILE.SCALE.x
+    json.Transform.scaleY = TILE.SCALE.y
+    json.Transform.scaleZ = TILE.SCALE.z
+
+    json.CustomMesh.MeshURL = TILE.MODEL
+    json.CustomMesh.ColliderURL = TILE.COLLIDER
+    json.CustomMesh.DiffuseURL = TILE.IMAGE_PREFIX .. json.CustomMesh.DiffuseURL .. TILE.IMAGE_SUFFIX .. system.tile
+
+    return JSON.encode_pretty(json)
+end
+
+local function mutateObject(object, system)
+    print('mutating ' .. system.string)
+
+    local guid = object.getGUID()
+    local json = object.getJSON()
+    local originalLock = object.getLock() or false
+
+    -- Do not attempt to mutate the Cruess home world, need different uv map and mesh.
+    if guid == 'f38182' then
+        return object
+    end
+
+    json = mutateJson(json, system)
+    local spawnParams = {
+        json              = json,
+        position          = object.getPosition(),
+        rotation          = object.getRotation(),
+        scale             = TILE.SCALE,
+        callback_function = nil,
+        sound             = false,
+        params            = nil,
+        snap_to_grid      = object.use_grid
+    }
+
+    -- Delete object, wait for delete to actually happen before reusing guid!
+    if _deletedItems then
+        _deletedItems.call('ignoreGuid', guid)
+    end
+    _deletePendingSet[guid] = true
+    destroyObject(object)
+    object = nil
+    while _deletePendingSet[guid] do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    local object = spawnObjectJSON(spawnParams)
+    assert(object.getGUID() == guid)
+
+    -- Wait for spawn, plus extra time for texture to load.
+    object.setLock(true)
+    while object.spawning do
+        coroutine.yield(0)
+    end
+    local waitUntil = Time.time + 3
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+    object.setLock(originalLock)
+
+    return object
+end
+
+function mutateCoroutine()
+    if not _tileGuidToContainers then
+        tileSearch()
+    end
+
+    local guidToSystem = getGuidToSystem()
+
+    for guid, containers in pairs(_tileGuidToContainers) do
+        local system = assert(guidToSystem[guid])
+        for _, container in ipairs(containers) do
+            if container then
+                local pos = container.getPosition()
+                local object = assert(container.takeObject({
+                    guid = guid,
+                    position = { x = pos.x, y = pos.y + 12, z = pos.z },
+                    smooth = false,
+                }))
+                coroutine.yield(0)
+                assert(object.getGUID() == guid)
+                object = mutateObject(object, system)
+                assert(object.getGUID() == guid)
+                coroutine.yield(0)
+
+                -- Wait for the put to finish (object get deleted) b/c of guid reuse.
+                _deletePendingSet[guid] = true
+                container.putObject(object)
+                while _deletePendingSet[guid] do
+                    coroutine.yield(0)
+                end
+                coroutine.yield(0)
+                coroutine.yield(0)
+                coroutine.yield(0)
+            else
+                local object = assert(getObjectFromGUID(guid))
+                object = mutateObject(object, system)
+                assert(object.getGUID() == guid)
+            end
+            coroutine.yield(0)
+            coroutine.yield(0)
+            coroutine.yield(0)
+        end
+    end
+
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

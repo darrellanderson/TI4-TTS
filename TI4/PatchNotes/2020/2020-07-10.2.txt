@@ -1,0 +1,1 @@
+Fix end of status phase Franken handler to only apply versatile and scheming when appropriate.

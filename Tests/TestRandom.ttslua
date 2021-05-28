@@ -1,0 +1,67 @@
+--- Place this script on a bag.
+-- @author Darrell
+
+local NUM_OBJECTS = 20
+local REPEAT = 10
+
+function onLoad(save_state)
+    assert(self.tag == 'Bag')
+    self.addContextMenuItem('Test random', testRandom)
+end
+
+function testRandom()
+    startLuaCoroutine(self, 'testRandomCoroutine')
+end
+
+function testRandomCoroutine()
+
+    _reset()
+    _report('ORIGINAL')
+
+    for _ = 1, REPEAT do
+        _reset()
+        self.shuffle()
+        _report('SHUFFLE')
+        coroutine.yield(0)
+    end
+
+    for _ = 1, REPEAT do
+        _reset()
+        self.randomize()
+        _report('RANDOMIZE')
+        coroutine.yield(0)
+    end
+
+    return 1
+end
+
+
+function _reset()
+    self.reset()
+
+    local p = self.getPosition()
+    p.y = p.y + 5
+    for i = 1, NUM_OBJECTS do
+        local object = spawnObject({
+            type              = 'BlockSquare',
+            position          = p,
+            sound             = false,
+            snap_to_grid      = false,
+        })
+        object.setName(tostring(i))
+        while object.spawning do
+            coroutine.yield(0)
+        end
+        self.putObject(object)
+        coroutine.yield(0)
+    end
+end
+
+function _report(prefix)
+    local contents = {}
+    for _, entry in ipairs(self.getObjects()) do
+        table.insert(contents, entry.name)
+    end
+    print(prefix .. ' ' .. table.concat(contents, ', '))
+
+end

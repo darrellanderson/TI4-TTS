@@ -1,0 +1,12 @@
+- Fix attach tokens to move beneath other objects on a system tile.
+- Add attach token injection support for homebrew.
+- Add purge to more exploration cards.
+- Fix purge option for relic fragments.
+- Support flipped tech boards for auto-placement.
+- Possible fix for token bags sometimes not showing a floating token.
+- Ignore Tekklar Legion when in the Sardakk player area.
+- Fix "Ordinian" typo.
+- Fix deal to add cards to the right of hand.
+- Update PoK Franken leaders with tooltips clarifying leader type.
+- Probably fix rare case where "R" token swapping fails.
+- Strategy Card Automator now adds a "secondary" button on the tech window to consume a strategy token.

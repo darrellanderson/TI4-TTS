@@ -1,0 +1,10 @@
+17.3:
+- Fix VolverMilty tile dealer bug (could get stuck in a loop).
+- Update rifts and trade good images (thanks waffles).
+- Map tool clear now puts hyperlane tiles in the hyperlanes bag.
+- Unit modifier detection now ignores singleton cards in a discard pile (e.g. "Regulated Conscription").
+- New Titan Sleeper Token right click options to replace with unit(s).
+- Possible fix for build tool resize throwing errors when it can't resolve player pointer location.
+- Print Cabal's Dimensional Tear messages to all players (not just the host).
+- Highlight Unit Upgrades tool now draws thick black lines to mark upgraded units.
+- Show Me Units tool now pings the table over units as well as a subtle white highlight.

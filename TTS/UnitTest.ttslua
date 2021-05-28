@@ -1,0 +1,65 @@
+-------------------------------------------------------------------------------
+--- Lua unit testing functions
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.UnitTest'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.UnitTest = assert(not CrLua.UnitTest) and {
+    _require = { 'UnitTest' }
+}
+
+-------------------------------------------------------------------------------
+--- Run tests in a table, optionally recursing to sub-tables.
+-- @param prefix string: print this when announcing tests in that table.
+-- @param table: look for _testX functions here.
+-- @param recurse boolean: if true, also look for tests in sub-tables.
+-- @return passed integer, failed integer: number of tests that passed and failed.
+-------------------------------------------------------------------------------
+function CrLua.UnitTest.runTests(prefix, table, recurse, isRecurse)
+    assert(type(prefix) == 'string' and type(table) == 'table' and type(recurse) == 'boolean')
+
+    if not isRecurse then
+        print(TAG .. ': running tests')
+    end
+
+    local passed, failed = 0, 0
+    local firstFailure = false
+    for k, v in pairs(table) do
+        local startPos, endPos = string.find(tostring(k), '_test')
+        if startPos == 1 then
+            assert(type(v) == 'function')
+            local testName = prefix .. '.' .. k
+            print(TAG .. ': running "' .. testName .. '"')
+            local success, err = pcall(function() v() end)
+            if success then
+                passed = passed + 1
+            else
+                failed = failed + 1
+                print(TAG .. ': "' .. prefix .. '.' .. k .. '" FAILED: ' .. err)
+                firstFailure = firstFailure or { testName, v }
+            end
+        elseif type(v) == 'table' and recurse then
+            local p, f, ff = CrLua.UnitTest.runTests(prefix .. '.' .. k, v, recurse, true)
+            passed = passed + p
+            failed = failed + f
+            firstFailure = firstFailure or ff
+        end
+    end
+
+    if not isRecurse then
+        print(TAG .. ': finished #passed=' .. passed .. ' #failed=' .. failed)
+        if firstFailure then
+            print(TAG .. ': re-running first failure without pcall to get normal error handling')
+            print(TAG .. ': running "' .. firstFailure[1] .. '"')
+            firstFailure[2]()
+        end
+    end
+
+    return passed, failed, firstFailure
+end
+
+function CrLua.UnitTest._testExample()
+    assert(true)
+end

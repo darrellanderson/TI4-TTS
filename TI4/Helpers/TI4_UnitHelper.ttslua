@@ -1,0 +1,2301 @@
+--- Shared unit logic.
+-- @author Darrell
+-- #include <~/CrLua/Objects/TI4_Helpers/TI4_UnitHelper>
+
+-- Users should copy this getHelperClient function, and use via:
+--
+-- local unitHelper = getHelperClient('TI4_UNIT_HELPER')
+--
+-- Where one can call any main function in this file via the helper.
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    -- Nested tables are considered cross script.  Make a local copy.
+    local function copyTable(t)
+        if t and type(t) == 'table' then
+            local copy = {}
+            for k, v in pairs(t) do
+                copy[k] = type(v) == 'table' and copyTable(v) or v
+            end
+            t = copy
+        end
+        return t
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return copyTable(helperObject.call(functionName, parameters)) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local OWNER = {
+    SELF = 'self',
+    OPPONENT = 'opponent',
+    ANY = 'any',
+}
+
+local TYPE = {
+    MUTATE = 'mutate', -- adds or removes attribute(s), do first.
+    ADJUST = 'adjust',  -- adjusts existing attribute(s).
+    CHOOSE = 'choose',  -- picks from available unit(s), do after all others.
+}
+
+local LEADER = {
+    AGENT = 'agent',
+    COMMANDER = 'commander',
+    HERO = 'hero'
+}
+
+-- Unit attributes:
+--
+-- - antiFighterBarrage {dice=#,hit=#} table.
+-- - bombardment {dice=#,hit=#,extraDice=#} table.
+-- - capacity number.
+-- - cost number : cost per unit.
+-- - disablePlanetaryShield boolean.
+-- - groundCombat {dice=#,hit=#,anyPlanet=boolean,requireGround=boolean} table.
+-- - move number.
+-- - name string : unit name when base unit is replaced (faction or unit upgrade).
+-- - override string : base unit type if this is a faction override.
+-- - planetaryShield boolean.
+-- - spaceCannon {dice=#,hit=#,range=#,extraDice=#} table.
+-- - spaceCombat {dice=#,hit=#,extraHitsOn={count=#,value=#},diceAsCount=boolean,requireSpace=boolean}.
+-- - sustainDamage boolean.
+-- - unitLimit number : at most N units roll dice (Experimental Battlestation).
+-- - upgrade string : base unit type if this is a unit upgrade technology.
+--
+-- The groundCombat ".anyPlanet" means unit participates in ground combat for any
+-- planet in the system (e.g. Naalu fighters with the flagship).  ".requireGround"
+-- means the unit must be on a planet and not merely near one to count.
+--
+-- The spaceCombat ".extraHitsOn" attribute is for expressing Jol-Nar's flagship,
+-- which gets 2 additional hits on a 9 or 10, extraHitsOn={count=2,value=9}.
+-- ".diceAsCount" is an awkward way for Winnu flagship to signal the dice
+-- number is non-standard, and should override unit count for MultiRoller.
+-- ".requireSpace" means the unit must not be on a planet to count.
+--
+local _unitTypes = {
+    ['Carrier'] = {
+        cost = 3,
+        spaceCombat = { dice = 1, hit = 9 },
+        move = 1,
+        capacity = 4,
+        ship = true,
+    },
+    ['Cruiser'] = {
+        cost = 2,
+        spaceCombat = { dice = 1, hit = 7 },
+        move = 2,
+        ship = true,
+    },
+    ['Destroyer'] = {
+        antiFighterBarrage = { dice = 2, hit = 9 },
+        cost = 1,
+        spaceCombat = { dice = 1, hit = 9 },
+        move = 2,
+        ship = true,
+    },
+    ['Dreadnought'] = {
+        sustainDamage = true,
+        bombardment = { dice = 1, hit = 5, extraDice = 0 },
+        cost = 4,
+        spaceCombat = { dice = 1, hit = 5 },
+        move = 1,
+        capacity = 1,
+        ship = true,
+    },
+    ['Fighter'] = {
+        cost = 0.5,
+        spaceCombat = { dice = 1, hit = 9 },
+        ship = true,
+    },
+    ['Flagship'] = {
+        sustainDamage = true,
+        cost = 8,
+        move = 1,
+        capacity = 3,
+        ship = true,
+    },
+    ['Infantry'] = {
+        cost = 0.5,
+        groundCombat = { dice = 1, hit = 8 },
+    },
+    ['Mech'] = {
+        cost = 2,
+        groundCombat = {dice = 1, hit = 6 },
+        sustainDamage = true,
+    },
+    ['PDS'] = {
+        planetaryShield = true,
+        spaceCannon = { dice = 1, hit = 6, range = 0, extraDice = 0 },
+        structure = true,
+    },
+    ['Space Dock'] = {
+        production = -2,
+        structure = true,
+    },
+    ['War Sun'] = {
+        ship = true,
+    },
+}
+
+-- "override" replaces base unit, "upgrade" requires unit upgrade card.
+local _unitOverrides = {
+    -- Standard unit upgrades.
+    ['Carrier II'] = { upgrade = 'Carrier', move = 2, capacity = 6 },
+    ['Cruiser II'] = { upgrade = 'Cruiser', spaceCombat = { hit = 6 }, move = 3, capacity = 1 },
+    ['Destroyer II'] = { upgrade = 'Destroyer', antiFighterBarrage = { dice = 3, hit = 6 }, spaceCombat = { hit = 8 } },
+    ['Dreadnought II'] = { upgrade = 'Dreadnought', move = 2 },
+    ['Fighter II'] = { upgrade = 'Fighter', spaceCombat = { hit = 8 }, move = 2 },
+    ['Infantry II'] = { upgrade = 'Infantry', groundCombat = { hit = 7 } },
+    ['PDS II'] = { upgrade = 'PDS', spaceCannon = { hit = 5, range = 1 } },
+    ['Space Dock II'] = { upgrade = 'Space Dock', production = -4 },
+    ['War Sun'] = { upgrade = 'War Sun', disablePlanetaryShield = true, sustainDamage = true, bombardment = { dice = 3, hit = 3, extraDice = 0 }, cost = 12, spaceCombat = { dice = 3, hit = 3 }, move = 2, capacity = 6 },
+
+    -- Faction unit overrides and upgrades.
+    ['Advanced Carrier I'] = { override = 'Carrier', capacity = 6 },
+    ['Advanced Carrier II'] = { upgrade = 'Carrier', sustainDamage = true, move = 2, capacity = 8 },
+    ['Exotrireme I'] = { override = 'Dreadnought', bombardment = { dice = 2, hit = 4 } },
+    ['Exotrireme II'] = { upgrade = 'Dreadnought', bombardment = { dice = 2, hit = 4 }, move = 2 },
+    ['Floating Factory I'] = { override = 'Space Dock', production = 5, move = 1, capacity = 4 },
+    ['Floating Factory II'] = { upgrade = 'Space Dock', production = 7, move = 2, capacity = 5 },
+    ['Hybrid Crystal Fighter I'] = { override = 'Fighter', spaceCombat = { hit = 8 } },
+    ['Hybrid Crystal Fighter II'] = { upgrade = 'Fighter', spaceCombat = { hit = 7 }, move = 2 },
+    ['Letani Warrior I'] = { override = 'Infantry', production = 1 },
+    ['Letani Warrior II'] = { upgrade = 'Infantry', production = 2, groundCombat = { hit = 7 } },
+    ['Prototype War Sun I'] = { override = 'War Sun', disablePlanetaryShield = true, sustainDamage = true, bombardment = { dice = 3, hit = 3 }, cost = 12, spaceCombat = { dice = 3, hit = 3 }, move = 1, capacity = 6 },
+    ['Prototype War Sun II'] = { upgrade = 'War Sun', disablePlanetaryShield = true, sustainDamage = true, bombardment = { dice = 3, hit = 3 }, cost = 10, spaceCombat = { dice = 3, hit = 3 }, move = 3, capacity = 6 },
+    ['Spec Ops I'] = { override = 'Infantry', groundCombat = { hit = 7 } },
+    ['Spec Ops II'] = { upgrade = 'Infantry', groundCombat = { hit = 6 } },
+    ['Super-Dreadnought I'] = { override = 'Dreadnought', capacity = 2 },
+    ['Super-Dreadnought II'] = { upgrade = 'Dreadnought', bombardment = { dice = 1, hit = 4 }, spaceCombat = { hit = 4 }, move = 2, capacity = 2 },
+    -- PoK faction unit overrides and upgrades
+    ['Strike Wing Alpha I'] = { override = 'Destroyer', spaceCombat = { hit = 8 }, capacity = 1 },
+    ['Strike Wing Alpha II'] = { upgrade = 'Destroyer', antiFighterBarrage = { dice = 3, hit = 6, extraHitsOn = { value = 9, message = '${PlayerName} destroys ${ExtraHits} of the opponent\'s Infantry in the space area.' } }, spaceCombat = { hit = 7 }, capacity = 1 },
+    ['Crimson Legionnaire I'] = { override = 'Infantry', groundCombat = { hit = 8 } },
+    ['Crimson Legionnaire II'] = { upgrade = 'Infantry', groundCombat = { hit = 7 } },
+    ['Saturn Engine I'] = { override = 'Cruiser', spaceCombat = { hit = 7 }, capacity = 1 },
+    ['Saturn Engine II'] = { upgrade = 'Cruiser', spaceCombat = { hit = 6 }, move = 3, capacity = 2 , sustainDamage = true },
+    ['Hel-Titan I'] = { override = 'PDS', groundCombat = { hit = 7, dice = 1 }, planetaryShield = true, spaceCannon = { dice = 1, hit = 6, range = 0, extraDice = 0 }, production = 1, sustainDamage = true },
+    ['Hel-Titan II'] = { upgrade = 'PDS', groundCombat = { hit = 6, dice = 1 }, planetaryShield = true, spaceCannon = { dice = 1, hit = 5, range = 1, extraDice = 0 }, production = 1, sustainDamage = true },
+    ['Dimensional Tear I'] = { override = 'Space Dock', production = 5 },
+    ['Dimensional Tear II'] = { upgrade = 'Space Dock', production = 7 },
+
+    -- Flagships.
+    ['Arc Secundus'] = { override = 'Flagship', disablePlanetaryShield = true, bombardment = { dice = 3, hit = 5, extraDice = 0 }, spaceCombat = { dice = 2, hit = 5 } },
+    ["C'morran N'orr"] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 6 } },
+    ['Duha Menaimon'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 }, capacity = 5 },
+    ['Fourth Moon'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ['Genesis'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 }, capacity = 12 },
+    ['Hil Colish'] = { override = 'Flagship', spaceCombat = { dice = 1, hit = 5 } },
+    ['J.N.S. Hylarim'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 6, extraHitsOn = { count = 2, value = 9 } } },
+    ['Loncara Ssodu'] = { override = 'Flagship', spaceCannon = { dice = 3, hit = 5, range = 1, extraDice = 0 }, spaceCombat = { dice = 2, hit = 7 } },
+    ['Matriarch'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 9 }, capacity = 6 },
+    ['Salai Sai Corian'] = { override = 'Flagship', spaceCombat = { dice = 1, hit = 7 } },
+    ['Son of Ragh'] = { override = 'Flagship', antiFighterBarrage = { dice = 4, hit = 6 }, spaceCombat = { dice = 2, hit = 5 } },
+    ['The Alastor'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 9 } },
+    ['The Inferno'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 } },
+    ['Van Hauge'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 9 } },
+    ['Wrath of Kenara'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ["Y'sia Y'ssrila"] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 }, move = 2 },
+    ['[0.0.1]'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 }, capacity = 5 },
+        -- PoK flagships
+    ['Quetzecoatl'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ['The Terror Between'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 }, bombardment = { dice = 1, hit = 5, extraDice = 0 } },
+    ['Dynamo'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 } },
+    ['Arvicon Rex'] = { override = 'Flagship', spaceCombat = {dice = 2, hit = 5 } },
+    ['Visz El Vir'] = { override = 'Flagship', spaceCombat = {  dice = 2, hit = 9 }, capacity = 4 },
+    ['Memoria I'] = { override = 'Flagship', antiFighterBarrage = { dice = 3, hit = 8 }, spaceCombat = { dice = 2, hit = 7 } },
+    ['Memoria II'] = { upgrade = 'Flagship', antiFighterBarrage = { dice = 3, hit = 5 }, spaceCombat = { dice = 2, hit = 5 }, capacity = 6 },
+    ['Ouranos'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+
+    -- PoK Mechs
+    ['Letani Behemoth'] = { override = 'Mech', production = 2, planetaryShield = true },
+    ['Aerie Sentinel'] = { override = 'Mech' },
+    ['Dunlain Reaper'] = { override = 'Mech' },
+    ['Reanimator'] = { override = 'Mech' },
+    ['Icarus Drive'] = { override = 'Mech' },
+    ['Watcher'] = { override = 'Mech' },
+    ['Pride of Kenara'] = { override = 'Mech' },
+    ['Shield Paling'] = { override = 'Mech' },
+    ['Annihilator'] = { override = 'Mech', bombardment = { dice = 1, hit = 8 } }, -- TODO: L1Z1X, add "bombardment.requireOffPlanet=true" attribute for harrow?
+    ['Starlancer'] = { override = 'Mech' },
+    ['Moll Terminus']  = { override = 'Mech' },
+    ['Ember Colossus'] = { override = 'Mech' },
+    ['Iconoclast'] = { override = 'Mech' },
+    ['Eidolon'] = { override = 'Mech', spaceCombat = {dice = 2, hit = 8, requireSpace = true }, groundCombat = { dice = 2, hit = 6, requireGround = true } },
+    ['Mordred'] = { override = 'Mech' },
+    ['Quantum Manipulator'] = { override = 'Mech' },
+    ['Scavenger Zeta'] = { override = 'Mech' },
+    ['Valkyrie Exoskeleton'] = { override = 'Mech' },
+    ['ZS Thunderbolt M2'] = { override = 'Mech' },
+    ['Hecatoncheires'] = { override = 'Mech' },
+    ['Reclaimer'] = { override = 'Mech' },
+    ['Indomitus'] = { override = 'Mech', spaceCannon = { dice = 1, hit = 8, range = 1 } },
+    ["Moyin's Ashes"] = { override = 'Mech' },
+    ['Blackshade Infiltrator'] = { override = 'Mech' },
+
+    -- Codex.
+    ['????_REDACTED_????'] = { override = 'Destroyer', antiFighterBarrage = { dice = 3, hit = 6 }, spaceCombat = { hit = 7 }, capacity = 1 },
+
+    -- Blue Space.
+    ['Battlecruiser I'] = { override = 'Cruiser', },
+    ['Battlecruiser II'] = { upgrade = 'Cruiser', spaceCombat = { hit = 6 } },
+    ['Lancer Dreadnought I'] = { override = 'Dreadnought', spaceCannon = { dice = 1, hit = 6, range = 0 } },
+    ['Lancer Dreadnought II'] = { upgrade = 'Dreadnought', spaceCannon = { hit = 4 }, move = 2 },
+    ['Wraith Corvette I'] = { override = 'Destroyer', antiFighterBarrage = { dice = 3 }, spaceCombat = { hit = 8 } },
+    ['Wraith Corvette II'] = { upgrade = 'Destroyer', antiFighterBarrage = { dice = 4, hit = 6 }, spaceCombat = { hit = 7 } },
+    ['Raid Shuttle I'] = { override = 'Carrier', },
+    ['Raid Shuttle II'] = { upgrade = 'Carrier', bombardment = { dice = 1, hit = 8 }, spaceCombat = { hit = 8 } },
+    ['Heavy Bomber I'] = { override = 'Fighter', bombardment = { dice = 1, hit = 9 }, spaceCombat = { hit = 8 } },
+    ['Heavy Bomber II'] = { upgrade = 'Fighter', bombardment = { dice = 1, hit = 8 }, spaceCombat = { hit = 7 } },
+    ['Ashkari I'] = { override = 'Infantry', groundCombat = { hit = 7 } },
+    ['Ashkari II'] = { upgrade = 'Infantry', groundCombat = { hit = 6 } },
+    ['Unholy Abominations I'] = { override = 'Infantry', groundCombat = { hit = 5 } },
+    ['Unholy Abominations II'] = { upgrade = 'Infantry', groundCombat = { hit = 4 } },
+    ['Tachyon Lance I'] = { override = 'PDS', spaceCannon = { hit = 5 } },
+    ['Tachyon Lance II'] = { upgrade = 'PDS', spaceCannon = { hit = 4, range = 1 } },
+    ['Perdition Array I'] = { override = 'PDS', spaceCannon = { hit = 5 } },
+    ['Perdition Array II'] = { upgrade = 'PDS', spaceCannon = { hit = 4, range = 1 } },
+    ['Planetary Fortress I'] = { override = 'Space Dock', planetaryShield = true },
+    ['Planetary Fortress II'] = { upgrade = 'Space Dock' },
+
+    -- Blue Space flagships.
+    ['Nightingale II'] = { override = 'Flagship', spaceCombat = { dice = 1, hit = 9 } },
+    ['Shai-Hulud'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 9 } },
+    ['Khage'] = { override = 'Flagship', bombardment = { dice = 3, hit = 5 }, spaceCombat = { dice = 3, hit = 5 } },
+    ['Richtyrian'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ["Kyr'tsad"] = { override = 'Flagship', bombardment = { dice = 2, hit = 5 }, spaceCombat = { dice = 2, hit = 5 } },
+    ['Vox'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ['Chogra Tuhn'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 } },
+    ["For'xdar"] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ['Mho Rhodyn'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ['Locus'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 9 } },
+    ["Gheld'atar"] = { override = 'Flagship', bombardment = { dice = 4, hit = 5 }, spaceCombat = { dice = 2, hit = 7 } },
+    ["Eru'ishon"] = { override = 'Flagship', spaceCombat = { dice = 1, hit = 7 } },
+    ['Regulus'] = { override = 'Flagship', spaceCombat = { dice = 1, hit = 5 } },
+    ["Noctul H'rgan"] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ['Robotic Reprocessing Center'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ['Advent Flagship'] = { override = 'Flagship' },
+    ['Coronata'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ['Eradica'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 5 } },
+    ['Vasari Flagship'] = { override = 'Flagship' },
+    ['Vorastra'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ['Kultorask'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 5 } },
+    ['Trader Flagship'] = { override = 'Flagship' },
+    ['Anklyon'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    ['Ragnarov'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 5 } },
+}
+
+function getUnitOverrides()
+    return _unitOverrides
+end
+
+local _flagshipModifiers = {
+    ['Arvicon Rex'] = {
+        description = '+2 flagship COMBAT against opponent with no token in your fleet pool',
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs, params)
+            local myColor = params.myColor
+            local vsColor = params.opponentColor
+            local haveToken = false
+            local faction = vsColor and _factionHelper.fromColor(vsColor)
+            if faction then
+                local tokenName = faction.tokenName .. ' Command Token'
+                local guidToPosition = {}
+                for _, object in ipairs(getAllObjects()) do
+                    if object.getName() == tokenName then
+                        guidToPosition[object.getGUID()] = object.getPosition()
+                    end
+                end
+                local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
+                for guid, color in pairs(guidToColor) do
+                    if color == myColor then
+                        haveToken = true
+                        break
+                    end
+                end
+            end
+            if faction and not haveToken then
+                local attr = unitAttrs['Flagship']
+                attr.spaceCombat.hit = attr.spaceCombat.hit - 2
+            end
+        end
+    },
+
+    ["C'morran N'orr"] = {
+        description = "+1 to all COMBAT rolls for other ships with the C'morran N'orr",
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if unitType ~= 'Flagship' and attr.spaceCombat then
+                    attr.spaceCombat.hit = attr.spaceCombat.hit - 1
+                end
+            end
+        end
+    },
+
+    ['Fourth Moon'] = {
+        description = "Opponent's ships cannot use SUSTAIN DAMAGE",
+        owner = OWNER.OPPONENT,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.sustainDamage then
+                    attr.sustainDamage = false
+                end
+            end
+        end
+    },
+
+    ['Matriarch'] = {
+        description = 'Fighters may participate in ground combat',
+        owner = OWNER.SELF,
+        type = TYPE.CHOOSE,  -- copy combat attributes AFTER all adjustments
+        isCombat = true,
+        apply = function(unitAttrs)
+            unitAttrs['Fighter'].groundCombat = _copy(unitAttrs['Fighter'].spaceCombat)
+            unitAttrs['Fighter'].groundCombat.anyPlanet = true
+        end
+    },
+
+    ['Salai Sai Corian'] = {
+        description = "Rolls number of dice equal to number of opponent's non-fighter ships",
+        owner = OWNER.SELF,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        apply = function(unitAttrs, params)
+            local count = 1  -- only override if given opponent units
+            if params.opponentUnitTypeToCount then
+                count = 0
+                local opponentUnitTypeToCount = params.opponentUnitTypeToCount or {}
+                for unitType, attr in pairs(unitAttrs) do
+                    if attr.ship and (unitType ~= 'Fighter') and attr.spaceCombat then
+                        count = count + (opponentUnitTypeToCount[unitType] or 0)
+                    end
+                end
+            end
+            unitAttrs['Flagship'].spaceCombat.dice = count
+            unitAttrs['Flagship'].spaceCombat.diceAsCount = true  -- for multiroller unit count
+        end
+    },
+
+    ['The Alastor'] = {
+        description = 'Ground forces may participate in space combat',
+        owner = OWNER.SELF,
+        type = TYPE.CHOOSE,  -- copy combat attributes AFTER all adjustments
+        isCombat = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.groundCombat then
+                    attr.spaceCombat = _copy(attr.groundCombat)
+                end
+            end
+        end
+    },
+
+    ['Quetzecoatl'] = {
+        description = 'Other players cannot use SPACE CANNON against your ships in this system',
+        owner = OWNER.OPPONENT,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        apply = function(unitAttrs)
+            -- Do nothing unless we can differentiate space cannon offense from defense.
+            --for unitType, attr in pairs(unitAttrs) do
+            --    attr.spaceCannon = nil
+            --end
+        end
+    },
+
+    ['Visz El Vir'] = {
+        description = 'Your mechs in this system roll 1 additional die during combat',
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs)
+            local attr = unitAttrs['Mech']
+            if attr.spaceCombat then
+                attr.spaceCombat.dice = (attr.spaceCombat.dice or 0) + 1
+            end
+            if attr.groundCombat then
+                attr.groundCombat.dice = (attr.groundCombat.dice or 0) + 1
+            end
+        end
+    },
+}
+
+-- Attributes:
+-- - description: string
+-- - leader: optional LEADER.X value
+-- - owner: OWNER.X value
+-- - type: TYPE.X value
+-- - apply: function(unitAttrs, params)
+-- - allowFaceDown: optional boolean, if true detect even if face down
+-- - toggleActive: optional boolean, if true add "idle/active" button
+local _unitModifiers = {
+    ['2RAM'] = {
+        leader = LEADER.COMMANDER, -- L1Z1X
+        description = 'PLANETARY SHIELD does not prevent BOMBARDMENT',
+        owner = OWNER.SELF,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.bombardment then
+                    attr.disablePlanetaryShield = true
+                end
+            end
+        end
+    },
+
+    ['Antimass Deflectors'] = {
+        description = '-1 to all SPACE CANNON rolls',
+        owner = OWNER.OPPONENT,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs)
+            for _, attr in pairs(unitAttrs) do
+                if attr.spaceCannon then
+                    attr.spaceCannon.hit = attr.spaceCannon.hit + 1
+                end
+            end
+        end
+    },
+
+    ['Articles of War'] = {
+        description = 'Mechs lose non-SUSTAIN DAMAGE abilities',
+        owner = OWNER.SELF,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        apply = function(unitAttrs)
+            local attr = unitAttrs['Mech']
+            attr.antiFighterBarrage = nil
+            attr.bombardment = nil
+            attr.planetaryShield = nil
+            attr.spaceCannon = nil
+        end
+    },
+
+    ['Blitz'] = {
+        description = 'BOMBARDMENT 6 to non-fighter, non-bomdbardment ships',
+        owner = OWNER.SELF,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.ship and (unitType ~= 'Fighter') and not attr.bombardment then
+                    attr.bombardment = { dice = 1, hit = 6 }
+                end
+            end
+        end
+    },
+
+    ['Brother Omar'] = {
+        description = 'Produce an additional Infantry for their cost; it doesn\'t count towards production limits.',
+        leader = LEADER.COMMANDER, -- Yin
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = false,
+        apply = function(unitAttrs)
+            local oldCost = unitAttrs['Infantry'].cost
+            local oldUnitsPerResource = math.floor(0.5 + (1.0 / oldCost)) -- math.round
+            local newUnitsPerResource = oldUnitsPerResource + 1
+            local newCost = 1.0 / newUnitsPerResource
+            unitAttrs['Infantry'].cost = newCost
+
+            local oldProductionConsumed = unitAttrs['Infantry'].productionConsumed or 1
+            local newProductionConsumed = (oldUnitsPerResource / newUnitsPerResource) * oldProductionConsumed
+            unitAttrs['Infantry'].productionConsumed = newProductionConsumed
+        end
+    },
+
+    ['Bunker'] = {
+        description = '-4 to all BOMBARDMENT rolls',
+        owner = OWNER.ANY,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.bombardment then
+                    attr.bombardment.hit = attr.bombardment.hit + 4
+                end
+            end
+        end
+    },
+
+    ['Disable'] = {
+        description = 'Opponent PDS lose PLANETARY SHIELD and SPACE CANNON DEFENSE',
+        owner = OWNER.OPPONENT,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        apply = function(unitAttrs)
+            local attr = unitAttrs['PDS']
+            attr.planetaryShield = nil
+            attr.spaceCannon = nil
+        end
+    },
+
+    -- Is this necessary?  Roller differentiates ground vs space so really only
+    -- sustain damage is relevant.  Let players manage this one.
+    -- ['Eidolon'] = {
+    --     description = 'Flip card to switch between ground/space',
+    --     allowFaceDown = true,
+    --     owner = OWNER.SELF,
+    --     type = TYPE.MUTATE,
+    --     apply = function(unitAttrs, params)
+    --         local zGrav = false
+    --         for _, object in ipairs(getAllObjects()) do
+    --             if object.tag == 'Card' and object.getName() == 'Eidolon' then
+    --                 local zoneColor = _zoneHelper.zoneFromPosition(object.getPosition())
+    --                 if zoneColor == params.myColor then
+    --                     zGrav = true
+    --                     break
+    --                 end
+    --             end
+    --         end
+    --         local attr = unitAttrs['Mech']
+    --         if zGrav then
+    --             attr.groundGombat = nil
+    --             attr.sustainDamage = nil
+    --         else
+    --             attr.spaceCombat = nil
+    --         end
+    --     end
+    -- },
+
+    ['Emissary Taivra'] = {
+        leader = LEADER.AGENT, -- Ghosts
+        description = 'Active with-wormhole system is adjacent to other wormholes',
+        owner = OWNER.ANY,
+        type = TYPE.CHOOSE,
+        isCombat = false,
+        toggleActive = true,
+        apply = function(unitAttrs)
+        end
+    },
+
+    ['Experimental Battlestation'] = {
+        description = 'One in or adjacent Space Dock gets SPACE CANNON 5x3',
+        owner = OWNER.SELF,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        apply = function(unitAttrs)
+            unitAttrs['Experimental Battlestation'] = {
+                spaceCannon = { hit = 5, dice = 3, range = 1 },
+                unitCount = 1
+            }
+        end
+    },
+
+    ['Evelyn Delouis'] = {
+        leader = LEADER.AGENT, -- Sol
+        description = '+1 die to a single GROUND COMBAT roll',
+        owner = OWNER.SELF,
+        type = TYPE.CHOOSE,
+        isCombat = true,
+        toggleActive = true,
+        apply = function(unitAttrs, params)
+            local best = false
+            for unitType, attr in pairs(unitAttrs) do
+                -- Check for units present, then check for dynamically injected units, then default to 0
+                local unitCount = params.myUnitTypeToCount[unitType] or attr.unitCount or 0
+                if attr.groundCombat and unitCount > 0 then
+                    if (not best) or attr.groundCombat.hit < best.groundCombat.hit then
+                        best = attr
+                    end
+                end
+            end
+            if best then
+                best.groundCombat.extraDice = (best.groundCombat.extraDice or 0) + 1
+            end
+        end
+    },
+
+    ['Fighter Prototype'] = {
+        description = "+2 to fighters' COMBAT rolls",
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs)
+            unitAttrs['Fighter'].spaceCombat.hit = unitAttrs['Fighter'].spaceCombat.hit - 2
+        end
+    },
+
+    ['Fragile'] = {
+        description = '-1 to all COMBAT rolls',
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.spaceCombat then
+                    attr.spaceCombat.hit = attr.spaceCombat.hit + 1
+                end
+                if attr.groundCombat then
+                    attr.groundCombat.hit = attr.groundCombat.hit + 1
+                end
+            end
+        end
+    },
+
+    ['Ul the Progenitor'] = {
+        leader = LEADER.HERO,
+        description = 'SPACE CANNON 5(x3)',
+        owner = OWNER.SELF,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        toggleActive = true,
+        apply = function(unitAttrs)
+            unitAttrs['Geoform'] = {
+                spaceCannon = { hit = 5, dice = 3 },
+                unitCount = 1
+            }
+        end
+    },
+
+    ['Iconoclast'] = {
+        description = '+2 mech COMBAT rolls if opponent has fragment',
+        owner = OWNER.SELF,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        apply = function(unitAttrs, params)
+            local vsColor = params.opponentColor
+            local hasFragment = false
+            if vsColor then
+                local guidToPosition = {}
+                for _, object in ipairs(getAllObjects()) do
+                    if object.tag == 'Card' and string.match(object.getName(), ' Relic Fragment ') then
+                        guidToPosition[object.getGUID()] = object.getPosition()
+                    end
+                end
+                local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
+                for guid, color in pairs(guidToColor) do
+                    if color == vsColor then
+                        hasFragment = true
+                        break
+                    end
+                end
+            end
+            if hasFragment then
+                local attrs = unitAttrs['Mech'] or {}
+                if attrs.groundCombat then
+                    attrs.groundCombat.hit = attrs.groundCombat.hit - 2
+                end
+                if attrs.spaceCombat then
+                    attrs.spaceCombat.hit = attrs.spaceCombat.hit - 2
+                end
+            end
+        end
+    },
+
+    ["M'aban"] = {
+        description = 'Produce an additional Fighter for their cost; it doesn\'t count towards production limits.',
+        leader = LEADER.COMMANDER, -- Naalu
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = false,
+        apply = function(unitAttrs, params)
+            local oldCost = unitAttrs['Fighter'].cost
+            local oldUnitsPerResource = math.floor(0.5 + (1.0 / oldCost)) -- math.round
+            local newUnitsPerResource = oldUnitsPerResource + 1
+            local newCost = 1.0 / newUnitsPerResource
+            unitAttrs['Fighter'].cost = newCost
+
+            local oldProductionConsumed = unitAttrs['Fighter'].productionConsumed or 1
+            local newProductionConsumed = (oldUnitsPerResource / newUnitsPerResource) * oldProductionConsumed
+            unitAttrs['Fighter'].productionConsumed = newProductionConsumed
+        end
+    },
+
+    ['Morale Boost'] = {
+        description = '+1 to all COMBAT rolls',
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.spaceCombat then
+                    attr.spaceCombat.hit = attr.spaceCombat.hit - 1
+                end
+                if attr.groundCombat then
+                    attr.groundCombat.hit = attr.groundCombat.hit - 1
+                end
+            end
+        end
+    },
+    ['Morale Boost (1)'] = { alias = 'Morale Boost' },
+    ['Morale Boost (2)'] = { alias = 'Morale Boost' },
+    ['Morale Boost (3)'] = { alias = 'Morale Boost' },
+    ['Morale Boost (4)'] = { alias = 'Morale Boost' },
+
+    ['Mordred'] = {
+        description = '+2 mech COMBAT rolls if opponent has X/Y token',
+        owner = OWNER.SELF,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        apply = function(unitAttrs, params)
+            local vsColor = params.opponentColor
+            local hasXY = false
+            if vsColor then
+                local tokenNameSet = {
+                    ['Valefar Assimilator X Token'] = true,
+                    ['Valefar Assimilator Y Token'] = true,
+                }
+                local guidToPosition = {}
+                for _, object in ipairs(getAllObjects()) do
+                    if tokenNameSet[object.getName()] then
+                        guidToPosition[object.getGUID()] = object.getPosition()
+                    end
+                end
+                local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
+                for guid, color in pairs(guidToColor) do
+                    if color == vsColor then
+                        hasXY = true
+                        break
+                    end
+                end
+            end
+            if hasXY then
+                local attrs = unitAttrs['Mech'] or {}
+                if attrs.groundCombat then
+                    attrs.groundCombat.hit = attrs.groundCombat.hit - 2
+                end
+                if attrs.spaceCombat then
+                    attrs.spaceCombat.hit = attrs.spaceCombat.hit - 2
+                end
+            end
+        end
+    },
+
+    ['Navarch Feng'] = {
+        description = 'You can produce your flagship without spending resources.',
+        leader = LEADER.COMMANDER, -- Nomad
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = false,
+        apply = function(unitAttrs)
+            unitAttrs['Flagship'].cost = 0
+        end
+    },
+
+    ['Nebula Defence'] = {
+        description = '+1 to SPACE COMBAT rolls (defender)',
+        tag = 'Generic',  -- most are cards, not this one
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.spaceCombat then
+                    attr.spaceCombat.hit = attr.spaceCombat.hit - 1
+                end
+            end
+        end
+    },
+
+    -- Plasma Scoring REQUIRES params.myUnitTypeToCount to choose best available.
+    ['Plasma Scoring'] = {
+        description = '+1 die to a single SPACE CANNON or BOMBARDMENT roll',
+        owner = OWNER.SELF,
+        type = TYPE.CHOOSE,
+        isCombat = true,
+        apply = function(unitAttrs, params)
+            local best = false
+            for unitType, attr in pairs(unitAttrs) do
+                -- Check for units present, then check for dynamically injected units, then default to 0
+                local unitCount = params.myUnitTypeToCount[unitType] or attr.unitCount or 0
+                if attr.spaceCannon and unitCount > 0 then
+                    if (not best) or attr.spaceCannon.hit < best.spaceCannon.hit then
+                        best = attr
+                    end
+                end
+            end
+            if best then
+                best.spaceCannon.extraDice = (best.spaceCannon.extraDice or 0) + 1
+            end
+            local best = false
+            for unitType, attr in pairs(unitAttrs) do
+                -- Check for units present, then check for dynamically injected units, then default to 0
+                local unitCount = params.myUnitTypeToCount[unitType] or attr.unitCount or 0
+                if attr.bombardment and unitCount > 0 then
+                    if (not best) or attr.bombardment.hit < best.bombardment.hit then
+                        best = attr
+                    end
+                end
+            end
+            if best then
+                best.bombardment.extraDice = (best.bombardment.extraDice or 0) + 1
+            end
+        end
+    },
+
+    ['Prophecy of Ixth'] = {
+        description = "+1 to fighter's COMBAT rolls",
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs)
+            unitAttrs['Fighter'].spaceCombat.hit = unitAttrs['Fighter'].spaceCombat.hit - 1
+        end
+    },
+
+    ['Publicize Weapon Schematics'] = {
+        description = 'War Suns lose SUSTAIN DAMAGE',
+        owner = OWNER.SELF,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        apply = function(unitAttrs)
+            unitAttrs['War Sun'].sustainDamage = false
+        end
+    },
+
+    ['Regulated Conscription'] = {
+        description = 'Fighters and infantry cost 1 each',
+        owner = OWNER.ANY,
+        type = TYPE.MUTATE, -- set cost before additional adjustments
+        isCombat = false,
+        apply = function(unitAttrs)
+            unitAttrs['Fighter'].cost = 1
+            unitAttrs['Infantry'].cost = 1
+        end
+    },
+
+    ['Rickar Rickani'] = {
+        leader = LEADER.COMMANDER, -- Winnu
+        description = '+2 to combat rolls',
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        toggleActive = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.spaceCombat then
+                    attr.spaceCombat.hit = attr.spaceCombat.hit - 2
+                end
+                if attr.groundCombat then
+                    attr.groundCombat.hit = attr.groundCombat.hit - 2
+                end
+            end
+        end
+    },
+
+    ['Shield Paling'] = {
+        description = 'Infantry on planet with mech are not FRAGILE',
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs, params)
+            -- In a Franken game, might have this mech but not fragile.
+            local hasFragile = false
+            for _, modifier in ipairs(params.myUnitModifiers) do
+                if modifier == 'Fragile' then
+                    hasFragile = true
+                    break
+                end
+            end
+            if hasFragile and (params.myUnitTypeToCount['Mech'] or 0) > 0 then
+                local attr = unitAttrs['Infantry']
+                attr.groundCombat.hit = attr.groundCombat.hit - 1
+            end
+        end
+    },
+
+    ['Ssruu'] = {
+        leader = LEADER.AGENT, -- Yssaril agent
+        description = 'Copy abilities from other agents',
+        owner = OWNER.SELF,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        toggleActive = true,
+        apply = function(unitAttrs) end
+    },
+
+    ['Strike Wing Ambuscade'] = {
+        description = '+1 die to a unit ability (anti-fighter barrage, bombardment, space cannon)',
+        owner = OWNER.SELF,
+        type = TYPE.CHOOSE,
+        isCombat = true,
+        excludeFaction = 'The Argent Flight',
+        apply = function(unitAttrs, params)
+            local best = false
+            for unitType, attr in pairs(unitAttrs) do
+                -- Check for units present, then check for dynamically injected units, then default to 0
+                local unitCount = params.myUnitTypeToCount[unitType] or attr.unitCount or 0
+                if attr.antiFighterBarrage and unitCount > 0 then
+                    if (not best) or (attr.antiFighterBarrage.hit < best.antiFighterBarrage.hit) then
+                        best = attr
+                    end
+                end
+            end
+            if best then
+                best.antiFighterBarrage.extraDice = (best.antiFighterBarrage.extraDice or 0) + 1
+            end
+            local best = false
+            for unitType, attr in pairs(unitAttrs) do
+                -- Check for units present, then check for dynamically injected units, then default to 0
+                local unitCount = params.myUnitTypeToCount[unitType] or attr.unitCount or 0
+                if attr.bombardment and unitCount > 0 then
+                    if (not best) or (attr.bombardment.hit < best.bombardment.hit) then
+                        best = attr
+                    end
+                end
+            end
+            if best then
+                best.bombardment.extraDice = (best.bombardment.extraDice or 0) + 1
+            end
+            local best = false
+            for unitType, attr in pairs(unitAttrs) do
+                -- Check for units present, then check for dynamically injected units, then default to 0
+                local unitCount = params.myUnitTypeToCount[unitType] or attr.unitCount or 0
+                if attr.spaceCannon and unitCount > 0 then
+                    if (not best) or (attr.spaceCannon.hit < best.spaceCannon.hit) then
+                        best = attr
+                    end
+                end
+            end
+            if best then
+                best.spaceCannon.extraDice = (best.spaceCannon.extraDice or 0) + 1
+            end
+        end
+    },
+
+    ['Supercharge'] = {
+        description = '+1 to all COMBAT rolls',
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        toggleActive = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.spaceCombat then
+                    attr.spaceCombat.hit = attr.spaceCombat.hit - 1
+                end
+                if attr.groundCombat then
+                    attr.groundCombat.hit = attr.groundCombat.hit - 1
+                end
+            end
+        end
+    },
+
+    ['Ta Zern'] = {
+        description = 'You may reroll any dice (when active will reroll all misses)',
+        leader = LEADER.COMMANDER,  -- Jol-Nar
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        toggleActive = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.spaceCannon then
+                    attr.spaceCannon.rerollMisses = true
+                end
+                if attr.bombardment then
+                    attr.bombardment.rerollMisses = true
+                end
+                if attr.antiFighterBarrage then
+                    attr.antiFighterBarrage.rerollMisses = true
+                end
+            end
+        end
+    },
+
+    ['Tekklar Legion'] = {
+        description = '+1 to GROUND COMBAT rolls for attacker, -1 to Sardakk if opponent owns',  -- -1 to Sardakk if other player has it
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        excludeFaction = "The Sardakk N'orr",
+        apply = function(unitAttrs, params)
+            -- Get faction from color, which is ultimately derived from the faction sheet.
+            -- This is Franken friendly, as Franken faction sheet matches promissory note.
+            local myFaction = params.myColor and _factionHelper.fromColor(params.myColor)
+            local delta = (myFaction and myFaction.name == "The Sardakk N'orr") and -1 or 1
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.groundCombat then
+                    attr.groundCombat.hit = attr.groundCombat.hit - delta
+                end
+            end
+        end
+    },
+
+    ['That Which Molds Flesh'] = {
+        description = 'When producing Infantry and/or Fighters, up to 2 do not count against the production limit.',
+        leader = LEADER.COMMANDER, -- Vuil'raith
+        owner = OWNER.SELF,
+        type = TYPE.CHOOSE,
+        isCombat = false,
+        apply = function(unitAttrs, params)
+            local bonusRemaining = 2
+            for _, unitType in ipairs({'Infantry', 'Fighter'}) do
+                local unitTypeAttrs = unitAttrs[unitType]
+                local produceAmount = (params.myUnitTypeToCount[unitType] or 0)
+                local productionConsumed = math.ceil(produceAmount * (unitTypeAttrs.productionConsumed or 1))
+                if productionConsumed > 0 then
+                    local applyBonusAmount = math.min(productionConsumed, bonusRemaining)
+                    bonusRemaining = bonusRemaining - applyBonusAmount
+                    unitTypeAttrs.freeProduction = applyBonusAmount
+                end
+            end
+        end
+    },
+
+    ['The Cavalry'] = {
+        description = 'One non-fighter ship gains the SUSTAIN DAMAGE, combat value, and ANTI-FIGHTER BARRAGE of the Nomad flagship (this modifier adds a new unit for AFB/space combat, remove the affected unit from normal setup)',
+        owner = OWNER.SELF,
+        type = TYPE.MUTATE,
+        isCombat = true,
+        excludeFaction = 'The Nomad',
+        apply = function(unitAttrs, params)
+            unitAttrs['The Cavalry'] = {
+                antiFighterBarrage = { hit = 8, dice = 3 },
+                spaceCombat = { hit = 7, dice = 2 },
+                unitCount = 1
+            }
+            for _, object in ipairs(getAllObjects()) do
+                if object.tag == 'Card' and object.getName() == 'Memoria II' then
+                    unitAttrs['The Cavalry'] = {
+                        antiFighterBarrage = { hit = 5, dice = 3 },
+                        spaceCombat = { hit = 5, dice = 2 },
+                        unitCount = 1
+                    }
+                end
+            end
+        end
+    },
+
+    ['The Crown of Thalnos (PoK)'] = { alias = 'The Crown of Thalnos' },
+    ['The Crown of Thalnos'] = {
+        description = 'Apply +1 to COMBAT rolls, player must destroy any units that do not produce at least one hit',
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        toggleActive = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.spaceCombat then
+                    attr.spaceCombat.hit = attr.spaceCombat.hit - 1
+                end
+                if attr.groundCombat then
+                    attr.groundCombat.hit = attr.groundCombat.hit - 1
+                end
+            end
+        end
+    },
+
+    ['Trrakan Aun Zulok'] = {
+        leader = LEADER.COMMANDER, -- Argent Flight
+        description = '+1 die to a unit ability (anti-fighter barrage, bombardment, space cannon)',
+        owner = OWNER.SELF,
+        type = TYPE.CHOOSE,
+        isCombat = true,
+        toggleActive = true,
+        apply = function(unitAttrs, params)
+            local best = false
+            for unitType, attr in pairs(unitAttrs) do
+                -- Check for units present, then check for dynamically injected units, then default to 0
+                local unitCount = params.myUnitTypeToCount[unitType] or attr.unitCount or 0
+                if attr.antiFighterBarrage and unitCount > 0 then
+                    if (not best) or (attr.antiFighterBarrage.hit < best.antiFighterBarrage.hit) then
+                        best = attr
+                    end
+                end
+            end
+            if best then
+                best.antiFighterBarrage.extraDice = (best.antiFighterBarrage.extraDice or 0) + 1
+            end
+            local best = false
+            for unitType, attr in pairs(unitAttrs) do
+                -- Check for units present, then check for dynamically injected units, then default to 0
+                local unitCount = params.myUnitTypeToCount[unitType] or attr.unitCount or 0
+                if attr.bombardment and unitCount > 0 then
+                    if (not best) or (attr.bombardment.hit < best.bombardment.hit) then
+                        best = attr
+                    end
+                end
+            end
+            if best then
+                best.bombardment.extraDice = (best.bombardment.extraDice or 0) + 1
+            end
+            local best = false
+            for unitType, attr in pairs(unitAttrs) do
+                -- Check for units present, then check for dynamically injected units, then default to 0
+                local unitCount = params.myUnitTypeToCount[unitType] or attr.unitCount or 0
+                if attr.spaceCannon and unitCount > 0 then
+                    if (not best) or (attr.spaceCannon.hit < best.spaceCannon.hit) then
+                        best = attr
+                    end
+                end
+            end
+            if best then
+                best.spaceCannon.extraDice = (best.spaceCannon.extraDice or 0) + 1
+            end
+        end
+    },
+
+    ['Unrelenting'] = {
+        description = '+1 to all COMBAT rolls',
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.spaceCombat then
+                    attr.spaceCombat.hit = attr.spaceCombat.hit - 1
+                end
+                if attr.groundCombat then
+                    attr.groundCombat.hit = attr.groundCombat.hit - 1
+                end
+            end
+        end
+    },
+
+    ['Viscount Unlenn'] = {
+        leader = LEADER.AGENT, -- Barony agent
+        description = '+1 die to a single SPACE COMBAT roll',
+        owner = OWNER.SELF,
+        type = TYPE.CHOOSE,
+        isCombat = true,
+        toggleActive = true,
+        apply = function(unitAttrs, params)
+            local best = false
+            for unitType, attr in pairs(unitAttrs) do
+                -- Check for units present, then check for dynamically injected units, then default to 0
+                local unitCount = params.myUnitTypeToCount[unitType] or attr.unitCount or 0
+                if attr.spaceCombat and unitCount > 0 then
+                    if (not best) or (attr.spaceCombat.hit < best.spaceCombat.hit) then
+                        best = attr
+                    end
+                end
+            end
+            if best then
+                best.spaceCombat.extraDice = (best.spaceCombat.extraDice or 0) + 1
+            end
+        end
+    },
+
+    -- BLUE Space
+
+    ['Tachyon Lance II'] = {
+        description = 'SPACE CANNON of units in this system may target adjacent systems',
+        owner = OWNER.SELF,
+        type = TYPE.ADJUST,
+        isCombat = true,
+        apply = function(unitAttrs)
+            for unitType, attr in pairs(unitAttrs) do
+                if attr.spaceCannon and (attr.spaceCannon.range or 0) == 0 then
+                    attr.spaceCannon.range = 1
+                end
+            end
+        end
+    }
+}
+
+--- Get a (for debugging) text summary.
+-- @param unitAttrs table : unitType to unit attributes tables.
+function unitAttributesSummary(unitAttrs)
+    assert(type(unitAttrs) == 'table')
+
+    local ignoreAttributeSet = {
+        ['name'] = true,
+        ['override'] = true,
+        ['upgrade'] = true,
+    }
+
+    local message = {}
+    for unitType, attrs in pairs(unitAttrs) do
+        -- Only include if key is a unit type.  Let other fields exist.
+        if _unitTypes[unitType] then
+            local unitMessage = {}
+            if attrs.name and attrs.name ~= unitType then
+                table.insert(unitMessage, 'name="' .. attrs.name .. '"')
+            end
+            for k, v in pairs(attrs) do
+                if k == 'antiFighterBarrage' then
+                    table.insert(unitMessage, k .. '=' .. v.hit .. 'x' .. v.dice )
+                elseif k == 'bombardment' then
+                    table.insert(unitMessage, k .. '=' .. v.hit .. 'x' .. v.dice )
+                elseif k == 'capacity' then
+                    table.insert(unitMessage, k .. '=' .. v )
+                elseif k == 'cost' then
+                    table.insert(unitMessage, k .. '=' .. v )
+                elseif k == 'disablePlanetaryShield' then
+                    table.insert(unitMessage, k .. '=true')
+                elseif k == 'groundCombat' then
+                    table.insert(unitMessage, k .. '=' .. v.hit .. 'x' .. v.dice )
+                elseif k == 'move' then
+                    table.insert(unitMessage, k .. '=' .. v )
+                elseif k == 'planetaryShield' then
+                    table.insert(unitMessage, k .. '=true')
+                elseif k == 'production' then
+                    table.insert(unitMessage, k .. '=' .. v )
+                elseif k == 'spaceCannon' then
+                    table.insert(unitMessage, k .. '=' .. v.hit .. 'x' .. v.dice .. '@' .. (v.range or 0) )
+                elseif k == 'spaceCombat' then
+                    table.insert(unitMessage, k .. '=' .. v.hit .. 'x' .. v.dice )
+                elseif k == 'structure' then
+                    table.insert(unitMessage, k .. '=true')
+                elseif k == 'sustainDamage' then
+                    table.insert(unitMessage, k .. '=true')
+                elseif not ignoreAttributeSet[k] then
+                    error('unknown attribute "' .. k .. '"')
+                end
+            end
+            table.insert(message, unitType .. ': ' .. table.concat(unitMessage, ', '))
+        end
+    end
+
+    return table.concat(message, '\n')
+end
+
+--- Get unit attributes.
+-- @param unitOverrides table : list of unit override name strings.
+-- @return table : unit type to unit attributes tables.
+function getUnitAttributes(unitOverrides)
+    assert(type(unitOverrides) == 'table', 'unitOverrides not a table')
+
+    -- Overwrite orig fields.
+    local function apply(orig, override)
+        assert(type(orig) == 'table', 'orig not a table')
+        assert(type(override) == 'table', 'override not a table')
+        for k, v in pairs(orig) do
+            if type(v) == 'table' then
+                apply(v, override[k] or {})
+            else
+                orig[k] = override[k] or v
+            end
+        end
+        for k, v in pairs(override) do
+            if not orig[k] then
+                orig[k] = v
+            end
+        end
+    end
+
+    -- Start with base attributes (copy for private mutations).
+    local result = _copy(_unitTypes)
+
+    for unitType, attrs in pairs(result) do
+        -- Apply any faction overrides.
+        for _, name in ipairs(unitOverrides) do
+            local unitOverride = assert(_unitOverrides[name], 'missing unit override "' .. name .. '"')
+            if unitOverride.override == unitType then
+                apply(attrs, unitOverride)
+                attrs.name = name
+            end
+        end
+
+        -- Apply any unit upgrades.
+        for _, name in ipairs(unitOverrides) do
+            local unitOverride = _unitOverrides[name]
+            if unitOverride.upgrade == unitType then
+                apply(attrs, unitOverride)
+                attrs.name = name
+            end
+        end
+    end
+    return result
+end
+
+function applyFlagshipModifiers(params)
+    assert(type(params.unitAttrs) == 'table')
+    assert(type(params.myColor) == 'string', 'params.myColor')
+    assert((not params.opponentColor) or type(params.opponentColor) == 'string', 'params.opponentColor')
+    assert((not params.myUnitTypeToCount) or type(params.myUnitTypeToCount) == 'table')
+    assert((not params.opponentUnitTypeToCount) or type(params.opponentUnitTypeToCount) == 'table')
+
+    local unitAttrs = _copy(params.unitAttrs)
+    local modifiers = {}
+
+    if params.myUnitTypeToCount and (params.myUnitTypeToCount['Flagship'] or 0) > 0 then
+        local flagship = unitAttrs['Flagship'].name
+        local unitModifier = _flagshipModifiers[flagship]
+        if unitModifier and unitModifier.owner == OWNER.SELF then
+            table.insert(modifiers, unitAttrs['Flagship'].name)
+            unitModifier.apply(unitAttrs, params)
+        end
+    end
+
+    -- Worth it to support opponent flagship?  Opponent color is not sufficient
+    -- for Franken.  For now ignore those, they are rare and do not effect
+    -- roll mechanics (they do things like remove sustain damage, etc).
+
+    unitAttrs._flagshipModifiers = {}
+    for _, modifier in ipairs(modifiers) do
+        table.insert(unitAttrs._flagshipModifiers, {
+            name = modifier,
+            description = _flagshipModifiers[modifier].description,
+            owner = _flagshipModifiers[modifier].owner,
+            type = _flagshipModifiers[modifier].type,
+            isCombat = _flagshipModifiers[modifier].isCombat,
+        })
+    end
+
+    return unitAttrs
+end
+
+function applyUnitModifiers(params)
+    assert(type(params.unitAttrs) == 'table', 'params.unitAttrs')
+    assert(type(params.myColor) == 'string', 'params.myColor')
+    assert(type(params.myUnitModifiers) == 'table', 'params.myUnitModifiers')
+    assert(type(params.myUnitTypeToCount) == 'table', 'params.myUnitTypeToCount')
+    assert((not params.opponentColor) or type(params.opponentColor) == 'string', 'params.opponentColor')
+    assert((not params.opponentUnitModifiers) or type(params.opponentUnitModifiers) == 'table', 'params.opponentUnitModifiers')
+    assert((not params.opponentUnitTypeToCount) or type(params.opponentUnitTypeToCount) == 'table', 'params.opponentUnitTypeToCount')
+
+    local unitAttrs = _copy(params.unitAttrs)
+    local modifiers = {}
+
+    local ownerSet = {
+        [OWNER.SELF] = {},
+        [OWNER.OPPONENT] = {},
+        [OWNER.ANY] = {},
+    }
+    for _, name in ipairs(params.myUnitModifiers or {}) do
+        ownerSet[OWNER.SELF][name] = true
+        ownerSet[OWNER.ANY][name] = true
+    end
+    for _, name in ipairs(params.opponentUnitModifiers or {}) do
+        ownerSet[OWNER.OPPONENT][name] = true
+        ownerSet[OWNER.ANY][name] = true
+    end
+
+    -- Apply MUTATE first to add/remove attributes.
+    for name, unitModifier in pairs(_unitModifiers) do
+        if unitModifier.type == TYPE.MUTATE and ownerSet[unitModifier.owner][name] then
+            table.insert(modifiers, name)
+            unitModifier.apply(unitAttrs, params)
+        end
+    end
+
+    -- Apply ADJUST to update (but not add/remove) attribute values.
+    for name, unitModifier in pairs(_unitModifiers) do
+        if unitModifier.type == TYPE.ADJUST and ownerSet[unitModifier.owner][name] then
+            table.insert(modifiers, name)
+            unitModifier.apply(unitAttrs, params)
+        end
+    end
+
+    -- Apply CHOOSE to select units based on attributes.
+    for name, unitModifier in pairs(_unitModifiers) do
+        if unitModifier.type == TYPE.CHOOSE and ownerSet[unitModifier.owner][name] then
+            table.insert(modifiers, name)
+            unitModifier.apply(unitAttrs, params)
+        end
+    end
+
+    -- Record active modifiers for reporting.
+    unitAttrs._unitModifiers = {}
+    for _, modifier in ipairs(modifiers) do
+        table.insert(unitAttrs._unitModifiers, {
+            name = modifier,
+            description = _unitModifiers[modifier].description,
+            owner = _unitModifiers[modifier].owner,
+            type = _unitModifiers[modifier].type,
+            isCombat = _unitModifiers[modifier].isCombat,
+        })
+    end
+    return unitAttrs
+end
+
+--- Get a table from player color to list of unit override names.
+function getColorToUnitOverrides()
+    local colorToUnitOverrideSet = {}
+
+    local function addOverride(color, name)
+        local entry = colorToUnitOverrideSet[color]
+        if not entry then
+            entry = {}
+            colorToUnitOverrideSet[color] = entry
+        end
+        entry[name] = true
+    end
+
+    -- Faction overrides (only get overrides, not upgrades!)
+    for color, faction in pairs(_factionHelper.allFactions()) do
+        if faction then
+            if faction.flagship and faction.flagship ~= '?' then
+                addOverride(color, faction.flagship)
+            end
+            for _, unit in ipairs(faction.units or {}) do
+                local attrs = assert(_unitOverrides[unit], 'unknown faction unit ' .. unit)
+                if attrs.override then
+                    addOverride(color, unit)
+                end
+            end
+        end
+    end
+
+    -- Unit upgrade cards (or Franken tiles for faction overrides).
+    local tagSet = { ['Card'] = true, ['Tile'] = true }
+    local inHandGuidSet = _zoneHelper.inHand()
+    local guidToName = {}
+    local guidToPosition = {}
+    for _, object in ipairs(getAllObjects()) do
+        local guid = object.getGUID()
+        local name = object.getName()
+        if (not object.is_face_down) and (not inHandGuidSet[guid]) and tagSet[object.tag] and _unitOverrides[name] then
+            guidToName[guid] = name
+            guidToPosition[guid] = object.getPosition()
+        end
+    end
+    local guidToZoneColor = _zoneHelper.zonesFromPositions(guidToPosition)
+    for guid, zoneColor in pairs(guidToZoneColor) do
+        local name = guidToName[guid]
+        addOverride(zoneColor, name)
+    end
+
+    local colorToUnitOverrides = {}
+    for color, unitOverrideSet in pairs(colorToUnitOverrideSet) do
+        local entry = {}
+        for name, _ in pairs(unitOverrideSet) do
+            table.insert(entry, name)
+        end
+        colorToUnitOverrides[color] = entry
+    end
+    return colorToUnitOverrides
+end
+
+--- Get a table from player color to list of unit modifier names.
+function getColorToUnitModifiers()
+    local colorToUnitModifierSet = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        colorToUnitModifierSet[color] = {}
+    end
+
+    local allModifiersSet = {}
+    local function addModifier(color, name)
+        local entry = colorToUnitModifierSet[color]
+        if not entry then
+            entry = {}
+            colorToUnitModifierSet[color] = entry
+        end
+        entry[name] = true
+        allModifiersSet[name] = true
+    end
+
+    -- Add commanders (including Alliance and Imperia sharing).
+    -- Faction helper looks at alliance cards when they have toggle active,
+    -- as well as if the linked commander is active when unable to (imperia).
+    -- It is safe to trust faction helper returns only valid commanders.
+    local colorToCommanders = _factionHelper.getColorToCommanders()
+    for color, commanders in pairs(colorToCommanders) do
+        for _, commander in ipairs(commanders) do
+            addModifier(color, commander)
+        end
+    end
+
+    -- Faction abilities.
+    for color, faction in pairs(_factionHelper.allFactions()) do
+        for _, ability in ipairs(faction and faction.abilities or {}) do
+            if _unitModifiers[ability] then
+                addModifier(color, ability)
+            end
+        end
+    end
+
+    -- Cards/Franken tiles.  Add "anywhereOnTable" to ALL colors.
+    local inHandGuidSet = _zoneHelper.inHand()
+    local tagSet = { ['Card'] = true, ['Tile'] = true }
+    local function getUnitModifier(object)
+        if inHandGuidSet[object.getGUID()] then
+            return false
+        end
+
+        -- Lookup the modifier.
+        local name = object.getName()
+        local unitModifier = _unitModifiers[name]
+        if not unitModifier then
+            return false
+        end
+        if unitModifier.alias then
+            name = unitModifier.alias
+            unitModifier = _unitModifiers[unitModifier.alias]
+        end
+
+        -- Verify tag.
+        if unitModifier.tag then
+            if object.tag ~= unitModifier.tag then
+                return false
+            end
+        elseif not tagSet[object.tag] then
+            return false
+        end
+
+        -- Verify cards are face up.
+        if object.tag == 'Card' and object.is_face_down and (not unitModifier.allowFaceDown) then
+            return false
+        end
+
+        -- "toggle active" card handling.
+        if unitModifier.toggleActive and not _isToggleActiveCardActive(object) then
+            return false
+        end
+
+        -- Faction promissory notes might be face up in the owner player's
+        -- area with a "for sale" sign.  Do not count those.
+        if unitModifier.excludeFaction then
+            local color = _zoneHelper.zoneFromPosition(object.getPosition())
+            local faction = color and _factionHelper.fromColor(color)
+            if faction and faction.name == unitModifier.excludeFaction then
+                return false
+            end
+        end
+
+        return name, unitModifier
+    end
+
+    local guidToName = {}
+    local guidToPosition = {}
+    for _, object in ipairs(getAllObjects()) do
+        -- Get unit modifiers.
+        local name, unitModifier = getUnitModifier(object)
+        if unitModifier then
+            -- Tekklar Legion debuffs Sardakk when played by others.
+            if name == 'Tekklar Legion' then
+                local sardakk = _factionHelper.fromTokenName("Sardakk N'orr")
+                local color = _zoneHelper.zoneFromPosition(object.getPosition())
+                if sardakk and sardakk.color and sardakk.color ~= color then
+                    addModifier(sardakk.color, name)
+                end
+            end
+
+            if _unitModifiers[name].owner == OWNER.ANY then
+                -- Make sure card is not in the discard pile.
+                if object.tag ~= 'Card' or not _deckHelper.isDiscard(object.getGUID()) then
+                    for _, color in ipairs(_zoneHelper.zones()) do
+                        addModifier(color, name)
+                    end
+                end
+            else
+                local guid = object.getGUID()
+                guidToName[guid] = name
+                guidToPosition[guid] = object.getPosition()
+            end
+        end
+    end
+    local guidToZoneColor = _zoneHelper.zonesFromPositions(guidToPosition)
+    for guid, zoneColor in pairs(guidToZoneColor) do
+        local name = guidToName[guid]
+        local modifier = _unitModifiers[name]
+        addModifier(zoneColor, name)
+    end
+
+    local colorToUnitModifiers = {}
+    for color, unitModifiersSet in pairs(colorToUnitModifierSet) do
+        local entry = {}
+        for name, _ in pairs(unitModifiersSet) do
+            table.insert(entry, name)
+            -- Yssaril agent, copies other agents.
+            if name == 'Ssruu' then
+                for other, _ in pairs(allModifiersSet) do
+                    local leader = _unitModifiers[other] and _unitModifiers[other].leader
+                    if other ~= 'Ssruu' and leader == LEADER.AGENT then
+                        table.insert(entry, other)
+                    end
+                end
+            end
+        end
+        colorToUnitModifiers[color] = entry
+    end
+    return colorToUnitModifiers
+end
+
+-------------------------------------------------------------------------------
+
+local _objectNameToUnitData = false
+local _objectNameToUnitDataTimestamp = false
+
+function _getObjectNameToUnitData()
+    if _objectNameToUnitData and _objectNameToUnitDataTimestamp then
+        local age = Time.time - _objectNameToUnitDataTimestamp
+        if age < 60 then
+            return _objectNameToUnitData
+        end
+    end
+    _objectNameToUnitDataTimestamp = Time.time
+
+    -- Build a COMPLETE map from name to { unitType, color, count } attributes.
+    -- This way table scans can do a simple membership check rather than
+    -- string.match or other heavier lifting to identify units.  In some cases
+    -- do not know the color.
+    _objectNameToUnitData = {
+        ['x1 Fighter Token'] = {
+            tag = 'Tile',
+            unitType = 'Fighter',
+            count = 1
+        },
+        ['x3 Fighter Token'] = {
+            tag = 'Tile',
+            unitType = 'Fighter',
+            count = 3
+        },
+        ['x1 Infantry Token'] = {
+            tag = 'Tile',
+            unitType = 'Infantry',
+            count = 1
+        },
+        ['x3 Infantry Token'] = {
+            tag = 'Tile',
+            unitType = 'Infantry',
+            count = 3
+        },
+        ['Infantry Counter'] = {
+            unitType = 'Infantry',
+            count = 0
+        },
+        ['Fighter Counter'] = {
+            unitType = 'Fighter',
+            count = 0
+        },
+    }
+
+    -- Add flagships.  Do not know the color (and may change).
+    for _, faction in pairs(_factionHelper.allFactions(true)) do
+        _objectNameToUnitData[faction.flagship] = {
+            tag = 'Generic',
+            unitType = 'Flagship',
+            count = 1,
+            factionTokenName = faction.tokenName
+        }
+    end
+
+    -- Add units.
+    for _, color in ipairs(Player.getColors()) do
+        for unitType, _ in pairs(_unitTypes) do
+            local name = color .. ' ' .. unitType
+            _objectNameToUnitData[name] = {
+                tag = 'Generic',
+                unitType = unitType,
+                count = 1,
+                color = color
+            }
+        end
+    end
+
+    return  _objectNameToUnitData
+end
+
+function isUnitUpgradeName(name)
+    assert(type(name) == 'string')
+    return _unitOverrides[name] and _unitOverrides[name].upgrade and true or false
+end
+
+function isUnitName(name)
+    assert(type(name) == 'string')
+    local objectNameToUnitData = _getObjectNameToUnitData()
+    return objectNameToUnitData[name] and true or false
+end
+
+function getUnitUpgradeNames()
+    local result = {}
+    for name, override in pairs(_unitOverrides) do
+        if override.upgrade then
+            table.insert(result, name)
+        end
+    end
+    return result
+end
+
+--- Get all units on the table.  Unit data tables contain:
+-- { unitType, count, color, hex } keys.  Tokens and flagships have no color,
+-- call fillUnitColors to add them.
+-- @return table : list of unit data tables.
+function getUnits()
+    local objectNameToUnitData = _getObjectNameToUnitData()
+    local result = {}
+    local guidToPosition = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        local unitData = objectNameToUnitData[name]
+        -- Treat 'figurine' as 'generic'.
+        local tag = object.tag == 'Figurine' and 'Generic' or object.tag
+        if (not object.held_by_color) and unitData and ((not unitData.tag) or unitData.tag == tag) then
+            local unitData = _copy(unitData)
+            unitData.guid = object.getGUID()
+            unitData.position = object.getPosition()
+            if name == 'Infantry Counter' or name == 'Fighter Counter' then
+                -- Require object store count in a global.  Object.getValue not universal.
+                local count = object.getVar('_unitCount')
+                if count and type(count) == 'number' and count >= 0 then
+                    unitData.count = count
+                end
+            end
+            table.insert(result, unitData)
+            guidToPosition[unitData.guid] = unitData.position
+        end
+    end
+    local guidToHex = _systemHelper.hexesFromPositions(guidToPosition)
+    for _, unitData in ipairs(result) do
+        unitData.hex = guidToHex[unitData.guid]
+    end
+    return result
+end
+
+--- Set colors for anonymous tokens to closest with-color unit in the same hex.
+-- @param units table : list of unit data tables.
+-- @return table : list of unit data tables with colors added.
+function fillUnitColors(units)
+    assert(type(units) == 'table', 'units must be a table')
+    units = _copy(units)
+
+    local hexToHaveColorUnits = {}
+    local hexToNeedColorUnits = {}
+    for _, unit in ipairs(units) do
+        if unit.factionTokenName then
+            -- Flagships do not have color in the name, lazy get color here.
+            local faction = unit.factionTokenName and _factionHelper.fromTokenName(unit.factionTokenName)
+            unit.color = faction and faction.color
+        end
+        if unit.color then
+            local entry = hexToHaveColorUnits[unit.hex]
+            if not entry then
+                entry = {}
+                hexToHaveColorUnits[unit.hex] = entry
+            end
+            table.insert(entry, unit)
+        else
+            local entry = hexToNeedColorUnits[unit.hex]
+            if not entry then
+                entry = {}
+                hexToNeedColorUnits[unit.hex] = entry
+            end
+            table.insert(entry, unit)
+        end
+    end
+
+    -- Set need-color units to closest have-color.
+    for hex, needColorUnits in pairs(hexToNeedColorUnits) do
+        local haveColorUnits = hexToHaveColorUnits[hex] or {}
+        for _, needColorUnit in ipairs(needColorUnits) do
+            local p0 = needColorUnit.position
+            local bestDistanceSq, bestHaveColorUnit = false, false
+            for _, haveColorUnit in ipairs(haveColorUnits) do
+                local p1 = haveColorUnit.position
+                local dSq = (p0.x - p1.x) ^ 2 + (p0.z - p1.z) ^ 2
+                if (not bestDistanceSq) or dSq < bestDistanceSq then
+                    bestHaveColorUnit = haveColorUnit
+                    bestDistanceSq = dSq
+                end
+            end
+            if bestHaveColorUnit then
+                needColorUnit.color = assert(bestHaveColorUnit.color)
+            end
+        end
+    end
+    return units
+end
+
+function getColorToUnits(units)
+    assert(type(units) == 'table', 'units must be a table')
+    local colorToUnits = {}
+    for _, unit in ipairs(units) do
+        if unit.color then
+            local entry = colorToUnits[unit.color]
+            if not entry then
+                entry = {}
+                colorToUnits[unit.color] = entry
+            end
+            table.insert(entry, unit)
+        end
+    end
+    return colorToUnits
+end
+
+function getUnitTypeToCount(units)
+    assert(type(units) == 'table', 'units must be a table')
+    local unitTypeToCount = {}
+    for _, unit in ipairs(units) do
+        unitTypeToCount[unit.unitType] = (unitTypeToCount[unit.unitType] or 0) + (unit.count or 1)
+    end
+    return unitTypeToCount
+end
+
+function getUnitTypeToCountSummary(unitTypeToCount)
+    local message = {}
+    for unitType, count in pairs(unitTypeToCount) do
+        local plural = (count > 1 and unitType ~= 'Infantry') and 's' or ''
+        table.insert(message, count .. ' ' .. unitType .. plural)
+    end
+    return table.concat(message, ', ')
+end
+
+-------------------------------------------------------------------------------
+
+--- Add a new unit type.
+-- Unit override MUST have a name field.
+-- @param unitOverride table : see the _unitOverrides table above for examples.
+function injectUnitOverride(unitOverride)
+    assert(type(unitOverride) == 'table', 'injectUnitOverride must be a table')
+    local name = assert(unitOverride.name, 'missing unitOverride.name')
+    assert(string.len(name) > 0, 'empty unitOverride.name')
+    _validateUnitOverride(name, unitOverride)
+    if _unitOverrides[name] then
+        print('injectUnitOverride: WARNING, already have "' .. name ..'", replacing with new attributes.')
+    end
+    _unitOverrides[name] = _copy(unitOverride)
+end
+
+function injectUnitModifier(unitModifier)
+    assert(type(unitModifier) == 'table', 'injectUnitOverride must be a table')
+    local name = assert(unitModifier.name, 'missing unitModifier.name')
+    assert(string.len(name) > 0, 'empty unitModifier.name')
+    _validateUnitModifier(name, unitModifier)
+    if _unitModifiers[name] then
+        print('already have unitOverride.name "' .. name .. '", replacing with new version')
+    end
+
+    -- Add an apply function.
+    assert(not unitModifier.apply, 'cannot declare ' .. name .. '.apply')
+    local applyFunctionName = assert(unitModifier.applyFunctionName, 'missing ' .. name .. '.applyFunctionName')
+    local applyFunctionGuid = assert(unitModifier.applyFunctionGuid, 'missing ' .. name .. '.applyFunctionGuid')
+
+    local function validateApplyObject()
+        local applyObject = getObjectFromGUID(applyFunctionGuid)
+        if not applyObject then
+            error('missing injectUnitModifier "' .. name .. '" guid ' .. applyFunctionGuid)
+        end
+        if not applyObject.getVar(applyFunctionName) then
+            error('missing injectUnitModifier "' .. name .. '" function ' .. applyFunctionName)
+        end
+        return applyObject
+    end
+    validateApplyObject()
+
+    local function apply(unitAttrs, params)
+        local applyObject = validateApplyObject()
+        unitAttrs._params = params
+        local result = applyObject.call(applyFunctionName, unitAttrs)
+        if result then
+            for k, v in pairs(unitAttrs) do
+                unitAttrs[k] = nil
+            end
+            for k, v in pairs(_copy(result)) do
+                unitAttrs[k] = v
+            end
+            unitAttrs._params = nil
+        end
+    end
+    unitModifier = _copy(unitModifier)
+    unitModifier.apply = apply
+
+    _unitModifiers[name] = unitModifier
+end
+
+-------------------------------------------------------------------------------
+
+local TOGGLE_ACTIVE_STATE = {
+    idle = {
+        label = 'Idle',
+        buttonColor = { r = 1, g = 1, b = 1 },
+        textColor = { r = 0, g = 0, b = 0 },
+    },
+    active = {
+        label = 'Active',
+        buttonColor = { r = 1, g = 0, b = 0 },
+        textColor = { r = 0, g = 0, b = 0 },
+    }
+}
+
+function _isToggleActiveCard(object)
+    if object.tag == 'Card' then
+        local name = object.getName()
+        local modifier = _unitModifiers[name]
+        if modifier and modifier.alias then
+            modifier = _unitModifiers[modifier.alias]
+        end
+        if modifier then
+            return modifier.toggleActive
+        end
+
+        -- Add toggle active for alliance cards where the peer is toggle active.
+        -- Do not use an alias should only actually get used when linked
+        -- commander is active, let faction helper look at the toggle active
+        -- status and decide when an alliance is in play.
+        local shortName = string.match(name, '^(.*) Alliance$')
+        local faction = shortName and _factionHelper.fromTokenName(shortName)
+        local commander = faction and faction.commander
+        local modifier = commander and _unitModifiers[commander]
+        if modifier and modifier.alias then
+            modifier = _unitModifiers[modifier.alias]
+        end
+        if modifier then
+            return modifier.toggleActive
+        end
+
+        -- COMMENTED OUT FOR NOW, ONLY USE NEW STYLE.  Also support the old style.
+        -- local factionColor = string.match(name, '^Alliance %((.*)%)$')
+        -- local faction = factionColor and _factionHelper.fromColor(factionColor)
+        -- local commander = faction and faction.commander
+        -- local modifier = commander and _unitModifiers[commander]
+        -- if modifier and modifier.alias then
+        --     modifier = _unitModifiers[modifier.alias]
+        -- end
+        -- if modifier then
+        --     return modifier.toggleActive
+        -- end
+
+        return false
+    end
+end
+
+function _isToggleActiveCardActive(object)
+    local buttons = object.getButtons()
+    local button = buttons and #buttons > 0 and buttons[1]
+    return button and button.label == TOGGLE_ACTIVE_STATE.active.label
+end
+
+function _onToggleActiveCard(buttonContainer, clickerColor, altClick)
+    local buttons = buttonContainer.getButtons()
+    local button = buttons and #buttons > 0 and buttons[1]
+    if button then
+        if _isToggleActiveCardActive(buttonContainer) then
+            button.label = TOGGLE_ACTIVE_STATE.idle.label
+            button.color = TOGGLE_ACTIVE_STATE.idle.buttonColor
+            button.font_color = TOGGLE_ACTIVE_STATE.idle.textColor
+        else
+            button.label = TOGGLE_ACTIVE_STATE.active.label
+            button.color = TOGGLE_ACTIVE_STATE.active.buttonColor
+            button.font_color = TOGGLE_ACTIVE_STATE.active.textColor
+        end
+        buttonContainer.editButton(button)
+    end
+end
+
+function _applyToggleActiveCard(object)
+    local scale = object.getScale()
+    local iscale = {
+        x = scale.x,  -- what is going on here??
+        y = 1,
+        z = 1/scale.z,
+    }
+    local bounds = object.getBoundsNormalized()
+    local pos = {
+        x = 0,
+        y = 1,
+        z = ((bounds.size.z / scale.z) / 2) + 0.15
+    }
+    object.clearButtons()
+    object.createButton({
+        click_function = '_onToggleActiveCard',
+        function_owner = self,
+        label          = TOGGLE_ACTIVE_STATE.idle.label,
+        position       = pos,
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = iscale,
+        width          = 650,
+        height         = 250,
+        font_size      = 200,
+        color          = TOGGLE_ACTIVE_STATE.idle.buttonColor,
+        font_color     = TOGGLE_ACTIVE_STATE.idle.textColor,
+        tooltip        = 'Toggle active'
+    })
+end
+
+function _applyToggleActiveCards()
+    for _, object in ipairs(getAllObjects()) do
+        if _isToggleActiveCard(object) then
+            _applyToggleActiveCard(object)
+        end
+    end
+end
+
+function onObjectSpawn(object)
+    if _isToggleActiveCard(object) then
+        _applyToggleActiveCard(object)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    self.setColorTint({ r = 0.25, g = 0.25, b = 0.25 })
+    self.setScale({ x = 2, y = 0.01, z = 2 })
+    self.setName('TI4_UNIT_HELPER')
+    self.setDescription('Shared helper functions used by other objects, PLEASE LEAVE ON TABLE! This object is only visible to the black (GM) player.')
+
+    -- Only the GM/black player can see this object.  Others can still interact!
+    local invisibleTo = {}
+    for _, color in ipairs(Player.getColors()) do
+        if color ~= 'Black' then
+            table.insert(invisibleTo, color)
+        end
+    end
+    self.setInvisibleTo(invisibleTo)
+
+    self.addContextMenuItem('Verify tables', _verifyTables)
+    self.addContextMenuItem('Verify factions', _verifyFactions)
+    self.addContextMenuItem('Dump attributes', _dumpAttributes)
+    self.addContextMenuItem('Dump units', _dumpUnits)
+
+    -- Add name to unit modifiers entries.
+    for name, mod in pairs(_unitModifiers) do
+        mod.name = name
+    end
+
+    -- Make toggle cards toggle-able.
+    Wait.frames(_applyToggleActiveCards, 3)
+end
+
+function _verifyTables()
+    for name, attrs in pairs(_unitTypes) do
+        _validateUnitType(name, attrs)
+    end
+    for name, override in pairs(_unitOverrides) do
+        _validateUnitOverride(name, override)
+    end
+    for name, unitModifier in pairs(_unitModifiers) do
+        if unitModifier.alias then
+            assert(_unitModifiers[unitModifier.alias], name .. ' alias does not exist')
+        else
+            _validateUnitModifier(name, unitModifier)
+        end
+    end
+    print('verifyTables: done')
+end
+
+function _verifyFactions()
+    local flagshipSet = {}
+    for _, faction in pairs(_factionHelper.allFactions(true)) do
+        local flagship = assert(faction.flagship)
+        flagshipSet[flagship] = true
+        assert(_unitOverrides[flagship], 'Missing flagship "' .. flagship .. '" ("' .. faction.name .. '")')
+        for _, unit in ipairs(faction.units) do
+            assert(_unitOverrides[unit], 'Missing unit "' .. unit .. '" ("' .. faction.name .. '")')
+        end
+    end
+    for flagship, _ in pairs(_flagshipModifiers) do
+        assert(flagshipSet[flagship], 'Modifier "' .. flagship .. '" not a flagship?')
+    end
+    print('verifyFactions: done')
+end
+
+function _dumpAttributes()
+    -- This method shows the intended way to get per-color unit attributes
+    -- with applied unit modifiers.
+    -- Ideally this would be inside a coroutine with a yield(0) between most items.
+    local colorToUnitOverrides = getColorToUnitOverrides()
+    local colorToUnitModifiers = getColorToUnitModifiers()
+
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local unitOverrides = colorToUnitOverrides[color] or {}
+        local unitModifiers = colorToUnitModifiers[color] or {}
+
+        -- Apply unit overrides.
+        local unitAttrs = getUnitAttributes(unitOverrides)
+
+        -- Apply flagship effects.
+        unitAttrs = applyFlagshipModifiers({
+            unitAttrs = assert(unitAttrs),
+            myColor = color,
+            myUnitTypeToCount = {},
+            opponentUnitTypeToCount = false
+        })
+
+        -- Apply unit modifiers.
+        unitAttrs = applyUnitModifiers({
+            unitAttrs = assert(unitAttrs),
+            myColor = color,
+            myUnitModifiers = unitModifiers,
+            myUnitTypeToCount = {},
+            opponentColor = false,
+            opponentUnitModifiers = false,
+            opponentUnitTypeToCount = false
+        })
+
+        local summary = unitAttributesSummary(unitAttrs)
+        print(string.upper(color) .. ':\n' .. summary)
+
+        for i, unitModifier in ipairs(unitAttrs._unitModifiers) do
+            print(i .. '. ' .. unitModifier.name .. ': ' .. unitModifier.description)
+        end
+    end
+end
+
+function _dumpUnits()
+    -- This method shows the intended way to get units on map.
+    -- Ideally this would be inside a coroutine with a yield(0) between most items.
+
+    -- Get the active hex, and adjacent (including wormholes).
+    local system = _systemHelper.getLastActivatedSystem()
+    if not system then
+        error('no active system')
+    end
+    local hex = _systemHelper.hexFromPosition(getObjectFromGUID(system.guid).getPosition())
+    local adjacentSet = {}
+    for _, adjacent in ipairs(_systemHelper.hexNeighbors(hex)) do
+        adjacentSet[adjacent] = true
+    end
+    for _, adjacent in ipairs(_systemHelper.hexAdjacentWormholes({ hex = hex })) do
+        adjacentSet[adjacent] = true
+    end
+
+    -- Get all units on the table.
+    local units = getUnits()
+
+    -- Select units in active hex and in adjacent hexes.
+    local hexUnits = {}
+    local adjUnits = {}
+    for _, unit in ipairs(units) do
+        if unit.hex == hex then
+            table.insert(hexUnits, unit)
+        elseif adjacentSet[unit.hex] then
+            table.insert(adjUnits, unit)
+        end
+    end
+
+    -- Assign colors to flagships and anonymous tokens.
+    hexUnits = fillUnitColors(hexUnits)
+    adjUnits = fillUnitColors(adjUnits)
+
+    -- Split into per-color unit lists.
+    local colorToHexUnits = getColorToUnits(hexUnits)
+    local colorToAdjUnits = getColorToUnits(adjUnits)
+
+    -- Summarize per-color counts.
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local units = colorToHexUnits[color]
+        if units then
+            local unitTypeToCount = getUnitTypeToCount(units)
+            local summary = getUnitTypeToCountSummary(unitTypeToCount)
+            print(color .. ' in hex: ' .. summary)
+        end
+
+        local units = colorToAdjUnits[color]
+        if units then
+            local unitTypeToCount = getUnitTypeToCount(units)
+            local summary = getUnitTypeToCountSummary(unitTypeToCount)
+            print(color .. ' adjacent: ' .. summary)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function _validateUnitType(unitType, unitAttributes)
+    assert(type(unitType) == 'string' and type(unitAttributes) == 'table')
+    for k, v in pairs(unitAttributes) do
+        if k == 'antiFighterBarrage' then
+            assert(v.dice, unitType .. '.antiFighterBarrage.dice')
+            assert(v.hit, unitType .. '.antiFighterBarrage.hit')
+        elseif k == 'bombardment' then
+            assert(v.dice, unitType .. '.bombardment.dice')
+            assert(v.hit, unitType .. '.bombardment.hit')
+        elseif k == 'capacity' then
+            assert(type(v) == 'number', unitType .. '.capacity')
+        elseif k == 'cost' then
+            assert(type(v) == 'number', unitType .. '.cost')
+        elseif k == 'disablePlanetaryShield' then
+            assert(type(v) == 'boolean', unitType .. '.disablePlanetaryShield')
+        elseif k == 'groundCombat' then
+            assert(v.dice, unitType .. '.groundCombat.dice')
+            assert(v.hit, unitType .. '.groundCombat.hit')
+        elseif k == 'move' then
+            assert(type(v) == 'number', unitType .. '.move')
+        elseif k == 'planetaryShield' then
+            assert(type(v) == 'boolean', unitType .. '.planetaryShield')
+        elseif k == 'production' then
+            assert(type(v) == 'number', unitType .. '.production')
+        elseif k == 'spaceCannon' then
+            assert(v.dice, unitType .. '.spaceCannon.dice')
+            assert(v.hit, unitType .. '.spaceCannon.hit')
+        elseif k == 'spaceCombat' then
+            assert(v.dice, unitType .. '.spaceCombat.dice')
+            assert(v.hit, unitType .. '.spaceCombat.hit')
+        elseif k == 'structure' then
+            assert(type(v) == 'boolean', unitType .. '.structure')
+        elseif k == 'sustainDamage' then
+            assert(type(v) == 'boolean', unitType .. '.sustainDamage')
+        else
+            error('unknown unit type attribute ' .. unitType .. '.' .. k)
+        end
+    end
+end
+
+function _validateUnitOverride(name, unitOverride)
+    assert(type(name) == 'string' and type(unitOverride) == 'table')
+
+    assert(unitOverride.upgrade or unitOverride.override, name .. '.{upgrade|override}')
+
+    for k, v in pairs(unitOverride) do
+        if k == 'override' then
+            assert(not unitOverride.upgrade)
+            assert(_unitTypes[v], name .. '.override')
+        elseif k == 'upgrade' then
+            assert(not unitOverride.override)
+            assert(_unitTypes[v], name .. '.upgrade')
+        end
+    end
+end
+
+function _validateUnitModifier(name, unitModifier)
+    assert(type(name) == 'string' and type(unitModifier) == 'table')
+
+    assert(type(unitModifier.description) == 'string', 'missing ' .. name .. '.description')
+    assert(type(unitModifier.owner) == 'string', 'missing ' .. name .. '.owner')
+    assert(type(unitModifier.type) == 'string', 'missing ' .. name .. '.type')
+    assert(type(unitModifier.isCombat) == 'boolean', 'missing ' .. name .. '.isCombat')
+
+    local legalOwnerSet = {}
+    for _, value in pairs(OWNER) do
+        legalOwnerSet[value] = true
+    end
+    assert(legalOwnerSet[unitModifier.owner], 'bad ' .. name .. '.owner')
+
+    local legalTypeSet = {}
+    for _, value in pairs(TYPE) do
+        legalTypeSet[value] = true
+    end
+    assert(legalTypeSet[unitModifier.type], 'bad ' .. name .. '.type')
+end
+
+-------------------------------------------------------------------------------
+
+function _copy(t)
+    if t and type(t) == 'table' then
+        local copy = {}
+        for k, v in pairs(t) do
+            copy[k] = type(v) == 'table' and _copy(v) or v
+        end
+        t = copy
+    end
+    return t
+end
+
+-------------------------------------------------------------------------------
+--- Partially lock the _G global variable table.
+-- Include this AFTER creating any necessary globals to prevent new ones.
+--
+-- - Existing globals can still be read AND WRITTEN.
+-- - Cannot read non-existent globals.
+-- - Cannot write new globals.
+--
+-- This helps catch typos where what was meant to access a local instead
+-- references a (hopefully non-existent) global, as well as forgetting to use
+-- "local" when creating objects.
+--
+-- @author Darrell
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

@@ -1,0 +1,44 @@
+Color Switcher:
+- Allow seated players to swap colors (Raptor suggestion).
+- Support multiple tints for each color (colors by Tactic Blue).
+- Blue Space faction detection fix.
+
+Autofill MultiRoller:
+- Plasma scoring detection fix.
+- Blue Space faction detection fix.
+- Use shared zones.
+- Use shared systems.
+
+Faction Borders:
+- Blue Space faction detection fix.
+- Maybe fix UI sometimes not showing.
+
+Build Area:
+- Report more transaction details (planets spent, etc) (Alister request).
+- Use shared resources/influence tables.
+- Use shared zones.
+
+Strategy Cards:
+- Use shared resources/influence tables (fix influence counting... again).
+- Use shared faction tables.
+- Use shared zones.
+- Use shared end of status phase.
+
+Place Trade Goods and Set Turns:
+- Use shared zones.
+
+Unpack:
+- Delay unit placement to prevent units from falling under system tiles.
+- Move faction token "up" in case it got stuck under faction sheet.
+
+New shared tables!
+- Faction (color/flagship/some attributes).
+- Systems (planet influence, resources, traits, etc).
+- Zone (player zone by color), uses larger table areas when fewer than 6 players.
+- Strategy cards (shared end of status phase logic).
+
+Tactic Blue / Blue Space
+- Unpack update.
+- MultiRoller update.
+- Savages of Cymiae update.
+- Reference deck update.

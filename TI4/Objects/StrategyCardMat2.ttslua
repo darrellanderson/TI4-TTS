@@ -1,0 +1,237 @@
+--- Movable mat for placing strategy cards.
+-- Add the start/end phase buttons here rather than on tiles/strategy cards.
+-- @author Darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _buttonHelper = getHelperClient('TI4_BUTTON_HELPER')
+local _strategyCardHelper = getHelperClient('TI4_STRATEGY_CARD_HELPER')
+
+local _tradeGoodBagGuid = false
+
+local BUTTONS = {
+    {
+        id = 'place',
+        label1 = 'Place Trade Goods\nand Set Turns',
+        function1 = 'confirmPlaceTradeGoodsAndSetTurns',
+        label2 = 'CLICK AGAIN\nTO CONFIRM',
+        function2 = 'placeTradeGoodsAndSetTurns'
+    },
+    {
+        id = 'deal',
+        label1 = 'Deal Action Cards',
+        function1 = 'confirmDealActionCards',
+        label2 = 'CLICK AGAIN\nTO CONFIRM',
+        function2 = 'dealActionCards'
+    },
+    {
+        id = 'return',
+        label1 = 'Return Strategy Cards\nand End Status Phase',
+        function1 = 'confirmReturnStrategyCardsAndEndStatusPhase',
+        label2 = 'CLICK AGAIN\nTO CONFIRM',
+        function2 = 'returnStrategyCardsAndEndStatusPhase'
+    }
+}
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    Wait.frames(createSnapPoints, 3)
+
+    local bounds = self.getBoundsNormalized()
+
+    local dx = -5
+    local y = 0.01
+    local z = -4.8
+    local width = 2200
+    local height = 1200
+    local fontSize = 200
+
+    self.clearButtons()
+
+    self.createButton({
+        click_function = 'placeTradeGoodsAndSetTurns',
+        function_owner = self,
+        label          = 'Place Trade Goods\nand Set Turns',
+        position       = { x = dx, y = y, z = z },
+        rotation       = { x = 0, y = 0, z = 0 },
+        width          = width,
+        height         = height,
+        font_size      = fontSize,
+        tooltip        = 'End of strategy phase: place trade goods on unclaimed strategy cards and set turn order',
+    })
+    self.createButton({
+        click_function = 'dealActionCards',
+        function_owner = self,
+        label          = 'Deal Action Cards',
+        position       = { x = 0, y = y, z = z },
+        rotation       = { x = 0, y = 0, z = 0 },
+        width          = width,
+        height         = height,
+        font_size      = fontSize,
+        tooltip        = 'After status phase scoring: deal action cards to all players in initiative order, shuffling the discard if necessary',
+    })
+    self.createButton({
+        click_function = 'returnStrategyCardsAndEndStatusPhase',
+        function_owner = self,
+        label          = 'Return Strategy Cards\nand End Status Phase',
+        position       = { x = -dx, y = y, z = z },
+        rotation       = { x = 0, y = 0, z = 0 },
+        width          = width,
+        height         = height,
+        font_size      = fontSize,
+        tooltip        = 'End of status phase: return and gain command tokens, ready cards, repair units, and return strategy cards'
+    })
+
+    -- Add a confirm second click.
+    for buttonIndex = 0, 2 do
+        _buttonHelper.addConfirmStep({
+            guid = self.getGUID(),
+            buttonIndex = buttonIndex,
+            confirm = {
+                label = 'CLICK AGAIN\nTO CONFIRM',
+                --font_size = #,
+                -- color = string
+            }
+        })
+    end
+end
+
+function getSnapPoint(index)
+    -- Get polar coordinates and point rotation relative to bottom center.
+    local degrees, r, rotation
+
+    -- MyCurveFit.com polynomials with error values.
+    local x = index
+    local stateId = self.getStateId()
+    if stateId == -1 or stateId == 1 then
+        degrees = 7.049048 - 20.05275*x - 0.813924*x^2 + 0.0650851*x^3 -- R^2 1
+        r = 9.231479 - 0.6100839*x + 0.1077831*x^2 - 0.01940475*x^3 + 0.00358401*x^4 - 0.0002154107*x^5 -- R^2 0.9998
+        rotation = -96.52601 + 22.12435*x - 0.4442263*x^2 + 0.03528454*x^3 -- R^2 1
+    else
+        degrees = -107.127 + 21.67016*x - 0.4358322*x^2 + 0.02599713*x^3 -- R^2 1
+        r = 9.059481 - 0.1146883*x + 0.1744545*x^2 - 0.03675651*x^3 + 0.002868113*x^4 - 0.00008123944*x^5 -- R^2 0.9991
+        rotation = 20.64305*x - 116.2335 -- R^2 1
+    end
+
+    -- Get bottom center "origin" in local coordinates.
+    -- local bounds = self.getBoundsNormalized()
+    -- local p = self.getPosition()
+    -- local forward = self.getTransformForward()
+    -- local bottomCenter = {
+    --     x = p.x + forward.x * bounds.size.z / 2,
+    --     y = p.y,
+    --     z = p.z + forward.z * bounds.size.z / 2,
+    -- }
+    -- local origin = self.positionToLocal(bottomCenter)
+    -- BOUNDS BREAKS WHEN CHANGING STATESS!!  Hard code origin in local space.
+    local origin = { x = 0, y = 0, z = 7.274 }
+
+    local phi = math.rad(degrees)
+    return {
+        position = {
+            x = origin.x + math.cos(phi) * r,
+            y = 0,
+            z = origin.z + math.sin(phi) * r,
+        },
+        rotation = {
+            x = 0,
+            y = rotation,
+            z = 0,
+        },
+        rotation_snap = true
+    }
+end
+
+function createSnapPoints()
+    -- Space for 8 strategy cards.
+    local snapPoints = {}
+    for i = 1, 8 do
+        table.insert(snapPoints, getSnapPoint(i))
+    end
+    self.setSnapPoints(snapPoints)
+end
+
+-------------------------------------------------------------------------------
+
+function placeTradeGoodsAndSetTurns(obj, playerClickerColor, altClick)
+    local initiativeOrder = _strategyCardHelper.getInitiativeOrder()
+    local unpickedStrategyCards = {}
+    for guid, color in pairs(initiativeOrder.strategyCardGuidToPlayerColor) do
+        if not color then
+            table.insert(unpickedStrategyCards, getObjectFromGUID(guid))
+        end
+    end
+
+    -- Place trade goods.
+    local function getTradeGoodBag()
+        local bag = _tradeGoodBagGuid and getObjectFromGUID(_tradeGoodBagGuid)
+        if bag then
+            return bag
+        end
+        for _, object in ipairs(getAllObjects()) do
+            if object.tag == 'Infinite' and object.getName() == 'x1 Commodities/Tradegoods Bag' then
+                _tradeGoodBagGuid = object.getGUID()
+                return object
+            end
+        end
+        error('no Trade Goods x1 bag')
+    end
+    local tradeGoodBag = getTradeGoodBag()
+    for _, unpickedStrategyCard in ipairs(unpickedStrategyCards) do
+        -- Copy jitter logic from v2.0, looks good.
+        local pos = unpickedStrategyCard.getPosition()
+        pos.x = pos.x + 0.5 * math.random(-1, 1)
+        pos.z = pos.z + 0.5 * math.random(-1, 1)
+        tradeGoodBag.takeObject({
+            position = { x = pos.x, y = 5, z = pos.z },
+            rotation = { x = 180, y = 90, z = math.random(30,60) },
+            smooth = false
+        })
+    end
+
+    -- Generate turn order, ONLY INCLUDE PLAYERS WITH INITIATIVE VALUES!
+    -- (Skip non-grey "spectators", non-players that can interact with table.)
+    local turnOrder = initiativeOrder.order
+
+    printToAll('Turn order: ' .. table.concat(turnOrder, ', '), playerClickerColor)
+
+    Turns.enable = false
+    Turns.type = 2
+    Turns.reverse_order = false
+    Turns.order = turnOrder
+    Turns.turn_color = turnOrder[1]
+    Turns.enable = true
+end
+
+function dealActionCards(obj, playerClickerColor, altClick)
+    _strategyCardHelper.dealAllActionCards(Turns.order)
+end
+
+function returnStrategyCardsAndEndStatusPhase(obj, playerClickerColor, altClick)
+    _strategyCardHelper.endStatusPhase()
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

@@ -1,0 +1,18 @@
+local _invis = {}
+
+function onLoad(save_state)
+    print('onLoad')
+    self.addContextMenuItem('go away', hideSelfFromPlayer)
+    if save_state and string.len(save_state) > 0 then
+        _invis = JSON.decode(save_state)
+    end
+end
+
+function onSave()
+    return JSON.encode(_invis)
+end
+
+function hideSelfFromPlayer(clickerColor)
+    table.insert(_invis, clickerColor)
+    self.setInvisibleTo(_invis)
+end

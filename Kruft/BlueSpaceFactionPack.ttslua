@@ -1,0 +1,255 @@
+local BOX = {
+    BLUE_SPACE = {
+        ["Advent Box"] = { x = 72.64, y = 2.96, z = 18.98 },
+        ["Drahn Consortium Box"] = { x = 72.62, y = 2.96, z = 15.75 },
+        ["Free Systems Alliance Box"] = { x = 72.72, y = 2.96, z = 12.48 },
+        ["Fremen Box"] = { x = 72.67, y = 2.96, z = 9.28 },
+        ["Gheldor Authority Box"] = { x = 72.66, y = 2.96, z = 5.96 },
+        ["HCEN Defense System Box"] = { x = 72.72, y = 2.96, z = 2.72 },
+        ["Khet Drakkol Union Box"] = { x = 72.69, y = 2.96, z = -0.60 },
+        ["Kortali Horde Box"] = { x = 72.73, y = 2.96, z = -3.97 },
+        ["Lazax Box"] = { x = 72.68, y = 2.96, z = -7.33 },
+        ["Mahact Sorcerer Kings Box"] = { x = 69.20, y = 2.96, z = 18.96 },
+        ["Mandalorian Clans Box"] = { x = 69.18, y = 2.96, z = 15.82 },
+        ["Navigators' Guild Box"] = { x = 69.21, y = 2.96, z = 12.55 },
+        ["Rhodyn Migrant Fleet Box"] = { x = 69.11, y = 2.96, z = 9.28 },
+        ["Trader Emergency Coalition Box"] = { x = 69.17, y = 2.96, z = 5.97 },
+        ["Vasari Empire Box"] = { x = 69.07, y = 2.96, z = 2.74 },
+        ["Veldyr Sovereignty Box"] = { x = 69.10, y = 2.96, z = -0.61 },
+        ["Zeth Contingency Box"] = { x = 69.08, y = 2.96, z = -4.03 },
+    },
+    STANDARD = {
+        ["Arborec Box"] = { x = 79.92, y = 2.96, z = 18.94 },
+        ["Barony of Letnev Box"] = { x = 79.87, y = 2.96, z = 15.71 },
+        ["Clan of Saar Box"] = { x = 79.86, y = 2.96, z = 12.44 },
+        ["Embers of Muaat Box"] = { x = 79.86, y = 2.96, z = 9.10 },
+        ["Emirates of Hacan Box"] = { x = 79.79, y = 2.96, z = 5.87 },
+        ["Federation of Sol Box"] = { x = 79.79, y = 2.96, z = 2.64 },
+        ["Ghosts of Creuss Box"] = { x = 79.72, y = 2.96, z = -0.60 },
+        ["L1Z1X Mindnet Box"] = { x = 79.64, y = 2.96, z = -3.92 },
+        ["Mentak Coalition Box"] = { x = 79.62, y = 2.96, z = -7.29 },
+        ["Naalu Collective Box"] = { x = 76.26, y = 2.96, z = 18.96 },
+        ["Nekro Virus Box"] = { x = 76.29, y = 2.96, z = 15.76 },
+        ["Sardakk N'orr Box"] = { x = 76.22, y = 2.96, z = 12.49 },
+        ["Universities of Jol-Nar Box"] = { x = 76.20, y = 2.96, z = 9.20 },
+        ["Winnu Box"] = { x = 76.24, y = 2.96, z = 5.86 },
+        ["Xxcha Kingdom Box"] = { x = 76.34, y = 2.96, z = 2.55 },
+        ["Yin Brotherhood Box"] = { x = 76.29, y = 2.96, z = -0.75 },
+        ["Yssaril Tribes Box"] = { x = 76.31, y = 2.96, z = -3.94 },
+    },
+    ROTATION = { x = 0, y = 0, z = 0 }
+}
+
+local FACTION_TO_PLAY_BAG = 'Pick a Faction to Play'
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    self.addContextMenuItem('Pack boxes', packBoxes, false)
+    self.addContextMenuItem('Unpack boxes', unpackBoxes, false)
+end
+
+-------------------------------------------------------------------------------
+
+function getBoxesOnTable()
+    local result = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if BOX.BLUE_SPACE[name] or BOX.STANDARD[name] then
+            result[object.getName()] = object
+        end
+    end
+    return result
+end
+
+function takeBlueSpaceFactionTokensBag()
+    local entries = self.getObjects()
+    for i = #entries, 1, -1 do
+        entry = entries[i]
+        if entry.name == 'Faction Tokens' then
+            local position = self.getPosition()
+            local object = self.takeObject({
+                index = i - 1,
+                position = { x = position.x, y = position.y + 5, z = position.z },
+            })
+            object.setLock(true)
+            return object
+        end
+    end
+    error('no Blue Space faction tokens bag?')
+end
+
+function getPickFactionToPlayBag()
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == FACTION_TO_PLAY_BAG then
+            return object
+        end
+    end
+    error('no "' .. FACTION_TO_PLAY_BAG ..'" bag?')
+end
+
+function distance(a, b)
+    return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2 + (a.z - b.z) ^ 2)
+end
+
+-------------------------------------------------------------------------------
+
+function deleteBoxesFromTableThatAreAlsoInsideSelf(boxesOnTable)
+    for i, entry in ipairs(self.getObjects()) do
+        local object = boxesOnTable[entry.name]
+        if object then
+            destroyObject(object)
+            boxesOnTable[entry.name] = nil
+        end
+    end
+end
+
+function deleteTokensFromPickFactionBagThatAreAlsoInsideSelf(pickFactionToPlayBag, blueSpaceFactionTokensBag)
+    local unpackSet = {}
+    for _, entry in ipairs(blueSpaceFactionTokensBag.getObjects()) do
+        unpackSet[entry.name] = true
+    end
+    local entries = pickFactionToPlayBag.getObjects()
+    for i = #entries, 1, -1 do
+        local entry = entries[i]
+        if unpackSet[entry.name] then
+            local position = pickFactionToPlayBag.getPosition()
+            local object = pickFactionToPlayBag.takeObject({
+                index = i - 1,
+                position = { x = position.x, y = position.y + 2 + i, z = position.z },
+            })
+            destroyObject(object)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function unpackBoxesLuaCoroutine()
+    local boxesOnTable = getBoxesOnTable()
+    local pickFactionToPlayBag = getPickFactionToPlayBag()
+    local blueSpaceFactionTokensBag = takeBlueSpaceFactionTokensBag()
+
+    -- If any will-unpack objects are currently present on the table (or pick
+    -- a faction tokens bag), delete the on-table versions.
+    deleteBoxesFromTableThatAreAlsoInsideSelf(boxesOnTable)
+    deleteTokensFromPickFactionBagThatAreAlsoInsideSelf(pickFactionToPlayBag, blueSpaceFactionTokensBag)
+    coroutine.yield(0)
+
+    -- Move existing boxes to be above final positions, wait, then to final.
+    for name, object in pairs(boxesOnTable) do
+        local position = BOX.BLUE_SPACE[name] or BOX.STANDARD[name]
+        if distance(position, object.getPosition()) > 0.1 then
+            object.setPosition({ x = position.x, y = position.y + 5, z = position.z })
+            coroutine.yield(0)
+        end
+        object.setLock(true)
+    end
+    for name, object in pairs(boxesOnTable) do
+        local position = BOX.BLUE_SPACE[name] or BOX.STANDARD[name]
+        object.setLock(false)
+        if distance(position, object.getPosition()) > 0.1 then
+            object.setPosition(position)
+            coroutine.yield(0)
+        end
+    end
+
+    -- Unpack boxes.
+    local entries = self.getObjects()
+    for i = #entries, 1, -1 do
+        local entry = entries[i]
+        local position = BOX.BLUE_SPACE[entry.name]
+        if position then
+            self.takeObject({
+                index = i - 1,
+                position = position,
+                rotation = BOX.ROTATION,
+            })
+            coroutine.yield(0)
+        end
+    end
+
+    -- Unpack tokens.
+    local entries = blueSpaceFactionTokensBag.getObjects()
+    for i = #entries, 1, -1 do
+        local entry = entries[i]
+        local boxName = string.gsub(entry.name, 'Owner Token', 'Box')
+        if BOX.BLUE_SPACE[boxName] then
+            local position = blueSpaceFactionTokensBag.getPosition()
+            local object = blueSpaceFactionTokensBag.takeObject({
+                index = i - 1,
+                position = { x = position.x, y = position.y + 5 + i, z = position.z },
+            })
+            object.setLock(true)
+            coroutine.yield(0)
+
+            object.setLock(false)
+            pickFactionToPlayBag.putObject(object)
+            coroutine.yield(0)
+        end
+    end
+
+    pickFactionToPlayBag.shuffle()
+
+    -- Put faction token bag back.
+    blueSpaceFactionTokensBag.setLock(false)
+    self.putObject(blueSpaceFactionTokensBag)
+
+    return 1
+end
+
+function unpackBoxes()
+    startLuaCoroutine(self, 'unpackBoxesLuaCoroutine')
+end
+
+-------------------------------------------------------------------------------
+
+function packBoxesLuaCoroutine()
+    local boxesOnTable = getBoxesOnTable()
+    local pickFactionToPlayBag = getPickFactionToPlayBag()
+    local blueSpaceFactionTokensBag = takeBlueSpaceFactionTokensBag()
+
+    -- If any will-unpack objects are currently present on the table (or pick
+    -- a faction tokens bag), delete the on-table versions.
+    deleteBoxesFromTableThatAreAlsoInsideSelf(boxesOnTable)
+    deleteTokensFromPickFactionBagThatAreAlsoInsideSelf(pickFactionToPlayBag, blueSpaceFactionTokensBag)
+    coroutine.yield(0)
+
+    -- Pack boxes.
+    for name, object in pairs(boxesOnTable) do
+        if BOX.BLUE_SPACE[name] then
+            self.putObject(object)
+            coroutine.yield(0)
+        end
+    end
+
+    -- Pack faction tokens.
+    local entries = pickFactionToPlayBag.getObjects()
+    for i = #entries, 1, -1 do
+        local entry = entries[i]
+        local boxName = string.gsub(entry.name, 'Owner Token', 'Box')
+        if BOX.BLUE_SPACE[boxName] then
+            local position = pickFactionToPlayBag.getPosition()
+            local object = pickFactionToPlayBag.takeObject({
+                index = i - 1,
+                position = { x = position.x, y = position.y + 5 + i, z = position.z },
+            })
+            object.setLock(true)
+            coroutine.yield(0)
+
+            object.setLock(false)
+            blueSpaceFactionTokensBag.putObject(object)
+            coroutine.yield(0)
+        end
+    end
+
+    -- Put faction token bag back.
+    blueSpaceFactionTokensBag.setLock(false)
+    self.putObject(blueSpaceFactionTokensBag)
+
+    return 1
+end
+
+function packBoxes()
+    startLuaCoroutine(self, 'packBoxesLuaCoroutine')
+end

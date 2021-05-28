@@ -1,0 +1,704 @@
+--- Drop an object in a bag with this script to make an auto-decompress version.
+-- Compression adapted from https://github.com/Rochet2/lualzw/blob/master/lualzw.lua
+-- @author darrell
+
+-- Larger objects with repetitions do better.  Testing with an object JSON:
+-- 6321 -> 4379
+-- 136145 -> 57677
+-- 1100520 -> 172487 (84.3%)
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    if self.tag == 'BlockSquare' then
+        self.createButton({
+            click_function = '_decompress',
+            function_owner = self,
+            label          = 'Click to decompress',
+            position       = { x = 0, y = 1, z = 0 },
+            rotation       = { x = 0, y = 0, z = 0 },
+            scale          = { x = 1, y = 1, z = 1 },
+            width          = 200,
+            height         = 200,
+            font_size      = 20,
+            tooltip        = 'Click to replace this object with its compressed content, may take a moment'
+        })
+    end
+end
+
+--- Drop an object on a bag with this script to create an auto-decompress version.
+function tryObjectEnter(enterObject)
+    -- Drop the object's json in the processing queue.
+    local json = enterObject.getJSON()
+    table.insert(_makeAutoDeflateQueue, json)
+    startLuaCoroutine(self, '_makeAutoDeflateCoroutine')
+
+    -- Destroy original and reject insert.
+    enterObject.addTag('DELETED_ITEMS_IGNORE')
+    destroyObject(enterObject)
+    return false
+end
+
+-------------------------------------------------------------------------------
+
+_makeAutoDeflateQueue = {}
+function _makeAutoDeflateCoroutine()
+    local startTime = os.time()
+    local function log(message)
+        local timestamp = math.floor((os.time() - startTime) * 1000) / 1000
+        printToAll(timestamp .. ' MakeAutoDeflate: ' .. message, 'Orange')
+        for _ = 1, 3 do coroutine.yield(0) end -- make sure message appears
+    end
+    local function KB(byteCount)
+        return math.floor(byteCount * 10 / 1024) / 10
+    end
+    log('starting')
+
+    -- Get JSON string.
+    local json = table.remove(_makeAutoDeflateQueue)
+    assert(json and type(json) == 'string')
+    local srcLen = string.len(json)
+    log('|json| = ' .. KB(string.len(json)) .. ' KB')
+
+    -- Get object as data table (MUCH faster than JSON.decode).
+    log('Getting data...')
+    local tmpObject = spawnObjectJSON({
+        json              = json,
+        position          = self.getPosition() + vector(0, 5, 0),
+        sound             = false,
+        snap_to_grid      = false
+    })
+    assert(tmpObject)
+    local data = tmpObject.getData()
+    tmpObject.addTag('DELETED_ITEMS_IGNORE')
+    destroyObject(tmpObject)
+    coroutine.yield(0)
+
+    -- Use key/value encoder.
+    log('Encoding...')
+    local enc = DataEncoder.encode(data)
+    log('|enc|=' .. KB(string.len(enc)))
+
+    -- Verify decode.
+    log('Decoding...')
+    local data2 = DataEncoder.decode(enc)
+    log('done')
+    log('Verifying...')
+    local json1 = JSON.encode(data)
+    local json2 = JSON.encode(data2)
+    print('1 ' .. json1)
+    print('2 ' .. json2)
+    assert(json1 == json2)
+    log('done')
+    error('stop')
+
+
+    if false then
+        -- Truncate transform.{pos|rot}{X|Y|Z}
+        -- Working with JSON (JSON.decode) is SLOOOOW.  Instead, work with data.
+        -- (Seriously, 1.8 MB JSON takes 10 minutes to JSON.decode.)
+        local tmpObject = spawnObjectJSON({
+            json              = json,
+            position          = self.getPosition() + vector(0, 5, 0),
+            sound             = false,
+            snap_to_grid      = false
+        })
+        assert(tmpObject)
+        local data = tmpObject.getData()
+        tmpObject.addTag('DELETED_ITEMS_IGNORE')
+        destroyObject(tmpObject)
+        coroutine.yield(0)
+
+        local alignCount = 0
+        local function alignContents(contents)
+            assert(type(contents) == 'table')
+            assert(type(contents.GUID) == 'string')
+            for k, v in pairs(contents) do
+                if k == 'Transform' then
+                    alignCount = alignCount + 1
+                    for k2, v2 in pairs(v) do
+                        if string.match(k2, '^pos') then
+                            v[k2] = 0
+                        elseif string.match(k2, '^rot') then
+                            v[k2] = math.floor(v2 + 0.5)
+                        elseif string.match(k2, '^scale') then
+                            v[k2] = math.floor(v2 * 1000 + 0.5) / 1000
+                        end
+                    end
+                elseif k == 'ContainedObjects' then
+                    for _, containedObject in ipairs(v) do
+                        alignContents(containedObject)
+                    end
+                elseif k == 'ColorDiffuse' and contents.Name == 'Card' then
+                    for k2, v2 in pairs(v) do
+                        v[k2] = 1
+                    end
+                end
+            end
+        end
+        alignContents(data)
+        log('aligned ' .. alignCount .. ' transforms')
+        coroutine.yield(0)
+
+        -- Convert back to JSON.
+        local tmpObject = spawnObjectData({
+            data              = data,
+            position          = self.getPosition() + vector(0, 10, 0),
+            sound             = false,
+            snap_to_grid      = false
+        })
+        assert(tmpObject)
+        json = tmpObject.getJSON()
+        tmpObject.addTag('DELETED_ITEMS_IGNORE')
+        destroyObject(tmpObject)
+        coroutine.yield(0)
+
+        local truncateLen = string.len(json)
+        log('|truncatedJson| = ' .. KB(truncateLen) .. ' KB')
+    end
+
+    local compressed, error = LuaLZW.compress(json)
+    assert(compressed, error)
+    local dstLen = string.len(compressed)
+    log('|compressedJson| = ' .. KB(dstLen) .. ' KB')
+    log('saved ' .. (math.floor((srcLen - dstLen) * 1000) / (srcLen * 10)) .. '%')
+
+    local b64 = base64.encode(compressed)
+    local dstLen = string.len(b64)
+    log('|b64| = ' .. KB(dstLen) .. ' KB')
+    log('saved ' .. (math.floor((srcLen - dstLen) * 1000) / (srcLen * 10)) .. '%')
+
+    -- Verify decompress works before proceeding.
+    log('sanity checking base64 decode...')
+    assert(base64.decode(b64) == compressed, 'base64')
+    log('sanity checking decompress...')
+    assert(LuaLZW.decompress(compressed) == json, 'lzw')
+    log('decompress verified')
+
+    -- Create the "click to decompress" object.
+    local scale = 2
+    local newObject = spawnObject({
+        type              = 'BlockSquare',
+        position          = self.getPosition() + vector(5, 5, 0),
+        rotation          = { x = 0, y = 0, z = 0 },
+        scale             = { x = scale, y = scale, z = scale },
+        sound             = false,
+        snap_to_grid      = false,
+    })
+    newObject.use_grid = false
+    newObject.use_snap_points = false
+    newObject.use_hands = false
+    newObject.setLuaScript(self.getLuaScript())
+    newObject.script_state = b64
+
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function _decompress()
+    local json, error = LuaLZW.decompress(self.script_state)
+    assert(json, error)
+
+    spawnObjectJSON({
+        json              = json,
+        position          = self.getPosition() + vector(5, 5, 0),
+        rotation          = { x = 0, y = 0, z = 0 },
+        scale             = { x = 1, y = 1, z = 1 },
+        sound             = false,
+        snap_to_grid      = false
+    })
+
+    self.addTag('DELETED_ITEMS_IGNORE')
+    destroyObject(self)
+end
+
+-------------------------------------------------------------------------------
+
+LuaLZW = {
+    basedictcompress = {},
+    basedictdecompress = {},
+}
+
+function LuaLZW.init()
+    for i = 0, 255 do
+        local ic, iic = string.char(i), string.char(i, 0)
+        LuaLZW.basedictcompress[ic] = iic
+        LuaLZW.basedictdecompress[iic] = ic
+    end
+end
+
+function LuaLZW.dictAddA(str, dict, a, b)
+    if a >= 256 then
+        a, b = 0, b + 1
+        if b >= 256 then
+            dict = {}
+            b = 1
+        end
+    end
+    dict[str] = string.char(a, b)
+    a = a + 1
+    return dict, a, b
+end
+
+function LuaLZW.dictAddB(str, dict, a, b)
+    if a >= 256 then
+        a, b = 0, b + 1
+        if b >= 256 then
+            dict = {}
+            b = 1
+        end
+    end
+    dict[string.char(a, b)] = str
+    a = a + 1
+    return dict, a, b
+end
+
+function LuaLZW.compress(input)
+    LuaLZW.init()
+    if type(input) ~= "string" then
+        return nil, "string expected, got "..type(input)
+    end
+    local len = #input
+    if len <= 1 then
+        return "u"..input
+    end
+
+    local dict = {}
+    local a, b = 0, 1
+
+    local result = {"c"}
+    local resultlen = 1
+    local n = 2
+    local word = ""
+    for i = 1, len do
+        local c = string.sub(input, i, i)
+        local wc = word..c
+        if not (LuaLZW.basedictcompress[wc] or dict[wc]) then
+            local write = LuaLZW.basedictcompress[word] or dict[word]
+            if not write then
+                return nil, "algorithm error, could not fetch word"
+            end
+            result[n] = write
+            resultlen = resultlen + #write
+            n = n+1
+            if  len <= resultlen then
+                return "u"..input
+            end
+            dict, a, b = LuaLZW.dictAddA(wc, dict, a, b)
+            word = c
+        else
+            word = wc
+        end
+    end
+    result[n] = LuaLZW.basedictcompress[word] or dict[word]
+    resultlen = resultlen+#result[n]
+    n = n + 1
+    if  len <= resultlen then
+        return "u"..input
+    end
+    return table.concat(result)
+end
+
+function LuaLZW.decompress(input)
+    LuaLZW.init()
+    if type(input) ~= "string" then
+        return nil, "string expected, got "..type(input)
+    end
+
+    if #input < 1 then
+        return nil, "invalid input - not a compressed string"
+    end
+
+    local control = string.sub(input, 1, 1)
+    if control == "u" then
+        return string.sub(input, 2)
+    elseif control ~= "c" then
+        return nil, "invalid input - not a compressed string"
+    end
+    input = string.sub(input, 2)
+    local len = #input
+
+    if len < 2 then
+        return nil, "invalid input - not a compressed string"
+    end
+
+    local dict = {}
+    local a, b = 0, 1
+
+    local result = {}
+    local n = 1
+    local last = string.sub(input, 1, 2)
+    result[n] = LuaLZW.basedictdecompress[last] or dict[last]
+    n = n + 1
+    for i = 3, len, 2 do
+        local code = string.sub(input, i, i+1)
+        local lastStr = LuaLZW.basedictdecompress[last] or dict[last]
+        if not lastStr then
+            return nil, "could not find last from dict. Invalid input?"
+        end
+        local toAdd = LuaLZW.basedictdecompress[code] or dict[code]
+        if toAdd then
+            result[n] = toAdd
+            n = n+1
+            dict, a, b = LuaLZW.dictAddB(lastStr..string.sub(toAdd, 1, 1), dict, a, b)
+        else
+            local tmp = lastStr..string.sub(lastStr, 1, 1)
+            result[n] = tmp
+            n = n+1
+            dict, a, b = LuaLZW.dictAddB(tmp, dict, a, b)
+        end
+        last = code
+    end
+    return table.concat(result)
+end
+
+function LuaLZW._test()
+    local inputs = { 'foo', 'foo bar', 'foo bar baz', self.getJSON() }
+    for _, a in ipairs(inputs) do
+        print('LuaLZW testing')
+        local b = LuaLZW.compress(a)
+        local c = LuaLZW.decompress(b)
+        assert(a == c)
+        print(string.len(a) .. ' -> ' .. string.len(b))
+    end
+end
+
+-------------------------------------------------------------------------------
+
+-- https://stackoverflow.com/questions/34618946/lua-base64-encode/35303321
+base64 = {}
+
+function base64.encode(data)
+    local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+#'
+    return ((data:gsub('.', function(x)
+        local r,b='',x:byte()
+        for i=8,1,-1 do r=r..(b%2^i-b%2^(i-1)>0 and '1' or '0') end
+        return r;
+    end)..'0000'):gsub('%d%d%d?%d?%d?%d?', function(x)
+        if (#x < 6) then return '' end
+        local c=0
+        for i=1,6 do c=c+(x:sub(i,i)=='1' and 2^(6-i) or 0) end
+        return b:sub(c+1,c+1)
+    end)..({ '', '==', '=' })[#data%3+1])
+end
+
+function base64.decode(data)
+    local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+#'
+    data = string.gsub(data, '[^'..b..'=]', '')
+    return (data:gsub('.', function(x)
+        if (x == '=') then return '' end
+        local r,f='',(b:find(x)-1)
+        for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
+        return r;
+    end):gsub('%d%d%d?%d?%d?%d?%d?%d?', function(x)
+        if (#x ~= 8) then return '' end
+        local c=0
+        for i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end
+            return string.char(c)
+    end))
+end
+
+function base64._test()
+    local inputs = { '1', '12', '123', '1234', '12345', '123456', '1234567' }
+    for _, a in ipairs(inputs) do
+        print('LuaBase64 testing')
+        local b = base64.encode(a)
+        local c = base64.decode(b)
+        assert(a == c)
+        print(string.len(a) .. ' -> ' .. string.len(b))
+        print(b)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+-- The built-in JSON encoder only tolerates string keys, with quotes.  Use a
+-- tighter encoding of index-to-key and index-to-value.
+DataEncoder = {
+    INDEX_CHARS = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ',
+
+    -- Pack into list of encoded entries.
+    CTRL = {
+        OPEN_TABLE = '{',
+        CLOSE_TABLE = '}',
+        OPEN_LIST = '[',
+        CLOSE_LIST = ']',
+        ASSIGN = '=',
+        DELIM = ',',
+    },
+    _idxToKey = false,
+    _idxToValue = false,
+}
+
+function DataEncoder._idxToEnc(idx)
+    assert(type(idx) == 'number')
+    local result = ''
+    local n = string.len(DataEncoder.INDEX_CHARS)
+    while idx > 0 do
+        local i = (idx % n) + 1
+        local c = string.sub(DataEncoder.INDEX_CHARS, i, i)
+        result = c .. result
+        idx = math.floor(idx / n)
+    end
+    return result
+end
+
+function DataEncoder._encToIdx(enc)
+    assert(type(enc) == 'string')
+    local result = 0
+    local n = string.len(DataEncoder.INDEX_CHARS)
+    for i = 1, string.len(enc) do
+        local c = string.sub(enc, i, i)
+        local idx, _ = string.find(DataEncoder.INDEX_CHARS, c)
+        assert(idx, 'bad c "' .. c .. '"')
+        result = (result * n) + (idx - 1)
+    end
+    return result
+end
+
+function DataEncoder._buildIdxToX(data)
+    -- Count key and value frequencies.
+    local keyCount = {}
+    local valueCount = {}
+    local function buildCounts(tbl)
+        for k, v in pairs(tbl) do
+            keyCount[k] = (keyCount[k] or 0) + 1
+            if type(v) == 'table' then
+                buildCounts(v)
+            else
+                valueCount[v] = (valueCount[v] or 0) + 1
+            end
+        end
+    end
+    buildCounts(data)
+
+    -- Generate list of keys and values in decreasing frequency order.
+    local function idxToX(xToCount)
+        assert(type(xToCount) == 'table')
+        -- Create map from count to keys with that count, and list of unique counts.
+        local countToX = {}
+        local seen = {}
+        local counts = {}
+        for x, count in pairs(xToCount) do
+            countToX[count] = countToX[count] or {}
+            table.insert(countToX[count], x)
+            if not seen[count] then
+                seen[count] = true
+                table.insert(counts, count)
+            end
+        end
+        -- Create list of X in decreasing frequency order.
+        table.sort(counts, function(a, b) return a > b end)
+        local result = {}
+        for _, count in ipairs(counts) do
+            for _, x in pairs(countToX[count]) do
+                table.insert(result, x)
+            end
+        end
+        return result
+    end
+    DataEncoder._idxToKey = idxToX(keyCount)
+    DataEncoder._idxToValue = idxToX(valueCount)
+
+    -- Invert to map from key or value to key index.
+    local function invert(tbl)
+        local result = {}
+        local seen = {}
+        for k, v in pairs(tbl) do
+            assert(not seen[v])
+            seen[v] = true
+            result[v] = k
+        end
+        return result
+    end
+    DataEncoder._keyToIdx = invert(DataEncoder._idxToKey)
+    DataEncoder._valueToIdx = invert(DataEncoder._idxToValue)
+end
+
+function _isList(tbl)
+    return tbl[1] ~= nil -- TTS "tables" never have integer keys unless list
+end
+function _encodeList(tbl, result)
+    table.insert(result, DataEncoder.CTRL.OPEN_LIST)
+    local first = true
+    for _, v in ipairs(tbl) do
+        if first then
+            first = false
+        else
+            table.insert(result, DataEncoder.CTRL.DELIM)
+        end
+        if type(v) == 'table' then
+            if _isList(v) then
+                _encodeList(v, result)
+            else
+                _encodeTable(v, result)
+            end
+        else
+            local vIdx = assert(DataEncoder._valueToIdx[v])
+            table.insert(result, DataEncoder._idxToEnc(vIdx))
+        end
+    end
+    table.insert(result, DataEncoder.CTRL.CLOSE_LIST)
+end
+function _encodeTable(tbl, result)
+    table.insert(result, DataEncoder.CTRL.OPEN_TABLE)
+    local first = true
+    for k, v in pairs(tbl) do
+        if first then
+            first = false
+        else
+            table.insert(result, DataEncoder.CTRL.DELIM)
+        end
+        local kIdx = assert(DataEncoder._keyToIdx[k])
+        table.insert(result, DataEncoder._idxToEnc(kIdx))
+        table.insert(result, DataEncoder.CTRL.ASSIGN)
+        if type(v) == 'table' then
+            if _isList(v) then
+                _encodeList(v, result)
+            else
+                _encodeTable(v, result)
+            end
+        else
+            local vIdx = assert(DataEncoder._valueToIdx[v])
+            table.insert(result, DataEncoder._idxToEnc(vIdx))
+        end
+    end
+    table.insert(result, DataEncoder.CTRL.CLOSE_TABLE)
+end
+
+function DataEncoder.encode(data)
+    DataEncoder._buildIdxToX(data)
+
+    local result = {}
+    _encodeTable(data, result)
+    local enc = table.concat(result, '')
+
+    return JSON.encode({
+        k = assert(DataEncoder._idxToKey),
+        v = assert(DataEncoder._idxToValue),
+        s = enc
+    })
+end
+
+function DataEncoder.decode(json)
+    local tbl = JSON.decode(json)
+    DataEncoder._idxToKey = assert(tbl.k)
+    DataEncoder._idxToValue = assert(tbl.v)
+    local str = assert(tbl.s)
+
+    local strIdx = 1
+    local function _peekChar()
+        return string.sub(str, strIdx, strIdx)
+    end
+    local function _consumeChar()
+        strIdx = strIdx + 1
+    end
+
+    local function _readAndConsumeChar()
+        local result = _peekChar()
+        _consumeChar()
+        return result
+    end
+
+    -- Read a key, stopping at CTRL.ASSIGN.
+    local function _readAndConsumeKeyEnc()
+        local result = ''
+        while _peekChar() ~= DataEncoder.CTRL.ASSIGN do
+            local c = _readAndConsumeChar()
+            result = result .. c
+        end
+        return result
+    end
+
+    -- Read a value, stopping at CTRL.{DELIM, CLOSE_LIST, CLOSE_TABLE}.
+    local function _readAndConsumeValueEnc()
+        local result = ''
+        local stopSet = {
+            [DataEncoder.CTRL.DELIM] = true,
+            [DataEncoder.CTRL.CLOSE_LIST] = true,
+            [DataEncoder.CTRL.CLOSE_TABLE] = true,
+        }
+        while not stopSet[_peekChar()] do
+            local c = _readAndConsumeChar()
+            result = result .. c
+        end
+        return result
+    end
+
+    -- Read a list.
+    local function _readAndConsumeList()
+        assert(_readAndConsumeChar() == DataEncoder.CTRL.OPEN_LIST)
+        local result = {}
+        while _peekChar() ~= DataEncoder.CTRL.CLOSE_LIST do
+            local c = _peekChar()
+            local v = nil
+            if c == DataEncoder.CTRL.OPEN_LIST then
+                v = _readAndConsumeList()
+            elseif c == DataEncoder.CTRL.OPEN_TABLE then
+                v = _readAndConsumeTable()
+            else
+                local vEnc = _readAndConsumeValueEnc()
+                local vIdx = DataEncoder._encToIdx(vEnc)
+                v = assert(DataEncoder._idxToValue[vIdx])
+            end
+            assert(v ~= nil)
+
+            table.insert(result, v)
+            if _peekChar() == DataEncoder.CTRL.DELIM then
+                _readAndConsumeChar()
+            end
+        end
+        assert(_readAndConsumeChar() == DataEncoder.CTRL.CLOSE_LIST)
+        return result
+    end
+
+    -- Read a list, open has already been consumed.
+    local function _readAndConsumeTable()
+        assert(_readAndConsumeChar() == DataEncoder.CTRL.OPEN_TABLE)
+        local result = {}
+        while _peekChar() ~= DataEncoder.CTRL.CLOSE_TABLE do
+            -- Read key (consumes assign).
+            local kEnc = _readAndConsumeKeyEnc()
+            local kIdx = DataEncoder._encToIdx(kEnc)
+            local k = assert(DataEncoder._idxToKey[kIdx])
+
+            -- Read assign.
+            assert(_readAndConsumeChar() == DataEncoder.CTRL.ASSIGN)
+
+            -- Read value.
+            local c = _peekChar()
+            local v = nil
+            if c == DataEncoder.CTRL.OPEN_LIST then
+                v = _readAndConsumeList()
+            elseif c == DataEncoder.CTRL.OPEN_TABLE then
+                v = _readAndConsumeTable()
+            else
+                local vEnc = _readAndConsumeValueEnc()
+                local vIdx = DataEncoder._encToIdx(vEnc)
+                v = assert(DataEncoder._idxToValue[vIdx])
+            end
+            assert(v ~= nil)
+
+            result[k] = v
+
+            if _peekChar() == DataEncoder.CTRL.DELIM then
+                _readAndConsumeChar()
+            end
+        end
+        return result
+    end
+
+    return _readAndConsumeTable()
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

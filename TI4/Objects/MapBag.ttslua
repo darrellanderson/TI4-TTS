@@ -1,0 +1,65 @@
+--- Add "copy & return" buttons to map tiles when leaving this bag.
+-- Lets the script live here, map tiles only need the encoded map description.
+-- @author Darrell June 2020
+
+local config = {
+    button = {
+        name = 'Copy &\nReturn',
+        tooltip = 'Copy map string to map builder, return map tile to map bag.',
+    },
+    mapTool = 'TI4 Map Tool',
+}
+
+function onObjectLeaveContainer(container, object)
+    if container == self then
+
+        local transforms = {
+            {
+                position = { x = -0.84, y = 0.101, z = -0.88 },
+                rotation = { x = 0, y = 0, z = 0 }
+            },
+            {
+                position = { x = 0.84, y = -0.001, z = -0.88 },
+                rotation = { x = 0, y = 0, z = 180 }
+            },
+        }
+        for _, transform in ipairs(transforms) do
+            object.createButton({
+                click_function = 'onBuildMap',
+                function_owner = self,
+                label          = config.button.name,
+                position       = transform.position,
+                rotation       = transform.rotation,
+                width          = 150,
+                height         = 100,
+                font_size      = 30,
+                tooltip        = config.button.tooltip
+            })
+        end
+    end
+end
+
+function onObjectEnterContainer(container, object)
+    if container == self then
+        for _, button in ipairs(object.getButtons() or {}) do
+            if button.label == config.buttonName then
+                object.removeButton(button.index)
+            end
+        end
+    end
+end
+
+function onBuildMap(buttonContainer, clickerColor, altClick)
+    local mapString = buttonContainer.getDescription()
+
+    -- Copy map string to map tool input.
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == config.mapTool then
+            assert(object.getVar('setMapString'))
+            object.call('setMapString', mapString)
+        end
+    end
+
+    -- Put map tile (buttonContainer) back in map bag (self).
+    self.putObject(buttonContainer)
+end

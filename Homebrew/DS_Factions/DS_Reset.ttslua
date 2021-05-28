@@ -1,0 +1,395 @@
+----#include <~/CrLua/Kruft/ResetNameDescription>
+do
+local cards6a = {
+    "Solis Morden",
+    "Vera Khage",
+    "Auberon Elyrin",
+    "Aurora Stormcaller",
+    "Cordo Haved",
+    "President Cyhn",
+    "Count Otto P'may",
+    "Liberator",
+    "Vasra Ivo",
+    "Dume Tathu",
+    "Khaz-Rin Li-Zho",
+    "Oro-Zhin Elite",
+    "Udosh B'Rtul",
+    "Hkot Tokal",
+    "Vehl Tikar",
+    "Megalith",
+    "Skarvald & Torvar",
+    "Jarl Vel & Jarl Jotrun",
+    "Kantrus, The Lord",
+    "Jotun",
+    "Yudri Sukhov",
+    "Komdar Borodin",
+    "Putriv Sirvonsk",
+    "Collector",
+    "Walik",
+    "Komat",
+    "Bayan",
+    "Duuban",
+    "Clodho",
+    "Lachis",
+    "Atropha",
+    "Iledrith",
+    "Shipwright ZskNck",
+    "Designer TckVsk",
+    "Demi-Queen MdcKssK",
+    "Forgetender",
+    "Baggil Wildpaw",
+    "Knak Half-Ear",
+    "Pahn Silverfur",
+    "Exemplar",
+    "Lactarious Indigo",
+    "Amanita Muscaria",
+    "Coprinus Comatus",
+    "Amandia Pholdis",
+    "Davish S'norri",
+    "Fillipo Rois",
+    "Turra Sveyar",
+    "Daedalon",
+    " ",
+    " ",
+    " ",
+    " ",
+    "Korela, The Lady",
+    " ",
+    " ",
+    "end",
+}
+local cards6b = {
+    "Skhot Unit X-12",
+    "Koryl Ferax",
+    "The Voice United",
+    "Revenant",
+    "Rond Bri'Ay",
+    "B-Unit 205643a",
+    "Roh'Vhin Dhna MK4",
+    "Autofabricator",
+    "Zelian A",
+    "Zelian B",
+    "Zelian R",
+    "Collider",
+    "Yvin Korduul",
+    "Pyndil Gonsuul",
+    "Dyln Harthuul",
+    "Eclipse",
+    "Sal Gavda",
+    "Quaxdol Junitas",
+    "Banua Gowen",
+    "Privateer",
+    "Jgin Faru",
+    "Clona Bathru",
+    "Verrisus Ypru",
+    "Repairitor",
+    "George Nobin",
+    "Henry Storcher",
+    "Titus Flavius",
+    "Minuteman",
+    "Suldhan Wraeg",
+    "Thussad Krath",
+    "Krill Drakkon",
+    "Voidflare Warden I",
+    "Assault Machina",
+    "Logic Machina",
+    "Wrath Machina",
+    "Javelin",
+    "Queen Lucreia",
+    "Queen Lorena",
+    "Queen Nadalia",
+    "Justicar",
+    "Captain Dust",
+    "Kado S'Mah-Qar",
+    "Dorrahn Griphyn",
+    "Nightshade Vangaurd",
+    "Priestess Tuh",
+    "Bishop Ulin",
+    "Saint Binal",
+    "Templar",
+    " ",
+    " ",
+    " ",
+    " ",
+    " ",
+    " ",
+    " ",
+    "end",
+}
+local cards4 = {
+    "Rhune",
+    "Kroll",
+    "Cyrra",
+    "Idyn",
+    "Pax",
+    "Kyr",
+    "Vess",
+    "Bohl-Dhur",
+    "Drah",
+    "Tryyk",
+    "Vadarian",
+    "Norvus",
+    "Blaheo",
+    "Empero",
+    "Chiron",
+    "Demis",
+    "Axis",
+    "Sanctuary",
+    "Shi-Halaum",
+    "Discordia",
+    "Cymiae",
+    "Prind",
+    "Zelian",
+    "Gen",
+    "Vaylar",
+    "Delmor",
+    "Kyd",
+    "Abyssus",
+    "Louk",
+    "Auldane",
+    "Salle",
+    "Ellas",
+    "Aldra",
+    "Beata",
+    "Ogdun",
+    "Brthkul",
+    "Susuros",
+    "Poh",
+    "Orad",
+    " ",
+    " ",
+    " ",
+    " ",
+    " ",
+    "end",
+}
+local cards3 = {
+    "Branch Office - Tax Haven",
+    "Branch Office - Broadcast Hub",
+    "Branch Office - Reserve Bank",
+    "Branch Office - Orbital Shipyard",
+    "Broadcast Teams",
+    "Trusted Counselor",
+    "Stone Speakers",
+    "Raid Leaders",
+    "Vaden Handshake",
+    "Secrets of the Weave",
+    "Read the Fates",
+    "Industry Secrets",
+    "Incite Revolution",
+    "Gift of Insight",
+    "Plots Within Plots",
+    "Algorithmic Replication",
+    "Automatons",
+    "Hyperkinetic Ordinance",
+    "Clan's Favor",
+    "Underground Market",
+    "Combat Drills",
+    "Trade Alliance",
+    "Trade Alliance",
+    "Nivyn Guidance",
+    "Rapid Excavation",
+    "Blessing of the Queens",
+    "AI Survey",
+    "Favor of Rhodun",
+}
+local cards2 = {
+    "Lancer Dreadnought II",
+    "SEIDR Project",
+    "Envoy Network",
+    "Covert Strike Teams",
+    "Wraith Engine",
+    "Heavy Bomber II",
+    "Stone's Embrace",
+    "Shattered Sky II",
+    "War Song Implants",
+    "Combat Transport II",
+    "Midas Turbine",
+    "Krovoz Strike Teams",
+    "Fabrication Grid",
+    "Illusory Weave Array",
+    "Sentient Datapool",
+    "Psychographics",
+    "Holo-Market Delivery Relay",
+    "Emergency Deployment",
+    "Geosympathic Impeller",
+    "False Flag Operations",
+    "Psychoactive Armaments",
+    "Mycelium Ring II",
+    "Blockade Runner II",
+    "Daedalon Flight System",
+    "Recursive Worm",
+    "Unholy Abomination II",
+    "Terrafactory II",
+    "Contractual Maintenance",
+    "Shard Volley",
+    "Impactor II",
+    "Scavenger Exos",
+    "Raider II",
+    "Blackmail Programs",
+    "Corsair II",
+    "Impressment Programs",
+    "Aegis II",
+    "Emergency Mobilization",
+    "Trade Port II",
+    "Voidwake Missiles",
+    "Voidflare Warden II",
+    "Gauss Cannon II",
+    "Low-Orbit Engagement",
+    "Tempest Warheads",
+    "Deliverance Engine",
+    "Shrouded Skirmishers",
+    "Seeker Drones",
+    "Pilgrimage Beacons",
+    "Sanctification Field",
+}
+
+
+local _cardNames6a = {}
+local _cardNames6b = {}
+local _cardNames4 = {}
+local _cardNames3 = {}
+local _cardNames2 = {}
+
+function onLoad(saveState)
+
+    -- Add card names in deck image order.
+    for _, name in ipairs(cards6a) do
+        table.insert(_cardNames6a, name)
+    end
+    for _, name in ipairs(cards6b) do
+        table.insert(_cardNames6b, name)
+    end
+    for _, name in ipairs(cards4) do
+        table.insert(_cardNames4, name)
+    end
+    for _, name in ipairs(cards3) do
+        table.insert(_cardNames3, name)
+    end
+    for _, name in ipairs(cards2) do
+        table.insert(_cardNames2, name)
+    end
+
+    self.createButton({
+        click_function = 'doReset',
+        function_owner = self,
+        label          = 'RESET',
+        position       = { x = 0, y = 0.51, z = 0 },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = { x = 1, y = 1, z = 1},
+        width          = 400,
+        height         = 200,
+        font_size      = 80,
+    })
+end
+
+function doReset()
+    local deck6a = false
+    local deck6b = false
+    local deck4 = false
+    local deck3 = false
+    local deck2 = false
+-- 6.1
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Deck' and object.getName() == 'RESET 6a' then
+            deck = object
+        end
+    end
+    if not deck then
+        error('did not find "RESET 6a"')
+    end
+    if deck.getQuantity() ~= #_cardNames6a then
+        error('deck must have ' .. (#_cardNames6a) .. ' cards')
+    end
+    local pos = deck.getPosition()
+    for i = 1, deck.getQuantity() do
+        local name = _cardNames6a[ (#_cardNames6a + 1) - i ]
+        local card = deck.remainder or deck.takeObject({
+            position = { x = pos.x, y = pos.y + 5 + i + 1, z = pos.z },
+        })
+        card.setName(name)
+    end
+-- 6.2
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Deck' and object.getName() == 'RESET 6b' then
+            deck = object
+        end
+    end
+    if not deck then
+        error('did not find "RESET 6b"')
+    end
+    if deck.getQuantity() ~= #_cardNames6b then
+        error('deck must have ' .. (#_cardNames6b) .. ' cards')
+    end
+    local pos = deck.getPosition()
+    for i = 1, deck.getQuantity() do
+        local name = _cardNames6b[ (#_cardNames6b + 1) - i ]
+        local card = deck.remainder or deck.takeObject({
+            position = { x = pos.x, y = pos.y + 5 + i + 1, z = pos.z },
+        })
+        card.setName(name)
+    end
+-- 4
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Deck' and object.getName() == 'RESET 4' then
+            deck = object
+        end
+    end
+    if not deck then
+        error('did not find "RESET 4"')
+    end
+    if deck.getQuantity() ~= #_cardNames4 then
+        error('deck must have ' .. (#_cardNames4) .. ' cards')
+    end
+    local pos = deck.getPosition()
+    for i = 1, deck.getQuantity() do
+        local name = _cardNames4[ (#_cardNames4 + 1) - i ]
+        local card = deck.remainder or deck.takeObject({
+            position = { x = pos.x, y = pos.y + 5 + i + 1, z = pos.z },
+        })
+        card.setName(name)
+    end
+-- 3
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Deck' and object.getName() == 'RESET 3' then
+            deck = object
+        end
+    end
+    if not deck then
+        error('did not find "RESET 3"')
+    end
+    if deck.getQuantity() ~= #_cardNames3 then
+        error('deck must have ' .. (#_cardNames3) .. ' cards')
+    end
+    local pos = deck.getPosition()
+    for i = 1, deck.getQuantity() do
+        local name = _cardNames3[ (#_cardNames3 + 1) - i ]
+        local card = deck.remainder or deck.takeObject({
+            position = { x = pos.x, y = pos.y + 5 + i + 1, z = pos.z },
+        })
+        card.setName(name)
+    end
+-- 2
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Deck' and object.getName() == 'RESET 2' then
+            deck = object
+        end
+    end
+    if not deck then
+        error('did not find "RESET 2"')
+    end
+    if deck.getQuantity() ~= #_cardNames2 then
+        error('deck must have ' .. (#_cardNames2) .. ' cards')
+    end
+    local pos = deck.getPosition()
+    for i = 1, deck.getQuantity() do
+        local name = _cardNames2[ (#_cardNames2 + 1) - i ]
+        local card = deck.remainder or deck.takeObject({
+            position = { x = pos.x, y = pos.y + 5 + i + 1, z = pos.z },
+        })
+        card.setName(name)
+    end
+end
+
+end
+----#include <~/CrLua/Kruft/ResetNameDescription>

@@ -1,0 +1,376 @@
+--- Reset command and owner tokens to use ThatRobHuman's new mesh / UV map.
+-- @author darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+
+local IMAGE = {
+    ['Arborec'] = 'Arborec',
+    ['Barony of Letnev'] = 'Letnev',
+    ['Clan of Saar'] = 'Saar',
+    ['Embers of Muaat'] = 'Muaat',
+    ['Emirates of Hacan'] = 'Hacan',
+    ['Federation of Sol'] = 'Sol',
+    ['Ghosts of Creuss'] = 'Creuss',
+    ['L1Z1X Mindnet'] = 'L1Z1X',
+    ['Mentak Coalition'] = 'Mentak',
+    ['Naalu Collective'] = 'Naalu',
+    ['Nekro Virus'] = 'Nekro',
+    ["Sardakk N'orr"] = 'Sardakk',
+    ['Universities of Jol-Nar'] = 'JolNar',
+    ['Winnu'] = 'Winnu',
+    ['Xxcha Kingdom'] = 'Xxcha',
+    ['Yin Brotherhood'] = 'Yin',
+    ['Yssaril Tribes'] = 'Yssaril',
+}
+
+local ORIGINALS = {
+    ["Advent Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507713662/B6451AD37B1960EDC35B945BA48B8AE03456D81D",
+    ["Advent Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507713172/1993FD0E09D628FBA3BE140FD6849F3BE6723B29",
+    ["Arborec Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986795/C5EE483483A7428E788B55E247AB55E5ECAD2AFF",
+    ["Arborec Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986753/FA0EA5CC974BE28F7FDB892F27022CD4ED5D0541",
+    ["Barony of Letnev Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986611/269BD6181345801DAE5811AD5E6843FEFA533382",
+    ["Barony of Letnev Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986649/1E86A9BBD958A2F751A961B5C0AEF7C3D8874259",
+    ["Clan of Saar Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986346/DA501B1053817B82B981F2D883F2D9A247317270",
+    ["Clan of Saar Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986310/FAA27BF711E89DFAF609B67149CAB3DD9F7B65BD",
+    ["Drahn Consortium Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507698236/3317875B893B8E35908A275CEFE62C4A07E975C6",
+    ["Drahn Consortium Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507697693/11DE766426A8243EC1BF4738E50038B052C1BD0E",
+    ["Embers of Muaat Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986157/2BE85534D3D046836E0275CC54B21CAC103F9F7A",
+    ["Embers of Muaat Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986192/117AF7D590BF8410FC3E5262D10A0012D1DCDD34",
+    ["Emirates of Hacan Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986228/35A0B485F3199B11C080CC72EDBF5DD99E735ACA",
+    ["Emirates of Hacan Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986275/D0D6CB4FF10926C505160E52E05BA0ABC3FAD3C8",
+    ["Federation of Sol Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986573/79618669F6B52C6D801B06CA52C84E23D94FE3E6",
+    ["Federation of Sol Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986537/7E0C20E2BADD7AC23865413D74408C40B5FBEB32",
+    ["Free Systems Alliance Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507705978/4D2254BE35A5DDC81A1AA7AD495F36D161E1772F",
+    ["Free Systems Alliance Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507706600/7A86D4D876C1E368927E434E10EB4B3950E85190",
+    ["Fremen Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507703776/3897A49EAC2E824658ABDF4C6750DB0B32A29FFB",
+    ["Fremen Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507703216/7BD6D73D81B13CFD7255CADC9D3B3818C272032E",
+    ["Gheldor Authority Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949738075012615/6DCC4FABE8F71CDBE675FD6792C93B88AEEF09AA",
+    ["Gheldor Authority Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949738075016348/5BDC31828A09634BD908E8C2C277C50FB095B787",
+    ["Ghosts of Creuss Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986686/3DA3AE2D568C5162C3C866FF993ACA46797FBA2A",
+    ["Ghosts of Creuss Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986719/A732DE0620F610818D7ADDB46C67E6AC6FB25104",
+    ["HCEN Defense System Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949738075041071/912403EA902E7AAABF99C8B1849AE72764065C63",
+    ["HCEN Defense System Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949738075041772/080FC5F503A7977625A4E4E9FA9B51A88627CFF7",
+    ["Khet Drakkol Union Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507704988/085225282DB5C83C61ECA14AFC7C048E4F7F91F2",
+    ["Khet Drakkol Union Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507701346/45A5FB3DD0D46C207233937DE52EDA9421F2D4C2",
+    ["Kortali Horde Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507710934/E8E7F7EFF585C1643B0E9BF505698248638A3C48",
+    ["Kortali Horde Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507710335/026C09C008852C0C49E10E04167C85DA65CD982B",
+    ["L1Z1X Mindnet Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986000/699AC20FE8DD3CA1C77CC248EA89B0C64939D78E",
+    ["L1Z1X Mindnet Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986036/2F9FF778A5482FBA2C44B9A95C56349C8715EB27",
+    ["Lazax Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507700565/506C103F01C9CF99138D643CB91A19F63444A5C7",
+    ["Lazax Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507702187/9080DB8913BFE6F84A3F6D9C22AADDB7E9AD5D69",
+    ["Mahact Sorcerer Kings Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507708044/D1CCA483D42C6437F982912F8CAAC0A365BEB6CA",
+    ["Mahact Sorcerer Kings Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507707311/78162CC528D7EE983962D265FE82AD85421893E3",
+    ["Mandalorian Clans Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507716690/80EEE5EBADE482C221BDEC1A4CA835F1D0A96BDF",
+    ["Mandalorian Clans Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949183705114850/19E6668A0BC7DC574045E11C34296F04F3FA82D4",
+    ["Mentak Coalition Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739985966/7195F0358F4EEE8877865F38660E1B52C6AC7341",
+    ["Mentak Coalition Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739985929/AC6D19A6C34724AC4546144CFA5D4D958F646D2C",
+    ["Naalu Collective Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986391/2E8C154F7A8007400A3C38EC87A83E46FAB63677",
+    ["Naalu Collective Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986427/0C0503C52ED44A126759FFB42EF4D203358C3B03",
+    ["Navigators' Guild Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507699864/EE33A9CCF00CBF6284BE58EAA695389DE134CFAB",
+    ["Navigators' Guild Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507699117/18CF751253449DA41C98B5CA6448886D19264603",
+    ["Nekro Virus Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986116/408B27BBC4317CE1D7CA40DE27CDB6E355D86F7A",
+    ["Nekro Virus Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986081/0E29BAA36DE551B7B4E3E827A93B4C2254C0F709",
+    ["Rhodyn Migrant Fleet Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949738075145827/DA6895EB8664F00E2C249CA52B584ABAA8CAB11A",
+    ["Rhodyn Migrant Fleet Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949738075146593/35D1FC26A2D7E86061F096A4F10DC207588253E4",
+    ["Sardakk N'orr Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986503/6B84F9C600BBEB419747DC4B4FA0DC9431187F38",
+    ["Sardakk N'orr Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986462/D4F9572175CCFF1F2A8AA2EFCB1137E6CFA216F0",
+    ["Savages of Cymiae Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949183705047431/675B1563E550F7922FB98CE41A7A65EDE7D02FB6",
+    ["Savages of Cymiae Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949183705046528/74256CCF561257818AB53A8CE23E28BC84EE5FB5",
+    ["Trader Emergency Coalition Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507712430/7AEFA3E53E6BFD8D242B7CA083B4C3F046A9371B",
+    ["Trader Emergency Coalition Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507711869/F3DD3DA6F8C8A2F80430C8BAAEE538CB9893D35F",
+    ["Universities of Jol-Nar Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986867/B4B3A332DA78538D402DC86322B8842488928747",
+    ["Universities of Jol-Nar Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739986837/5BC6D166E5500D2AC3C6083C341953B8341B18BB",
+    ["Vasari Empire Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507715122/8CDE869C14F9A519A95093EDFE2B66C3115D6A9E",
+    ["Vasari Empire Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507714542/4CD72BE139B0901A5108FFBBEAD7B0E3D4FC4BE4",
+    ["Veldyr Sovereignty Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507695650/59A3233FEE9C29833F7D47D4E2FCE5AE917DFD37",
+    ["Veldyr Sovereignty Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949075507696470/8D6C02132029BA9840D54B755D57DDA15B33DE50",
+    ["Winnu Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739985762/2023FD582E1941937E7A93659426C2B73B6A9E05",
+    ["Winnu Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739985807/2444114794984F1D30B04D3E42A85B29254D3F1E",
+    ["Xxcha Kingdom Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739985607/F4F5F2970A5A02BD8881AF6B72D97D59D6944557",
+    ["Xxcha Kingdom Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739985531/9A6950B20C7ABE7461F3F6E8DF54B02BAC6CE7B7",
+    ["Yin Brotherhood Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739985652/95EF11FCB28C5938DE9BB9ED1FE58F073B5EA2F3",
+    ["Yin Brotherhood Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739985727/D959CAD1CF15C58C7295711B83E26F3B2EC9AD6B",
+    ["Yssaril Tribes Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739985851/FB0D800B84D55EE06B8EEDE0E111426DE05491B3",
+    ["Yssaril Tribes Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1495712136739985892/6117C0803089DDA5561B0E6ADDFE33A4F81F85BD",
+    ["Zeth Contingency Command Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949738075227454/7061590EB6A43BEF7EB1C22C090E82645B7A203A",
+    ["Zeth Contingency Owner Token"] = "http://cloud-3.steamusercontent.com/ugc/1023949738075228338/B692C120A4ABBABC6FD46D1474B41BF661BBCDC6",
+}
+
+local COMMAND_TOKEN = {
+    SCALE = { x = 1.35, y = 1, z = 1.35 },
+    MODEL = 'file:////Users/darrell/Downloads/tokens/command-semitintable.obj',
+    COLLIDER = 'file:////Users/darrell/Downloads/tokens/command-tintable.obj',
+    IMAGE_PREFIX = 'file:////Users/darrell/Downloads/x3n_CCs/x3n_CC_',
+    IMAGE_SUFFIX = '.jpg',
+}
+
+local OWNER_TOKEN = {
+    SCALE = { x = 1.4, y = 1, z = 1.4 },
+    MODEL = 'file:////Users/darrell/Downloads/tokens/owner-semitintable.obj',
+    COLLIDER = 'file:////Users/darrell/Downloads/tokens/owner-tintable.obj',
+    IMAGE_PREFIX = 'file:////Users/darrell/Downloads/x3n_CCs/x3n_CC_',
+    IMAGE_SUFFIX = '.jpg',
+}
+
+local _tileGuidToContainers = false
+local _deletedItems = false
+local _deletePendingSet = {}
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    _deletedItems = getObjectByName('Bag', 'TI4 Deleted Items')
+    self.addContextMenuItem('Mutate', mutate)
+end
+
+function onObjectDestroy(dyingObject)
+    _deletePendingSet[dyingObject.getGUID()] = nil
+end
+
+function getObjectByName(tag, name)
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == tag and object.getName() == name then
+            return object
+        end
+    end
+    error('getObjectByName: missing "' .. name .. '"')
+end
+
+-------------------------------------------------------------------------------
+
+function mutate()
+    startLuaCoroutine(self, 'mutateCoroutine')
+end
+
+local function mutateJson(json, image, rule)
+    assert(type(json) == 'string' and type(rule) == 'table')
+    json = JSON.decode(json)
+
+    json.Transform.scaleX = rule.SCALE.x
+    json.Transform.scaleY = rule.SCALE.y
+    json.Transform.scaleZ = rule.SCALE.z
+
+    json.CustomMesh.MeshURL = rule.MODEL
+    json.CustomMesh.ColliderURL = rule.COLLIDER
+
+    local diffuseUrl = false
+    if type(image) == 'string' then
+        diffuseUrl = rule.IMAGE_PREFIX .. image .. rule.IMAGE_SUFFIX
+    else
+        local cmd = assert(image.Command) .. '/'
+        local own = assert(image.Owner) .. '/'
+        diffuseUrl = 'http://localhost:8080/mutatefaction?command=' .. cmd .. '&owner=' .. own
+    end
+    json.CustomMesh.DiffuseURL = assert(diffuseUrl)
+
+    return JSON.encode_pretty(json)
+end
+
+local function mutateObject(object, image, rule, isFirst)
+    assert(type(object) == 'userdata' and type(rule) == 'table')
+    print('mutating ' .. object.getName())
+
+    local guid = object.getGUID()
+    local json = object.getJSON()
+    local originalLock = object.getLock() or false
+
+    json = mutateJson(json, image, rule)
+    local spawnParams = {
+        json              = json,
+        position          = object.getPosition(),
+        rotation          = object.getRotation(),
+        scale             = rule.SCALE,
+        callback_function = nil,
+        sound             = false,
+        params            = nil,
+        snap_to_grid      = object.use_grid
+    }
+
+    -- Delete object, wait for delete to actually happen before reusing guid!
+    if _deletedItems then
+        _deletedItems.call('ignoreGuid', guid)
+    end
+    _deletePendingSet[guid] = true
+    destroyObject(object)
+    object = nil
+    while _deletePendingSet[guid] do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    local object = spawnObjectJSON(spawnParams)
+    assert(object.getGUID() == guid)
+
+    -- Wait for spawn, plus extra time for texture to load.
+    object.setLock(true)
+    while object.spawning do
+        coroutine.yield(0)
+    end
+    local waitUntil = 0.2
+    if isFirst then
+        waitUntil = type(image) == 'string' and 3 or 5
+    end
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+    object.setLock(originalLock)
+
+    return object
+end
+
+function mutateCoroutine()
+    local function takeByName(bag, name)
+        local p = bag.getPosition()
+        for _, entry in ipairs(bag.getObjects()) do
+            if entry.name == name then
+                return bag.takeObject({
+                    guid = entry.guid,
+                    position = { x = p.x, y = p.y + 5, z = p.z },
+                    smooth = false
+                })
+            end
+        end
+        error('missing ' .. bag.getName() .. '/' .. name)
+    end
+
+    local tokenNameToOriginals = {}
+    for k, v in pairs(ORIGINALS) do
+        local tokenName, tokenType = string.match(k, '^(.*) (.*) Token$')
+        if tokenType then
+            local entry = tokenNameToOriginals[tokenName]
+            if not entry then
+                entry = {}
+                tokenNameToOriginals[tokenName] = entry
+            end
+            entry[tokenType] = v
+        end
+    end
+
+    --local factionsBox = assert(getObjectByName('Bag', 'Factions'))
+    --local factionsBox = assert(getObjectByName('Bag', 'Faction Sheets/Tokens'))
+    local factionsBox = assert(getObjectByName('Bag', 'Blue Space Faction Pack'))
+    local p = factionsBox.getPosition()
+    for _, entry in ipairs(factionsBox.getObjects()) do
+        local tokenName = string.match(entry.name, '^(.*) Box$')
+        local image = tokenName and IMAGE[tokenName] or tokenNameToOriginals[tokenName]
+        if image then
+            local box = factionsBox.takeObject({
+                guid = entry.guid,
+                position = { x = p.x, y = p.y + 5, z = p.z },
+                smooth = false
+            })
+            box.setLock(true)
+            while box.spawning do coroutine.yield(0) end
+            coroutine.yield(0)
+            coroutine.yield(0)
+
+            ---------------------------
+
+            local commandTokens = takeByName(box, tokenName .. ' Command Tokens Bag')
+            assert(commandTokens.tag == 'Bag')
+            commandTokens.setLock(true)
+            while commandTokens.spawning do coroutine.yield(0) end
+            coroutine.yield(0)
+            coroutine.yield(0)
+
+            for i, tokenEntry in ipairs(commandTokens.getObjects()) do
+                local token = commandTokens.takeObject({
+                    guid = tokenEntry.guid,
+                    position = { x = p.x, y = p.y + 15, z = p.z },
+                    smooth = false
+                })
+                token.setLock(true)
+                while token.spawning do coroutine.yield(0) end
+                coroutine.yield(0)
+                coroutine.yield(0)
+
+                token = mutateObject(token, image, COMMAND_TOKEN, i == 1)
+                coroutine.yield(0)
+                coroutine.yield(0)
+
+                token.setLock(false)
+                commandTokens.putObject(token)
+                coroutine.yield(0)
+                coroutine.yield(0)
+            end
+
+            commandTokens.setLock(false)
+            box.putObject(commandTokens)
+            coroutine.yield(0)
+            coroutine.yield(0)
+
+            ---------------------------
+
+            local ownerTokens = takeByName(box, tokenName .. ' Owner Tokens Bag')
+            assert(ownerTokens.tag == 'Infinite')
+            ownerTokens.setLock(true)
+            while ownerTokens.spawning do coroutine.yield(0) end
+            coroutine.yield(0)
+            coroutine.yield(0)
+
+            local token = ownerTokens.takeObject({
+                position = { x = p.x, y = p.y + 15, z = p.z },
+                smooth = false
+            })
+            token.setLock(true)
+            while token.spawning do coroutine.yield(0) end
+            coroutine.yield(0)
+            coroutine.yield(0)
+
+            token = mutateObject(token, image, OWNER_TOKEN, true)
+            coroutine.yield(0)
+            coroutine.yield(0)
+
+            ownerTokens.reset()
+            coroutine.yield(0)
+            coroutine.yield(0)
+
+            token.setLock(false)
+            ownerTokens.putObject(token)
+            coroutine.yield(0)
+            coroutine.yield(0)
+
+            ownerTokens.setLock(false)
+            box.putObject(ownerTokens)
+            coroutine.yield(0)
+            coroutine.yield(0)
+
+            ---------------------------
+
+            box.setLock(false)
+            factionsBox.putObject(box)
+            coroutine.yield(0)
+            coroutine.yield(0)
+        end
+    end
+
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

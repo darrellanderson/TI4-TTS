@@ -1,0 +1,954 @@
+-- ############################################################################
+-- #### START #include <~/CrLua/Objects/TI4_Builders/TI4_DeckBuilder>
+-- ############################################################################
+
+--- Generate a fresh action card deck.
+-- @author Darrell
+
+local TAG = 'TI4_DeckBuilder'
+
+function onLoad(save_state)
+    print(TAG .. ' onLoad')
+    CrLua.Log.setLogLevel(CrLua.Log.LOG_LEVEL.INFO)
+    self.addContextMenuItem('Action Deck', buildActionDeck)
+    self.addContextMenuItem('Agenda Deck', buildAgendaDeck)
+    self.addContextMenuItem('Promissory Deck', buildPromissoryDeck)
+    self.addContextMenuItem('Secrets Deck', buildSecretsDeck)
+    self.addContextMenuItem('Stage1 Deck', buildStage1Deck)
+    self.addContextMenuItem('Stage2 Deck', buildStage2Deck)
+end
+
+-------------------------------------------------------------------------------
+
+local function getCell(sheet, cell)
+    assert(type(sheet) == 'string' and type(cell) == 'string')
+    CrLua.Log.i(TAG, 'getCell ' .. cell)
+    local result = false
+
+    local label = 'deck builder'
+    local id = '1yP1qYxSySbhDDMmHi1C_BeL93LtHaUtDWMvBJLOpkZs'
+    local sheet = sheet
+    local cell = cell
+    local function callback(cellValue)
+        result = cellValue
+    end
+    CrLua.TTS.Spreadsheet.get(label, id, sheet, cell, callback)
+
+    while not result do
+        coroutine.yield(0)
+    end
+    return result
+end
+
+local function getCol(sheet, col, row, minCount)
+    assert(type(sheet) == 'string' and type(col) == 'string' and type(row) == 'number')
+    local result = {}
+    while true do
+        local cell = getCell(sheet, col .. row)
+        if string.len(cell) == 0 and ((not minCount) or #result > minCount) then
+            return result
+        end
+        table.insert(result, cell)
+        row = row + 1
+    end
+end
+
+local function getCards(sheet, namesCol, descriptionCol, imagesCol)
+    assert(type(sheet) == 'string' and type(namesCol) == 'string' and type(imagesCol) == 'string')
+    local startRow = 2
+    local names = getCol(sheet, namesCol, startRow)
+    local descriptions = descriptionCol and getCol(sheet, descriptionCol, startRow, #names)
+    local images = getCol(sheet, imagesCol, startRow)
+
+    local result = {}
+    for i = 1, math.min(#names, #images) do
+        table.insert(result, {
+            name = names[i],
+            description = descriptions and descriptions[i],
+            img = images[i]
+        })
+    end
+
+    table.sort(result, function(a, b) return a.name < b.name end)
+
+    return result
+end
+
+local function buildSheet(cards, back, file)
+    assert(type(cards) == 'table' and type(back) == 'string' and type(file) == 'string')
+    local url = table.concat({
+        'http://localhost:8080/cardsheet',
+        '?cardw=500',
+        '&cardh=750',
+        '&back=' .. back,
+        '&file=' .. file,
+    }, '')
+
+    local result = false
+    local function callback(data)
+        result = data.is_done
+    end
+    WebRequest.post(url, JSON.encode(cards), callback)
+
+    while not result do
+        coroutine.yield(0)
+    end
+end
+
+local function spawnDeck(deckName, cards, cardSheetUrl, backUrl)
+    assert(type(deckName) == 'string' and type(cards) == 'table' and type(cardSheetUrl) == 'string' and type(backUrl) == 'string')
+
+    local params = {
+        face = cardSheetUrl,
+        back = backUrl,
+        unique_back = false,
+        width = 8,
+        height = math.max(2, math.ceil(#cards / 8)),
+        number = math.max(#cards, 3),  -- min 3 for deck handling
+    }
+    if #cards % 8 == 0 then
+        local minHeight = math.floor(#cards / 8) + 1
+        params.height = math.max(minHeight, params.height)
+    end
+    local deck = spawnObject({
+        type              = 'DeckCustom',
+        position          = { x = 0, y = 1, z = 0 },
+        rotation          = { x = 0, y = 0, z = 0 },
+        sound             = false,
+        params            = params,
+        snap_to_grid      = false,
+    })
+    deck.use_grid = false
+    deck.setCustomObject(params)
+    deck.setName(deckName)
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    local p = deck.getPosition()
+    for i, entry in ipairs(deck.getObjects()) do
+        local card = deck.remainder or deck.takeObject({
+            guid = entry.guid,
+            position = { x = p.x, y = p.y + 2 + i * 0.2, z = p.z },
+            smooth = false
+        })
+        card.use_grid = false
+        if i <= #cards then
+            card.setName(cards[i].name)
+            if cards[i].description then
+                card.setDescription(cards[i].description)
+            end
+        end
+        coroutine.yield(0)
+        coroutine.yield(0)
+        coroutine.yield(0)
+
+        deck.putObject(card)
+        coroutine.yield(0)
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+
+    local waitUntil = Time.time + 2
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+
+    -- Move to final position.
+    deck.setPosition({ x = 3, y = 5, z = 0 })
+
+    -- Remove any extra cards.
+    while deck.getQuantity() > #cards do
+        local card = deck.takeObject({
+            top = true
+        })
+        destroyObject(card)
+        coroutine.yield(0)
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+
+    local waitUntil = Time.time + 1
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+    return deck
+end
+
+-------------------------------------------------------------------------------
+
+local function buildDeck(deckName, cards, back)
+    assert(type(deckName) == 'string' and type(cards) == 'table' and type(back) == 'string')
+    print('#cards = ' .. (#cards))
+
+    print('cards[1] = {')
+    for k, v in pairs(cards[1]) do
+        print('   ' .. k .. ' = ' .. tostring(v))
+    end
+    print('}')
+
+    -- Break cards into max 39 entry sets.
+    local decks = {{}}
+    for _, card in ipairs(cards) do
+        local deck = decks[#decks]
+        if #deck == 39 then
+            deck = {}
+            table.insert(decks, deck)
+        end
+        table.insert(deck, card)
+    end
+    print('#decks = ' .. #decks)
+
+    local firstDeckObject = false
+    for i, cards in ipairs(decks) do
+        local file = '/tmp/t.decks/t_' .. deckName .. '_' .. i .. '.jpg'
+        buildSheet(cards, back, file)
+
+        local frontUrl = 'localhost:8080/proxy?file=' .. file
+        local backUrl = 'localhost:8080/proxy?file=' .. back
+        local deckObject = spawnDeck(deckName, cards, frontUrl, backUrl)
+        firstDeckObject = firstDeckObject or deckObject
+    end
+    return firstDeckObject
+end
+
+-------------------------------------------------------------------------------
+
+function buildActionDeck()
+    startLuaCoroutine(self, 'buildActionDeckCoroutine')
+end
+
+function buildActionDeckCoroutine()
+    local cards = getCards('Actions', 'A', 'B', 'H')
+    local back = '/tmp/t.decks/Action_Back.jpg'
+    buildDeck('Actions', cards, back)
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function buildAgendaDeck()
+    startLuaCoroutine(self, 'buildAgendaDeckCoroutine')
+end
+
+function buildAgendaDeckCoroutine()
+    local cards = getCards('Agenda', 'A', false, 'G')
+    local back = '/tmp/t.decks/Agenda_Back.jpg'
+    buildDeck('Agenda', cards, back)
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function buildSecretsDeck()
+    startLuaCoroutine(self, 'buildSecretsDeckCoroutine')
+end
+
+function buildSecretsDeckCoroutine()
+    local cards = getCards('Secrets', 'A', false, 'E')
+    local back = '/tmp/t.decks/SecretObjective_Back.jpg'
+    buildDeck('Secret Objectives', cards, back)
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function buildStage1Deck()
+    startLuaCoroutine(self, 'buildStage1DeckCoroutine')
+end
+
+function buildStage1DeckCoroutine()
+    local cards = getCards('Public1', 'A', false, 'E')
+    local back = '/tmp/t.decks/Stage1_Back.jpg'
+    buildDeck('Public Objectives I', cards, back)
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function buildStage2Deck()
+    startLuaCoroutine(self, 'buildStage2DeckCoroutine')
+end
+
+function buildStage2DeckCoroutine()
+    local cards = getCards('Public2', 'A', false, 'E')
+    local back = '/tmp/t.decks/Stage2_Back.jpg'
+    buildDeck('Public Objectives II', cards, back)
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function buildPromissoryDeck()
+    startLuaCoroutine(self, 'buildPromissoryDeckCoroutine')
+end
+
+function buildPromissoryDeckCoroutine()
+    local cards = getCards('Promissory', 'A', false, 'E')
+    local back = '/tmp/t.decks/Promissory_Note_Back.jpg'
+    local deck = buildDeck('Promissory', cards, back)
+
+    local waitUntil = Time.time + 3
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+
+    local deckPos = deck.getPosition()
+    local colorToPos = {}
+    for i, color in ipairs(Player.getColors()) do
+        local row = math.floor(i / 2)
+        local col = i % 2
+        colorToPos[color] = {
+            x = deckPos.x + col * 3 - 8,
+            y = deckPos.y,
+            z = deckPos.z + row * 3
+        }
+    end
+
+    for i, entry in ipairs(deck.getObjects()) do
+        local color = string.match(entry.name, '^.* %((.*)%)$')
+        assert(color, 'no color in ' .. entry.name)
+        local p = {
+            x = colorToPos[color].x,
+            y = colorToPos[color].y + 1 + i / 10,
+            z = colorToPos[color].z
+        }
+        if not deck.remainder then
+            deck.takeObject({
+                guid = entry.guid,
+                position = p
+            })
+        else
+            deck.remainder.setPosition(p)
+        end
+    end
+
+    local waitUntil = Time.time + 3
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+
+    for color, pos in pairs(colorToPos) do
+        local hits = Physics.cast({
+            origin = pos,
+            direction = { x = 0, y = -1, z = 0 },
+            type = 3, -- box
+            size = { 0.1, 10, 0.1 }
+        })
+        local thisDeck = false
+        for _, hit in ipairs(hits) do
+            if hit.hit_object.tag == 'Deck' then
+                thisDeck = hit.hit_object
+                break
+            end
+        end
+        if thisDeck then
+            thisDeck.setName('Notes (' .. color .. ')')
+        end
+    end
+
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function buildTechDeck()
+    startLuaCoroutine(self, 'buildTechDeckCoroutine')
+end
+
+function buildTechDeckCoroutine()
+    local cards = getCards('Technology Cards', 'A', false, 'E')
+    local back = '/tmp/t.decks/Promissory_Note_Back.jpg'
+    buildDeck('Promissory', cards, back)
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+-- ############################################################################
+-- #### START #include <~/CrLua/CrLua>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Create the base CrLua table, with require function for dependencies.
+-- @author Darrell
+--
+-- Suggested use: at the END of the object script (so #include does not affect
+-- line number reporting in the above portion), include CrLua and dependencies:
+--
+-- #include <~/CrLua/CrLua>
+-- #include <~/CrLua/LockGlobals>
+--
+-- #include <~/CrLua/[OTHER_DEPENDENCY]> (repeat)
+--
+-- CrLua.assertRequired() -- do this BEFORE lock
+-- CrLua.lock()
+--
+-- -- Optionally enable logging.
+-- CrLua.Log.setLogLevel(CrLua.Log.LOG_LEVEL.DEBUG)
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua'
+
+-- Create a GLOBAL CrLua table.
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua._require = { 'LockTable' }
+
+-------------------------------------------------------------------------------
+--- Assert all required packages exist.
+-- @param extraRequires table : list of additional require entries.
+-- @param table : table to search for _require entries, or CrLua if nil.
+--
+-- Modules add dependencies by having a _require item in their root table,
+-- with a list of module names.
+-- e.g. CrLua.MyModule = { _require = { 'OtherModule1', 'OtherModule2' } }.
+-------------------------------------------------------------------------------
+function CrLua.assertRequired(extraRequires, table)
+    local seen = {}
+    local requireSet = {}
+    local haveSet = {}
+
+    if extraRequires then
+        for _, name in ipairs(extraRequires) do
+            requireSet[name] = true
+        end
+    end
+
+    local function addRequireEntries(table, packagePath)
+        assert(type(table) == 'table')
+        if seen[table] then
+            return
+        end
+        seen[table] = true
+        if table._require then
+            for _, name in ipairs(table._require) do
+                requireSet[name] = true
+            end
+            if packagePath then
+                haveSet[packagePath] = true
+            end
+        end
+        for k, v in pairs(table) do
+            if type(v) == 'table' and not string.match(k, '^[_%l]') then
+                local recurse = type(k) == 'string' and string.match(k, '^%u')
+                if recurse then
+                    local childPackagePath = (packagePath and (packagePath .. '.') or '') .. k
+                    addRequireEntries(v, childPackagePath)
+                end
+            end
+        end
+    end
+    addRequireEntries(table or CrLua)
+
+    -- Make sure all required packages are present.
+    local message = false
+    for package, _ in pairs(requireSet) do
+        assert(type(package) == 'string')
+        -- Descend dot-delimited sub-package names.
+        local entry = CrLua
+        for subPackage in string.gmatch(package, '[^%.]+') do
+            entry = entry and entry[subPackage]
+        end
+        if not entry then
+            message = (message and message .. ', ' or '') .. package
+        end
+    end
+    if message then
+        error(TAG .. ': assertRequired missing ' .. message)
+    end
+
+    -- Make sure all present packages are required.
+    local message = false
+    for package, _ in pairs(haveSet) do
+        if not requireSet[package] then
+            message = (message and message .. ', ' or '') .. package
+        end
+    end
+    if message then
+        error(TAG .. ': assertRequired have not-required ' .. message)
+    end
+
+end
+
+-------------------------------------------------------------------------------
+--- Lock CrLua packages.
+--
+-- @param tableName string : name of table being locked, or nil for CrLua.
+-- @param table : table being locked, or nil for CrLua.
+--
+-- Make CrLua and nested packages read-only, with access requiring keys exist.
+--
+-- Locking rules:
+--
+-- (1.) '_data' is a reserved table name for mutable tables.  Do not lock.
+--
+-- (2.) If the table starts with a capital letter, make it read-only and
+-- require keys exist.  These are packages or constants, attempting to access
+-- a missing field is probably a typo.  (Override by adding an
+-- _allowMissingKeys = { 'tableName1', 'tableName2'} entry at the same level
+-- as the referenced tables.  Such tables allow reads to missing keys, as well
+-- as all sub-tables in them.)
+--
+-- (2.) Otherwise make it read-only but allow reads to missing keys (value nil).
+-- One can query membership by checking if a key exists.
+--
+-- This helps catch typos calling non-existent functions, or overwriting
+-- a constant value by mistake.
+-------------------------------------------------------------------------------
+function CrLua.lock(tableName, table)
+    local seen = {}
+
+    local function lockRecursive(tableName, table, allowMissingKeys)
+        assert(type(tableName) == 'string' and type(table) == 'table' and type(allowMissingKeys) == 'boolean')
+
+        -- Watch out for cycles!  This might happen if a script defines
+        -- an enum table, then later uses one of them in a different table.
+        if seen[table] then
+            return
+        end
+        seen[table] = true
+
+        -- Leave _data tables alone.
+        local isData = tableName == '_data'
+        if isData then
+            return
+        end
+
+        -- Get any missing keys entry BEFORE locking this table.
+        local allowMissingKeysTableNameSet = {}
+        if table._allowMissingKeys then
+            for _, tableName in ipairs(table._allowMissingKeys) do
+                allowMissingKeysTableNameSet[tableName] = true
+            end
+        end
+
+        -- Lock the given table.
+        local firstLetter = string.match(tableName, '%a')
+        local isUpper = firstLetter and firstLetter == string.upper(firstLetter)
+        if isUpper and not allowMissingKeys then
+            CrLua.LockTable.readOnlyRequireKey(tableName, table)
+        else
+            CrLua.LockTable.readOnly(tableName, table)
+        end
+
+        -- Lock sub-tables, respecting _allowMissingKeys values.
+        for k, v in pairs(table) do
+            if type(v) == 'table' then
+                local entryAllowMissingKeys = allowMissingKeys or allowMissingKeysTableNameSet[k] or false
+                lockRecursive(tostring(k), v, entryAllowMissingKeys)
+            end
+        end
+    end
+
+    lockRecursive(tableName or 'CrLua', table or CrLua, false)
+end
+
+-- ############################################################################
+-- #### END #include <~/CrLua/CrLua>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/LockGlobals>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Partially lock the _G global variable table.
+-- Include this AFTER creating any necessary globals to prevent new ones.
+--
+-- - Existing globals can still be read AND WRITTEN.
+-- - Cannot read non-existent globals.
+-- - Cannot write new globals.
+--
+-- This helps catch typos where what was meant to access a local instead
+-- references a (hopefully non-existent) global, as well as forgetting to use
+-- "local" when creating objects.
+--
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.LockGlobals'
+local _lockGlobalsMetaTable = {}
+
+-- Index is only called when the key does not already exist.
+function _lockGlobalsMetaTable.__index(table, key)
+    error(TAG .. ': accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error(TAG .. ': globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+
+setmetatable(_G, _lockGlobalsMetaTable)
+
+-------------------------------------------------------------------------------
+
+-- Add a test function to the CrLua "namespace".
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.LockGlobals = assert(not CrLua.LockGlobals) and {
+    _require = { 'LockGlobals' }  -- require self to avoid missing require error
+}
+
+-- ############################################################################
+-- #### END #include <~/CrLua/LockGlobals>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/LockTable>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Access control for tables.
+--
+-- Locked tables are empty, using a metatable to detect and redirect all forms
+-- of access to the actual table data.  Metatables contain a few custom fields:
+-- - '_name' string table name.
+-- - '_attrSet' table from set attribute names to true.
+-- - '_tableContents' table holding the actual locked table content.
+--
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.LockTable'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.LockTable = assert(not CrLua.LockTable) and {
+    _require = {}
+}
+
+CrLua.LockTable.ATTR = {
+    READ_ONLY = 1,
+    REQUIRE_KEY = 2
+}
+
+CrLua.LockTable.ACCESS_TYPE = {
+    READ_MISSING = 'read missing',
+    WRITE_NEW = 'write new',
+    OVERWRITE = 'overwrite'
+}
+
+-------------------------------------------------------------------------------
+--- Error and stop script when misusing a locked table.
+-------------------------------------------------------------------------------
+function CrLua.LockTable._error(lockedTable, key, accessType)
+    assert(type(lockedTable) == 'table' and type(accessType) == 'string')
+    local metatable = assert(getmetatable(lockedTable))
+    local tableName = assert(metatable._name)
+    local keyName = tostring(key or '<nil>')
+    error(TAG .. ': ' .. accessType .. ' ' .. tableName .. '.' .. keyName)
+end
+
+-------------------------------------------------------------------------------
+--- Create a new table with the lock table metamethods.
+-- @param tableName string : use this as the tableName.key when reporting errors.
+-- @param attrs table : list of LockTable.ATTRS to apply.
+-- @param table : table to lock (this table itself is mutated!)
+-- @return table : the same table, returned for create-by-wrapping convenience.
+-------------------------------------------------------------------------------
+function CrLua.LockTable._apply(tableName, attrs, table)
+    assert(type(tableName) == 'string' and type(attrs) == 'table' and type(table) == 'table')
+
+    -- Do not attempt to lock a table that already has a metatable.
+    assert(not getmetatable(table), 'cannot apply LockTable when a metatable is already set: ' .. tableName)
+
+    local newMetaTable = {
+        _name = tableName,
+        _attrSet = {},
+        _tableContents = {}
+    }
+
+    -- Add the metatable methods to behave like the original table.
+    for k, v in pairs(CrLua.LockTable._metatable) do
+        newMetaTable[k] = v
+    end
+
+    -- Apply attrs.
+    for _, attr in ipairs(attrs) do
+        assert(type(attr) == 'number')
+        newMetaTable._attrSet[attr] = true
+    end
+
+    -- Move table contents.
+    for k, v in pairs(table) do
+        newMetaTable._tableContents[k] = v
+        table[k] = nil
+    end
+
+    setmetatable(table, newMetaTable)
+    return table
+end
+
+CrLua.LockTable._metatable = {}
+
+function CrLua.LockTable._metatable.__index(lockedTable, key)
+    local metatable = getmetatable(lockedTable)
+    local attrSet = metatable._attrSet
+    local tableContents = metatable._tableContents
+    local value = tableContents[key]
+    local existing = value ~= nil
+    if not existing and attrSet[CrLua.LockTable.ATTR.REQUIRE_KEY] then
+        CrLua.LockTable._error(lockedTable, key, CrLua.LockTable.ACCESS_TYPE.READ_MISSING)
+    end
+    return value
+end
+
+function CrLua.LockTable._metatable.__newindex(lockedTable, key, value)
+    local metatable = getmetatable(lockedTable)
+    local attrSet = metatable._attrSet
+    local tableContents = metatable._tableContents
+    local existing = tableContents[key] ~= nil
+    if attrSet[CrLua.LockTable.ATTR.READ_ONLY] then
+        local accessType = existing and CrLua.LockTable.ACCESS_TYPE.OVERWRITE or CrLua.LockTable.ACCESS_TYPE.WRITE_NEW
+        CrLua.LockTable._error(lockedTable, key, accessType)
+    elseif not existing and attrSet[CrLua.LockTable.ATTR.REQUIRE_KEY] then
+        CrLua.LockTable._error(lockedTable, key, CrLua.LockTable.ACCESS_TYPE.WRITE_NEW)
+    end
+    tableContents[key] = value
+end
+
+function CrLua.LockTable._metatable.__pairs(lockedTable)
+    local metatable = getmetatable(lockedTable)
+    local tableContents = metatable._tableContents
+    local function iter(_, k)
+        local k, v = next(tableContents, k)
+        if v ~= nil then
+            return k, v
+        end
+    end
+    return iter, lockedTable, nil
+end
+
+function CrLua.LockTable._metatable.__ipairs(lockedTable)
+    local metatable = getmetatable(lockedTable)
+    local tableContents = metatable._tableContents
+    local function iter(_, i)
+        local v = tableContents[i + 1]
+        if v ~= nil then
+            return i + 1, v
+        end
+    end
+    return iter, lockedTable, 0
+end
+
+function CrLua.LockTable._metatable.__len(lockedTable)
+    local metatable = getmetatable(lockedTable)
+    local tableContents = metatable._tableContents
+    return #tableContents
+end
+
+-------------------------------------------------------------------------------
+--- Make table read-only.
+-- Reads to missing values return nil, as normal.
+-- If the table has a _name entry, use that when reporting errors.
+-- @param table
+-- @param table : the same table as the argument for convenience assignment.
+-------------------------------------------------------------------------------
+function CrLua.LockTable.readOnly(tableName, table)
+    assert(type(tableName) == 'string' and type(table) == 'table')
+    assert(type(table) == 'table')
+
+    local attrs = { CrLua.LockTable.ATTR.READ_ONLY }
+    return CrLua.LockTable._apply(tableName, attrs, table)
+end
+
+-------------------------------------------------------------------------------
+--- Make table read-only, and error if accessing missing key.
+-- Helps catch typos reading from must-have-item tables.
+-- @param table
+-- @param table : the same table as the argument for convenience assignment.
+-------------------------------------------------------------------------------
+function CrLua.LockTable.readOnlyRequireKey(tableName, table)
+    assert(type(tableName) == 'string' and type(table) == 'table')
+
+    local attrs = { CrLua.LockTable.ATTR.READ_ONLY, CrLua.LockTable.ATTR.REQUIRE_KEY }
+    return CrLua.LockTable._apply(tableName, attrs, table)
+end
+
+-- ############################################################################
+-- #### END #include <~/CrLua/LockTable>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/Log>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Lua logging functions
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.Log'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.Log = assert(not CrLua.Log) and {
+    _require = {},
+    _data = {}
+}
+
+CrLua.Log.LOG_LEVEL = {
+    DEBUG = { level = 1, shortString = 'd' },
+    INFO = { level = 2, shortString = 'i' },
+    WARNING = { level = 3, shortString = 'w' },
+	ERROR = { level = 4, shortString = 'e' },
+    NONE = { level = 5, shortString = 'x' },
+}
+
+-- Store mutable level in a nested table to avoid mutating anything in Log.
+CrLua.Log._data.level = CrLua.Log.LOG_LEVEL.NONE
+
+-------------------------------------------------------------------------------
+--- Set the log level, only log messagees at this level and above.
+-- @param level table : CrLua.Log.LOG_LEVEL value.
+-------------------------------------------------------------------------------
+function CrLua.Log.setLogLevel(level)
+    assert(level and type(level.level) == 'number' and type(level.shortString) == 'string')
+    CrLua.Log._data.level = level
+end
+
+function CrLua.Log._logTable(message, table, depth)
+    assert(type(message) == 'string' and type(table) == 'table' and type(depth) == 'number')
+
+    local indent = '   '
+    local prefix = ''
+    if depth > 1 then
+        for i = 2, depth do
+            prefix = prefix .. indent
+        end
+    end
+    local indentedPrefix = prefix .. '   '
+
+    print(prefix .. message .. ' = {')
+    if depth < 4 then
+        for k, v in pairs(table) do
+            if type(v) == 'table' then
+                CrLua.Log._logTable(tostring(k), v, depth + 1)
+            else
+                print(indentedPrefix .. tostring(k) .. ' = ' .. tostring(v))
+            end
+        end
+    else
+        -- Stop once too deep (also prevents infinite loops if cycles).
+        print(indentedPrefix .. '...')
+    end
+    print(prefix .. '}')
+end
+
+function CrLua.Log._log(logLevel, tag, message, table)
+    -- Be verbose about bad arguments here, easy to pass the wrong item.
+    -- ALWAYS verify arguments even if log level will suppress logging,
+    -- otherwise bugs can creep in that only tickle when logging is enabled.
+    if type(tag) ~= 'string' then
+        error(TAG .. '_log: tag is not a string', 2)
+    elseif type(message) ~= 'string' then
+        error(TAG .. '_log: message is not a string', 2)
+    elseif table and type(table) ~= 'table' then
+        error(TAG .. '_log: table is not a table', 2)
+    end
+
+    if logLevel.level < CrLua.Log._data.level.level then
+        return
+    end
+
+    -- Insert the tag as message prefix.
+    message = tag .. ' ' .. message
+
+    -- Inject a [timestamp/level] prefix.
+    local timestamp = os.date('%I:%M.%S')
+    message = '[' .. timestamp .. '/' .. logLevel.shortString .. '] ' .. message
+
+    if table then
+        CrLua.Log._logTable(message, table, 1)
+    else
+        print(message)
+    end
+end
+
+-------------------------------------------------------------------------------
+--- Log an info message.
+-- @param tag string.
+-- @param message string.
+-- @table optional table, logging contents if given.
+-------------------------------------------------------------------------------
+function CrLua.Log.i(tag, message, table)
+    CrLua.Log._log(CrLua.Log.LOG_LEVEL.INFO, tag, message, table)
+end
+
+-------------------------------------------------------------------------------
+--- Log a warning message.
+-- @param tag string.
+-- @param message string.
+-- @table optional table, logging contents if given.
+-------------------------------------------------------------------------------
+function CrLua.Log.w(tag, message, table)
+    CrLua.Log._log(CrLua.Log.LOG_LEVEL.WARNING, tag, message, table)
+end
+
+-- ############################################################################
+-- #### END #include <~/CrLua/Log>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/TTS/Spreadsheet>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Push updates to Google Sheets.
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.TTS.Spreadsheet'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.TTS = CrLua.TTS or {}
+CrLua.TTS.Spreadsheet = assert(not CrLua.TTS.Spreadsheet) and {
+    _require = { 'Log' }
+}
+
+-- Google Apps Script proxy that pushes updates to the editable sheet.
+CrLua.TTS.Spreadsheet.GAS_PROXY = 'https://script.google.com/macros/s/AKfycbxOlBxlSJNWnwmd9r-4AcDAcdWOfOX5r3N9ox23DtNefgGbs_4nKrYR6A/exec'
+
+local _idToCells = {}
+
+function CrLua.TTS.Spreadsheet.get(label, id, sheet, cell, callback)
+    assert(type(label) == 'string' and type(id) == 'string' and type(cell) == 'string')
+    assert(not sheet or type(sheet) == 'string')
+    assert(not callback or type(callback) == 'function')
+
+    local url = CrLua.TTS.Spreadsheet.GAS_PROXY
+    url = url .. '?id=' .. id
+    if sheet then
+        url = url .. '&sheet=' .. sheet
+    end
+    url = url .. '&cell=' .. cell
+
+    local function callbackWrapper(webRequest)
+        if webRequest.is_error then
+            CrLua.Log.w(TAG, 'get failed ("' .. label .. '")')
+        else
+            CrLua.Log.i(TAG, 'get success ("' .. label .. '")')
+        end
+        if callback then
+            callback(webRequest.text)
+        end
+    end
+
+    WebRequest.get(url, callbackWrapper)
+end
+
+-- ############################################################################
+-- #### END #include <~/CrLua/TTS/Spreadsheet>
+-- ############################################################################
+
+CrLua.assertRequired({ 'TTS.Spreadsheet' }) -- do this BEFORE lock
+CrLua.lock()
+
+-- ############################################################################
+-- #### END #include <~/CrLua/Objects/TI4_Builders/TI4_DeckBuilder>
+-- ############################################################################
+

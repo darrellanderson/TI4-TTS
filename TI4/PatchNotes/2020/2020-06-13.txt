@@ -1,0 +1,64 @@
+Tactic Blue:
+- Support "Blue Space" homebrew (MultiRoller, Faction Borders, etc).
+- Update text to prefer "faction".
+- New TI4 Dreadnought Models.
+- New Factions box, right-click to pack faction boxes.
+- Quick reference deck (in variants bag).
+- Cleaned up table text (no longer need to shuffle).
+
+Jatta Pake (via Tactic Blue):
+- "Savages of Cymiae" faction (in variants bag).
+
+Darrell (w/ thanks to Tactic Blue for testing help):
+TI4 Graveyard
+- Fix discard when discard pile is still being created.
+- Performance: better handling when discarding large numbers of objects.
+
+TI4 Deleted Items
+- Fix timing bug where items going into valid containers sometimes get added to deleted.
+- Performance: replace scanning containers and decks with tracking enter/destroy.
+- Generate only a single error when closing the game instead of hundreds.
+- Fix a potential hang when deleting a Deleted Items bag when more than one exists.
+
+Maps with Strings
+- Add "copy and return" button to map tiles, filling in the map builder and returning the map tile.
+- (Script is on the bag, not the map tiles.  Authors may create new tiles same as before.)
+
+Place Trade Goods and Set Turns
+- Only assign turns to players with strategy cards.
+- A player without a strategy card will be included if they right-click the button.
+- Supports Logistics and Industry strategy cards, if present.
+
+Active/Passed Token
+- Stop passing turns when an active token belongs to a missing player (prevents spinning when players disconnect).
+- Place token in player area instead of inside faction boxes.
+- Tokens only auto-reset for seated players.
+
+TI4 Faction Borders
+- Placing an owner token in a zero-planet system adds it to the ground area.
+- Add reset button to restore defaults.
+- Performance: delay UI creation to speed up initial load.
+- Support Tactic Blue's homebrew systems.
+- Partial support for Pick-A-Planet systems (1 or 2 "planets" based on tile).
+- Support TI3 systems (in variants).
+- Added auto-update toggle to update between turns.
+
+TI4 Player Color Picker (in variants)
+- New Player Color Picker to change player colors (in variants bag)
+- Move "COLOR Player Pieces" from variants into it.
+- Fix a brown card name.
+
+Agenda top/bottom
+- New context-menu entries in the right-click menu for Agenda cards to place top/bottom.
+
+Autofill TI4 Multiroller
+- New gadget to fill in the MultiRoller from the activated system (in variants bag).
+- Left click to fill, right click to fill and roll.
+
+UI
+- Update Diplomacy strategy card popup tooltip to April 1st version.
+- Raised the scoring area mats by 0.01 to avoid visual glitches when zoomed out.
+- Optimized command sheet images for nearly identical quality but 75% smaller.
+
+Other
+- Fixed Warfare spamming the flagship name.

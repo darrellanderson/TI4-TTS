@@ -1,0 +1,70 @@
+-- Report when taking or putting command tokens.
+-- @author Darrell
+local ChattyCommandTokens = {
+    _playerColorToState = {},
+}
+
+function ChattyCommandTokens._process(container, object, transactionType)
+    assert(type(container) == 'userdata' and type(object) == 'userdata' and type(transactionType) == 'string')
+    local isCommandTokenBag = string.match(container.getName(), 'Command Tokens Bag$')
+    if isCommandTokenBag then
+        local tokenName = string.match(object.getName(), '^(.*) Command Token$')
+        local faction = tokenName and _factionHelper.fromTokenName(tokenName)
+        local color = faction and faction.color
+        if color then
+            local state = ChattyCommandTokens._playerColorToState[color]
+            if not state then
+                state = {
+                    name = tokenName,
+                    transactions = {},
+                    waitId = false,
+                }
+                ChattyCommandTokens._playerColorToState[color] = state
+            end
+            state.transactions[transactionType] = (state.transactions[transactionType] or 0) + 1
+            if state.waitId then
+                Wait.stop(state.waitId)
+            end
+            state.waitId = Wait.time(function() ChattyCommandTokens._report(color) end, 5)
+        end
+    end
+end
+
+function ChattyCommandTokens._report(color)
+    assert(type(color) == 'string')
+    local state = ChattyCommandTokens._playerColorToState[color]
+    ChattyCommandTokens._playerColorToState[color] = nil
+    if state then
+        local tranactionMessages = {}
+        local total = 0
+        for transactionType, quantity in pairs(state.transactions) do
+            table.insert(tranactionMessages, transactionType .. ' ' .. quantity)
+            total = total + quantity
+        end
+        if total > 0 then
+            local message = {
+                state.name,
+                table.concat(tranactionMessages, ', '),
+                'Command Token' .. (total > 1 and 's' or '')
+            }
+            message = table.concat(message, ' ')
+            printToAll(message, color)
+        end
+    end
+end
+
+local originalOnObjectLeaveContainer = onObjectLeaveContainer
+function onObjectLeaveContainer(container, leaveObject)
+    if originalOnObjectLeaveContainer then
+        originalOnObjectLeaveContainer(container, leaveObject)
+    end
+    ChattyCommandTokens._process(container, leaveObject, 'withdrew')
+end
+
+local originalOnObjectEnterContainer = onObjectEnterContainer
+function onObjectEnterContainer(container, enterObject)
+    if originalOnObjectEnterContainer then
+        originalOnObjectEnterContainer(container, enterObject)
+    end
+    ChattyCommandTokens._process(container, enterObject, 'deposited')
+end

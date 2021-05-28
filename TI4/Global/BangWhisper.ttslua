@@ -1,0 +1,61 @@
+--- Use "!color message" to send an announced whisper.  Prints a message to
+-- everyone else that the whisper happened, then sends whisper to the target.
+-- Note that normal "/color message" whispers still work as before.
+-- @author Darrell
+local orginalOnChat = onChat
+function onChat(message, srcPlayer)
+    if orginalOnChat and not orginalOnChat(message, srcPlayer) then
+        return false -- originial suppressed message
+    end
+
+    local colorSet = {}
+    for _, color in ipairs(getSeatedPlayers()) do
+        colorSet[color] = true
+    end
+
+    -- The real function throws an error on invalid input.
+    local function safeColorToHex(color)
+        if colorSet[color] then
+            return Color.toHex(Color.fromString(color))
+        end
+        return 'ffffff'
+    end
+
+    local srcColor = srcPlayer.color
+    local srcName = srcPlayer.steam_name
+    local srcHex = safeColorToHex(srcColor)
+    local msgHex = 'ffffff'
+    local dstColor, message = string.match(message, '^!(%a+) (.+)')
+
+    if dstColor then
+        dstColor = dstColor:sub(1,1):upper()..dstColor:sub(2):lower()
+        local dstHex = safeColorToHex(dstColor)
+
+        local publicMessage = table.concat({
+            '[' .. msgHex .. ']!Whisper: ',
+            '[' .. srcHex .. ']' .. srcColor,
+            ' ',
+            '[' .. msgHex .. ']->',
+            ' ',
+            '[' .. dstHex .. ']' .. dstColor,
+        }, '')
+
+        local privateMessage = table.concat({
+            '[' .. dstHex .. ']<' .. dstColor .. '>',
+            ' ',
+            '[' .. srcHex .. ']' .. srcName .. ':',
+            ' ',
+            '[' .. msgHex .. ']' .. message
+        }, '')
+
+        if not colorSet[dstColor] then
+            printToColor('No one is playing as ' .. dstColor, srcColor, srcColor)
+        else
+            printToAll(publicMessage)
+            printToColor(privateMessage, srcColor, srcColor)
+            printToColor(privateMessage, dstColor, srcColor)
+        end
+        return false
+    end
+    return true
+end

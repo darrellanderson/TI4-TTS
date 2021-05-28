@@ -1,0 +1,7 @@
+Unpacker:
+- Fix space dock detection.
+- Fix flagship descriptions for some Blue Space units.
+- Remove PDS from Blue Space Vasari starting units.
+
+Deleted Items:
+- Ignore "deleted" cards when grouping them into a deck.

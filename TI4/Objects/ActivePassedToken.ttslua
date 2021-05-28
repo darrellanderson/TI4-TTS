@@ -1,0 +1,206 @@
+--- Active/passed token.
+-- @author Darrell
+--
+-- When flipped to "passed" the token will automatically skip that player's
+-- turn, broadcasting to all players that player has passed.
+--
+-- Once all players have passed, the token disables turns (via Turns.enable)
+-- and all tokens flip back to active.
+
+local TAG = 'ActivePassedToken'
+local _isActive = nil
+
+-------------------------------------------------------------------------------
+-- OBJECT EVENT METHODS
+
+function onLoad()
+    self.addContextMenuItem('Report', report)
+    _isActive = not self.is_face_down
+end
+
+function onPlayerTurnStart(playerColorStart, playerColorPrevious)
+    -- Do not manipulate any Turns state now, let all objects process the
+    -- same turn start values and maybe pass the turn after a few frames.
+    if isMyTurn() then
+        Wait.frames(maybePassTurn, 3)
+    end
+end
+
+function onPlayerChangeColor(playerColor)
+    if playerColor == myColor() and not isActive(self) then
+        self.flip()
+    end
+end
+
+function onRotate(spin, flip, player_color, old_spin, old_flip)
+    local newIsActive = (flip < 90) or (flip > 270)
+    if _isActive ~= newIsActive then
+        _isActive = newIsActive
+        local color = myColor()
+        if (not newIsActive) and color then
+            local message = 'Active/Passed: ' .. color .. ' passes'
+            broadcastToAll(message, color)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function report(playerColor)
+    local message = { 'Active/Passed Tokens:' }
+    for i, tokenState in ipairs(getAllActivePassedTokens()) do
+        table.insert(message, table.concat({
+            '(' .. i .. ')',
+            tokenState.color,
+            tokenState.active and 'Active' or 'Passed',
+            tokenState.seated and 'Seated' or 'NotSeated',
+        }, ' '))
+    end
+    message = table.concat(message, '\n')
+    printToColor(message, playerColor)
+end
+
+-------------------------------------------------------------------------------
+
+function parseColor(name)
+    assert(type(name) == 'string')
+    local color = string.match(name, '^Active/Passed %((%a+)%)$')
+    color = color and (string.upper(string.sub(color, 1, 1)) .. string.lower(string.sub(color, 2)))
+    return color
+end
+
+function myColor()
+    return parseColor(self.getName())
+end
+
+--- Is the current turn the player who owns this token?
+-- @return boolean true if my turn.
+function isMyTurn()
+    return Turns.enable and Turns.turn_color == myColor()
+end
+
+--- Is this token showing "active"?
+-- @return boolean true if active.
+function isActive(token)
+    assert(type(token) == 'userdata')
+    if token == self then
+        return _isActive
+    end
+    local z = token.getRotation().z
+    return (z < 90) or (z > 270)
+end
+
+-------------------------------------------------------------------------------
+
+--- Get all Active/Passed tokens on the board.
+-- @return list of token state {object, color=string, active=boolean, seated=boolean}.
+function getAllActivePassedTokens()
+    local seatedSet = {}
+    for _, color in ipairs(getSeatedPlayers()) do
+        seatedSet[color] = true
+    end
+
+    local seenSet = {}
+    local result = {}
+
+    for _, object in ipairs(getAllObjects()) do
+        local color = parseColor(object.getName())
+        if color then
+            if seenSet[color] then
+                printToAll('Warning: ' .. color .. ' has multiple active/passed tokens', color)
+            else
+                table.insert(result, {
+                    object = object,
+                    color = color,
+                    active = isActive(object),
+                    seated = seatedSet[color] or false
+                })
+            end
+        end
+    end
+    return result
+end
+
+--- Is any seated player's active/passed token still active?
+-- @param peers list of active/passed token objects.
+-- @return table, table : if given, list of seated/not-seated active colors.
+function anyIsActive(activePassedTokens)
+    assert(type(activePassedTokens) == 'table')
+    local activeSeated, activeNotSeated = false, false
+    for _, tokenState in ipairs(activePassedTokens) do
+        if tokenState.active then
+            if tokenState.seated then
+                activeSeated = (activeSeated or {})
+                table.insert(activeSeated, tokenState.color)
+            else
+                activeNotSeated = (activeNotSeated or {})
+                table.insert(activeNotSeated, tokenState.color)
+            end
+        end
+    end
+    return activeSeated, activeNotSeated
+end
+
+function resetActive(activePassedTokens)
+    assert(type(activePassedTokens) == 'table')
+    for _, tokenState in ipairs(activePassedTokens) do
+        if (not tokenState.active) and tokenState.seated then
+            tokenState.object.flip()
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+--- Pass turn if this token is set to "passed".  If all tokens are set to
+-- "passed" then disable turns altogether, requiring turns be re-enabled
+-- via some external means to proceed.
+function maybePassTurn()
+    -- Out of paranoia make sure it is still this token owner's turn.
+    -- It is possible some other script changed turns while this function
+    -- was waiting to be called, or in some cases such as hot-seat games
+    -- it appears TTS calls onPlayerTurnStart twice each turn.
+    if not isMyTurn() then
+        return
+    end
+
+    -- Always get the tokens list (reports observed errors).
+    local activePassedTokens = getAllActivePassedTokens()
+
+    -- Do nothing if still active (play normally).
+    if isActive(self) then
+        return
+    end
+
+    -- At this point we know it is "my" turn and the token is set to "passed".
+    -- Pass this turn, or if all players have passed disable turns altogether.
+    -- (Requires external event to re-enable turns.)
+    -- Note: if the sanity check failed then there is not one token per player.
+    -- In that case, continue to pass turns but do not consider "all" passed.
+    local myColor = assert(myColor())
+    local activeSeated, activeNotSeated = anyIsActive(activePassedTokens)
+    if activeSeated then
+        -- At least one active seated peer, passing turn.
+        broadcastToAll(myColor .. ' passed.', myColor)
+        Turns.turn_color = Turns.getNextTurnColor()
+    elseif activeNotSeated then
+        -- At least one active unseated peer, aborting.
+        broadcastToAll('All seated players have passed, but not-at-table ' .. table.concat(activeNotSeated, ', ') .. ' still active.')
+    else
+        -- No active peers, disabling turns.
+        broadcastToAll('All players have passed.')
+        resetActive(activePassedTokens)
+        Turns.enable = false
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

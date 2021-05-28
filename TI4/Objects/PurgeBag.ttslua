@@ -1,0 +1,67 @@
+--- Announces purged objects.
+-- @author Darrell (copied from Deleted Items)
+-- @author Jabberwocky
+--
+
+local _getByNameCache = {}
+function _getByName(name, tag)
+    local guid = _getByNameCache[name]
+    local object = guid and getObjectFromGUID(guid)
+    if object and ((not tag) or object.tag == tag) then
+        return object
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == name and ((not tag) or object.tag == tag) then
+            _getByNameCache[name] = object.getGUID()
+            return object
+        end
+    end
+
+    return false
+end
+
+function getRelicFragmentType(object)
+    return string.match(object.getName(), '^(%a+) Relic Fragment %(%d%)$')
+end
+
+function relocateRelicFragments(object)
+    local fragmentType = getRelicFragmentType(object)
+    if not fragmentType then
+        return false
+    end
+    local fragBag = _getByName(fragmentType .. ' Relic Fragments Bag', 'Bag')
+    if not fragBag then
+        return false
+    end
+
+    -- Need to wait for onObjectEnterContainer to finish placing this
+    -- object into self before it is safe to call takeObject (otherwise
+    -- will sometimes "take" a defective object).
+    local guid = object.getGUID()
+    local function delayedMove()
+        self.takeObject({
+            guid = guid,
+            callback_function = function (obj)
+                fragBag.putObject(obj)
+            end
+        })
+    end
+    Wait.frames(delayedMove, 3)
+
+    return true
+end
+
+function onObjectEnterContainer(bag, enterObject)
+    if bag == self then
+        if not relocateRelicFragments(enterObject) then --Try to handle known objects
+            --Otherwise the object is staying, so announce it
+            printToAll('PURGING ' .. enterObject.getName(), 'Yellow')
+        end
+    end
+end
+
+function onObjectLeaveContainer(bag, leaveObject)
+    if bag == self and not getRelicFragmentType(leaveObject) then
+        printToAll("unPURGING " .. leaveObject.getName(), 'Yellow')
+    end
+end

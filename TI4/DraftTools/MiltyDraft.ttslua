@@ -1,0 +1,1830 @@
+--- New draft style.
+-- Authors: Milty, SCPT Matt
+-- Script: Darrell
+-- #include <~/CrLua/Objects/Draft2021>
+--
+-- Layout:
+--
+-- ╔════════════════════════╗
+-- ║ SLICES (room for 8)    ║
+-- ╠════════════════════════╣
+-- ║ FACTIONS (room for 12) ║
+-- ╠════════════════════════╣
+-- ║ SEATS (6)              ║
+-- ╚════════════════════════╝
+--
+-- Setup:
+-- 1. Create (7) roughly balanced slices with the left-equidistant present.
+-- 2. Create 6 numbered and colored slice location / seat tokens.
+-- 3. Deal (9) random factions to the pool.
+-- 4. Assign random turn order.
+--
+-- Players snake draft one of [1, 2, 3] above.
+--
+-- Finish:
+-- 1. Move players to their chosen seat.
+-- 2. Move slices.
+-- 3. Select factions on the unpack tool.
+-- 4. Assign speaker to slice token #1.
+--
+-- Buttons:
+-- 1. Setup (do setup steps).
+-- 2. Reverse Turn Order.
+-- 3. Commit (do finish steps).
+
+-- 7x6 mat: http://cloud-3.steamusercontent.com/ugc/1734422701007725477/663ABBFFF278EA1CDFEEF84C1DBA12D309C745F0/
+
+-------------------------------------------------------------------------------
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local _buttonHelper = getHelperClient('TI4_BUTTON_HELPER')
+local _gameDataHelper = getHelperClient('TI4_GAME_DATA_HELPER')
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _setupHelper = getHelperClient('TI4_SETUP_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+-------------------------------------------------------------------------------
+
+_config = {
+    DEFAULT_SLICES = 7,
+    DEFAULT_FACTIONS = 9,
+
+    MIN_SLICES = 6,
+    MAX_SLICES = 8,
+
+    MIN_FACTIONS = 6,
+    MAX_FACTIONS = 12,
+}
+
+_state = {
+    numSlices = _config.DEFAULT_SLICES,
+    numFactions = _config.DEFAULT_FACTIONS
+}
+_deletedItemsBag = false
+_lastScale = false
+
+local BUTTONS = {
+    {
+        id = 'toggleWormholesAndLegendaries',
+        label = '<>',
+        onClick = 'toggleWormholesAndLegendaries',
+        LABEL_TEMPLATE = 'More wormholes\nand legendary\nplanets: $VALUE',
+        tooltip = 'Make sure wormholes and legendaries are well represented when building slices?'
+    },
+    {
+        id = 'numSlices',
+        label = '<>',
+        onClick = 'changeSliceCount',
+        LABEL_TEMPLATE = '#Slices: $VALUE\nLeft +/Right -',
+        tooltip = 'Left click to increase, right click to decrease',
+    },
+    {
+        id = 'numFactions',
+        label = '<>',
+        onClick = 'changeFactionCount',
+        LABEL_TEMPLATE = '#Factions: $VALUE\nLeft +/Right -',
+        tooltip = 'Left click to increase, right click to decrease',
+    },
+    {
+        id = 'setup',
+        label = 'Setup',
+        onClick = 'doSetup',
+        tooltip = 'Place (or replace) draft slices, factions, and seat tokens',
+        confirm = true,
+    },
+    {
+        label = 'Reverse\nTurn\nOrder',
+        onClick = 'doReverseTurns',
+        tooltip = 'Change next player direction (forward / reverse)',
+    },
+    {
+        id = 'finish',
+        label = 'Finish',
+        onClick = 'doFinish',
+        tooltip = 'Move players to their drafted seats, factions, and slices (found in the drafting player\'s area)',
+        confirm = true,
+    }
+}
+
+function onLoad(saveState)
+    math.randomseed(os.time())
+
+    if saveState and string.len(saveState) > 0 then
+        _state = JSON.decode(saveState) or _state
+    end
+    _state.numSlices = _state.numSlices or _config.DEFAULT_SLICES
+    _state.numFactions = _state.numFactions or _config.DEFAULT_FACTIONS
+
+    _deletedItemsBag = _getByName('Bag', 'TI4 Deleted Items')
+
+    self.clearButtons()
+    for i, button in ipairs(BUTTONS) do
+        self.createButton({
+            click_function = button.onClick,
+            function_owner = self,
+            label          = button.label,
+            position       = Slots.getPosition(0, i - 1, Slots.DRAFT_MAT),
+            rotation       = { x = 0, y = 0, z = 0 },
+            scale          = { x = 1, y = 1, z = 1 },
+            width          = button.onClick and 1900 or 0,
+            height         = button.onClick and 1200 or 0,
+            font_size      = 240,
+            font_color     = button.onClick and 'Black' or 'White',
+            tooltip        = button.tooltip,
+        })
+        if button.confirm then
+            _buttonHelper.addConfirmStep({
+                guid = self.getGUID(),
+                buttonIndex = i - 1,
+                confirm = {
+                    label = 'CLICK AGAIN\nTO CONFIRM',
+                    --font_size = #,
+                    -- color = string
+                }
+            })
+        end
+    end
+    resetButtons()
+
+    local snapPoints = {}
+    --local lines = {}
+    --local color = { r = 1, g = 1, b = 1, a = 0.1 }
+    for col = 0, 0 do
+        for row = 0, 5 do
+            --table.insert(lines, Slots.getVectorLine(col, row, Slots.DRAFT_MAT, color))
+        end
+    end
+    for col = 1, 3 do
+        for row = 0, 5, 2 do
+            table.insert(snapPoints, {
+                position = Slots.getPosition(6 - col, row + 0.5, Slots.DRAFT_MAT),
+                rotation = { x = 0, y = 0, z = 0 },
+                rotation_snap = true,
+            })
+            --table.insert(lines, Slots.getVectorLine(col, row, Slots.DRAFT_MAT, color, 2))
+        end
+    end
+    for col = 4, 6 do
+        for row = 0, 5 do
+            table.insert(snapPoints, {
+                position = Slots.getPosition(6 - col, row, Slots.DRAFT_MAT),
+                rotation = { x = 0, y = 0, z = 0 },
+                rotation_snap = true,
+            })
+            --table.insert(lines, Slots.getVectorLine(col, row, Slots.DRAFT_MAT, color))
+        end
+    end
+    self.setSnapPoints(snapPoints)
+    self.setVectorLines({})
+
+    local function lookAtMe(playerColor)
+        Player[playerColor].lookAt({
+            position = self.getPosition(),
+            pitch    = 90,
+            yaw      = self.getRotation().y + 180,
+            distance = 30
+        })
+    end
+    self.addContextMenuItem('Look at me', lookAtMe)
+end
+
+function onSave()
+    return _state and JSON.encode(_state)
+end
+
+function _getByName(tag, name)
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == tag and object.getName() == name then
+            return object
+        end
+    end
+    return false
+end
+
+-------------------------------------------------------------------------------
+
+function resetButtons()
+    for i, values in ipairs(BUTTONS) do
+        if values.id == 'toggleWormholesAndLegendaries' then
+            local value = VolverMilty.pushWormholesLegends and 'YES' or 'NO'
+            local label = string.gsub(values.LABEL_TEMPLATE, '$VALUE', value)
+            self.editButton({
+                index          = i - 1,
+                label          = label
+            })
+        elseif values.id == 'numSlices' then
+            local value = tostring(_state.numSlices)
+            local label = string.gsub(values.LABEL_TEMPLATE, '$VALUE', value)
+            self.editButton({
+                index          = i - 1,
+                label          = label
+            })
+        elseif values.id == 'numFactions' then
+            local value = tostring(_state.numFactions)
+            local label = string.gsub(values.LABEL_TEMPLATE, '$VALUE', value)
+            self.editButton({
+                index          = i - 1,
+                label          = label
+            })
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function toggleWormholesAndLegendaries()
+    assert(type(VolverMilty.pushWormholesLegends) == 'boolean')
+    VolverMilty.pushWormholesLegends = not VolverMilty.pushWormholesLegends
+    resetButtons()
+end
+
+function changeSliceCount(clickObject, clickerColor, altClick)
+    local delta = altClick and -1 or 1
+    local value = _state.numSlices + delta
+    if (value >= _config.MIN_SLICES) and (value <= _config.MAX_SLICES) then
+        _state.numSlices = value
+        resetButtons()
+    else
+        printToColor('Already at limit', clickerColor, 'Red')
+    end
+end
+
+function changeFactionCount(clickObject, clickerColor, altClick)
+    local delta = altClick and -1 or 1
+    local value = _state.numFactions + delta
+    if (value >= _config.MIN_FACTIONS) and (value <= _config.MAX_FACTIONS) then
+        _state.numFactions = value
+        resetButtons()
+    else
+        printToColor('Already at limit', clickerColor, 'Red')
+    end
+end
+
+function doSetup()
+    startLuaCoroutine(self, 'setupCoroutine')
+end
+
+function doReverseTurns()
+    Turns.reverse_order = not Turns.reverse_order
+    local message = Turns.reverse_order and 'reverse' or 'forward'
+    printToAll('Snake order: ' .. message, 'Yellow')
+end
+
+function doFinish()
+    _gameDataHelper.addExtraData({
+        name = 'MiltyDraft',
+        value = true
+    })
+    startLuaCoroutine(self, 'finishCoroutine')
+end
+
+function doReset()
+    startLuaCoroutine(self, 'resetCoroutine')
+end
+
+-------------------------------------------------------------------------------
+
+function setupCoroutine()
+    if not _setupHelper.getPoK() then
+        broadcastToAll('Please do setup with PoK enabled first', 'Red')
+        return 1
+    end
+
+    -- Put away any existing draft parts (start from scratch).
+    SeatTokens.stow()
+    coroutine.yield(0)
+
+    FactionTokens.stow()
+    coroutine.yield(0)
+
+    SliceTokens.stow()
+    coroutine.yield(0)
+
+    DraftSelectionMats.stow()
+    coroutine.yield(0)
+
+    -- Get 3 "balanced" blue tiles and 2 red ones.
+    _state.tileLists = assert(VolverMilty.makeHands(_state.numSlices))
+    VolverMilty.addRedTiles(_state.tileLists, 2)
+    coroutine.yield(0)
+
+    -- Randomize, separate any adajent anomalies.
+    for i, tileList in ipairs(_state.tileLists) do
+        _state.tileLists[i] = Slice.randomizeAndFixAdjacentAnomalies(tileList)
+    end
+    coroutine.yield(0)
+
+    -- Place slices.
+    for i, tileList in ipairs(_state.tileLists) do
+        printToAll('Slice ' .. i .. ': ' .. table.concat(tileList, ', '), 'Yellow')
+        local name = SliceTokens.getSliceName(i)
+        local position = Position.draftSlice(i)
+        local label = name .. '\n' .. Slice.getLabel(tileList)
+        local slice = SliceTokens.spawn(tileList, name, label, position, self.getRotation())
+        local scale = slice.getScale()
+        local s = 0.25
+        slice.setScale({ x = scale.x * s, y = scale.y, z = scale.z * s })
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    -- Add seat / speaker order tokens.
+    local zones = _zoneHelper.zones()
+    local numSeats = #zones
+    local speakerIndex = math.random(1, numSeats)
+    _state.speakerColor = assert(zones[speakerIndex])
+    printToAll('Speaker: ' .. _state.speakerColor, 'Yellow')
+    for i, color in ipairs(_zoneHelper.zones()) do
+        local speakerOrder = (((i + numSeats) - speakerIndex) % numSeats) + 1
+        local label = (speakerOrder == 1) and 'SPEAKER' or tostring(speakerOrder)
+        local position = Position.draftSeat(i)
+        SeatTokens.moveToken(color, label, position, self.getRotation())
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    -- Add draft factions.
+    FactionTokens.shuffle()
+    local factionNames = {}
+    for i = 1, _state.numFactions do
+        local position = Position.draftFaction(i)
+        local token = FactionTokens.placeRandomToken(position, self.getRotation())
+        local factionName = assert(string.match(token.getName(), '^(.*) Faction Token$'))
+        table.insert(factionNames, factionName)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    printToAll('Factions: ' .. table.concat(factionNames, ', '), 'Yellow')
+
+    -- Create draft selection mats.
+    for _, color in ipairs(_zoneHelper.zones()) do
+        DraftSelectionMats.spawn(color)
+        coroutine.yield(0)
+    end
+
+    -- Randomize turns.
+    local order = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        table.insert(order, color)
+    end
+    order = assert(VolverMilty.permute(order))
+    Turns.enable = false
+    Turns.type = 2
+    Turns.reverse_order = false
+    Turns.order = order
+    Turns.turn_color = order[1]
+    Turns.enable = true
+    printToAll('Draft order: ' .. table.concat(order, ', '), 'Yellow')
+
+    return 1
+end
+
+function finishCoroutine()
+    if not _setupHelper.getPoK() then
+        broadcastToAll('SCPT draft: please do setup with PoK enabled first', 'Red')
+        return 1
+    end
+
+    -- Gather per-player choices.
+    local errors = false
+    local colorToChoices = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        colorToChoices[color] = {
+            player = false,
+            sliceTiles = false,
+            factionTokenName = false,
+            seatColor = false
+        }
+    end
+
+    for _, player in ipairs(Player.getPlayers()) do
+        local color = player.color
+        local choices = color and colorToChoices[color]
+        if choices then
+            choices.player = player
+        end
+    end
+    coroutine.yield(0)
+
+    for _, object in ipairs(SliceTokens.getAll(false)) do
+        local zone = _zoneHelper.zoneFromPosition(object.getPosition())
+        local choices = zone and colorToChoices[zone]
+        if choices then
+            if choices.sliceTiles then
+                errors = errors or {}
+                table.insert(errors, zone .. ' has multiple slice tokens')
+            else
+                local sliceIndex = SliceTokens.getSliceIndex(object)
+                local sliceTiles = _state.tileLists[sliceIndex]
+                choices.sliceTiles = assert(sliceTiles)
+            end
+        end
+    end
+    for zone, choices in pairs(colorToChoices) do
+        if not choices.sliceTiles then
+            errors = errors or {}
+            table.insert(errors, zone .. ' does not have a slice token')
+        end
+    end
+    coroutine.yield(0)
+
+    for _, object in ipairs(FactionTokens.getAll(false)) do
+        local zone = _zoneHelper.zoneFromPosition(object.getPosition())
+        local choices = zone and colorToChoices[zone]
+        if choices then
+            if choices.factionTokenName then
+                errors = errors or {}
+                table.insert(errors, zone .. ' has multiple faction tokens')
+            else
+                local name = object.getName()
+                local factionTokenName = string.match(name, '^(.*) Faction Token$')
+                choices.factionTokenName = assert(factionTokenName)
+            end
+        end
+    end
+    for zone, choices in pairs(colorToChoices) do
+        if not choices.factionTokenName then
+            errors = errors or {}
+            table.insert(errors, zone .. ' does not have a faction token')
+        end
+    end
+    coroutine.yield(0)
+
+    for _, object in ipairs(SeatTokens.getAll(false)) do
+        local zone = _zoneHelper.zoneFromPosition(object.getPosition())
+        local choices = zone and colorToChoices[zone]
+        if choices then
+            if choices.seatColor then
+                errors = errors or {}
+                table.insert(errors, zone .. ' has multiple seat/color tokens')
+            else
+                local color = object.getName()
+                if colorToChoices[color] then
+                    choices.seatColor = color
+                end
+            end
+        end
+    end
+    for zone, choices in pairs(colorToChoices) do
+        if not choices.seatColor then
+            errors = errors or {}
+            table.insert(errors, zone .. ' does not have a valid seat token')
+        end
+    end
+    coroutine.yield(0)
+
+    -- Abort if anything is amiss.
+    if errors then
+        local message = 'Error: ' .. table.concat(errors, ', ')
+        broadcastToAll(message, 'Red')
+        return 1
+    end
+
+    for i, color in ipairs(_zoneHelper.zones()) do
+        local choices = assert(colorToChoices[color])
+        local message = {
+            '(' .. i .. ')',
+            choices.player and choices.player.steam_name or color,
+            'drafted',
+            choices.factionTokenName,
+            'in',
+            choices.seatColor,
+            'with slice {',
+            table.concat(choices.sliceTiles, ', '),
+            '}'
+        }
+        message = table.concat(message, ' ')
+        printToAll(message, color)
+    end
+    coroutine.yield(0)
+
+    -- Put away draft items.
+    SeatTokens.stow()
+    coroutine.yield(0)
+
+    FactionTokens.stow()
+    coroutine.yield(0)
+
+    SliceTokens.stow()
+    coroutine.yield(0)
+
+    DraftSelectionMats.stow()
+    coroutine.yield(0)
+
+    -- Move players to their chosen seat.
+    for _, choices in pairs(colorToChoices) do
+        if choices.player then
+            choices.player.changeColor('Grey')
+            coroutine.yield(0)
+            coroutine.yield(0)
+        end
+    end
+    for _, choices in pairs(colorToChoices) do
+        if choices.player then
+            choices.player.changeColor(choices.seatColor)
+            coroutine.yield(0)
+            coroutine.yield(0)
+        end
+    end
+
+    -- Move slices.
+    for _, choices in pairs(colorToChoices) do
+        local seatColor = assert(choices.seatColor)
+        local zoneAttrs = assert(_zoneHelper.zoneAttributes(seatColor))
+        local tiles = assert(choices.sliceTiles)
+        local p0 = assert(zoneAttrs.homeSystemPosition)
+        local applyRotation = true
+        Slice.placeTiles(tiles, p0, applyRotation)
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+
+    -- Setup faction on selector.
+    for _, choices in pairs(colorToChoices) do
+        local seatColor = assert(choices.seatColor)
+        local factionTokenName = assert(choices.factionTokenName)
+        _selectFaction(seatColor, factionTokenName)
+        coroutine.yield(0)
+    end
+
+    -- Assign speaker.
+    local speakerToken = _getByName('Generic', 'Speaker Token')
+    if speakerToken then
+        local zoneAttrs = _zoneHelper.zoneAttributes(_state.speakerColor)
+        local pos = {
+            x = zoneAttrs.center.x,
+            y = zoneAttrs.center.y + 5,
+            z = zoneAttrs.center.z + 6 * (zoneAttrs.center.z < 0 and 1 or -1)
+        }
+        local rot = {
+            x = 0,
+            y = zoneAttrs.rotation.y,
+            z = 0
+        }
+        local collide = false
+        local fast = false
+        speakerToken.setPositionSmooth(pos, collide, fast)
+        speakerToken.setRotationSmooth(rot, collide, fast)
+    end
+    coroutine.yield(0)
+
+    -- Stow self.
+    local toolsBag = _getByName('Bag', 'Tools and Helpers')
+    if toolsBag then
+        toolsBag.putObject(self)
+    end
+
+    return 1
+end
+
+function resetCoroutine()
+    _state.numSlices = _config.DEFAULT_SLICES
+    _state.numFactions = _config.DEFAULT_FACTIONS
+    resetButtons()
+    coroutine.yield(0)
+
+    SeatTokens.stow()
+    coroutine.yield(0)
+
+    FactionTokens.stow()
+    coroutine.yield(0)
+
+    SliceTokens.stow()
+    coroutine.yield(0)
+
+    DraftSelectionMats.stow()
+    coroutine.yield(0)
+
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+BoundingBox = {
+    _bb = false
+}
+
+function BoundingBox.get(object)
+    local bounds = object.getBounds()
+    return {
+        min = {
+            x = bounds.center.x - bounds.size.x / 2,
+            z = bounds.center.z - bounds.size.z / 2,
+        },
+        max = {
+            x = bounds.center.x + bounds.size.x / 2,
+            z = bounds.center.z + bounds.size.z / 2,
+        },
+    }
+end
+
+function BoundingBox.inside(object, bb)
+    local p = object.getPosition()
+    return p.x > bb.min.x and p.x < bb.max.x and p.z > bb.min.z and p.z < bb.max.z
+end
+
+function BoundingBox.insideSelf(object)
+    BoundingBox._bb = BoundingBox._bb or BoundingBox.get(self)
+    return BoundingBox.inside(object, BoundingBox._bb)
+end
+
+-------------------------------------------------------------------------------
+
+Slots = {
+    SIZE = {
+        x = 4.04,
+        z = 2.70,
+        gap = 0.5,
+    },
+    DRAFT_MAT = {
+        numCols = 7,
+        numRows = 6
+    },
+    SELECTION_MAT = {
+        numCols = 3,
+        numRows = 3
+    }
+}
+
+function Slots.getPosition(col, row, mat)
+    assert(type(col) == 'number' and type(row) == 'number' and type(mat) == 'table')
+    assert(type(mat.numCols) == 'number' and type(mat.numRows) == 'number')
+
+    -- Not safe to read bounds while spawning.
+    local bounds = {
+        x = (mat.numCols * Slots.SIZE.x) + ((mat.numCols + 1) * Slots.SIZE.gap),
+        y = 0.4,
+        z = (mat.numRows * Slots.SIZE.z) + ((mat.numRows + 1) * Slots.SIZE.gap),
+    }
+
+    local p0 = {
+        x = -(bounds.x / 2) + Slots.SIZE.gap + (Slots.SIZE.x / 2),
+        y = bounds.y + 0.01,
+        z = -(bounds.z / 2) + Slots.SIZE.gap + (Slots.SIZE.z / 2),
+    }
+
+    return {
+        x = p0.x + col * (Slots.SIZE.x + Slots.SIZE.gap),
+        y = p0.y,
+        z = p0.z + row * (Slots.SIZE.z + Slots.SIZE.gap),
+    }
+end
+
+function Slots.getVectorLine(col, row, mat, color, rowSpan)
+    assert(type(col) == 'number' and type(row) == 'number' and type(mat) == 'table')
+    assert(type(mat.numCols) == 'number' and type(mat.numRows) == 'number')
+
+    -- Vector lines have reversed X space?
+    local p1 = Slots.getPosition(col, row, mat)
+    local p2 = Slots.getPosition(col, row + ((rowSpan or 1) - 1), mat)
+    return {
+        points = {
+            { x = -p1.x, y = p1.y, z = p1.z - Slots.SIZE.z / 2 },
+            { x = -p2.x, y = p2.y, z = p2.z + Slots.SIZE.z / 2 },
+        },
+        rotation = { x = 0, y = 0, z = 0 },
+        thickness = Slots.SIZE.x,
+        color = color,
+        square = true,
+        loop = false,
+    }
+end
+
+-------------------------------------------------------------------------------
+
+-- Mat is 7x6.  COL/ROW in 0-based values:
+-- Col 0: buttons.
+-- Cols 1-3: slices, offset Z by 0.5.
+-- Cols 4-6:
+--   Rows 1-4: factions
+--   Rows 5-6: seats
+Position = {
+    SLICE = {
+        col0 = 1,
+        row0 = 0.5,
+        numCols = 3
+    },
+    FACTION = {
+        col0 = 4,
+        row0 = 0,
+        numCols = 3
+    },
+    SEAT = {
+        col0 = 4,
+        row0 = 4,
+        numCols = 3
+    },
+}
+
+function Position._pos(col, row, mat)
+    local p = Slots.getPosition(col, row, mat)
+    p.x = -p.x  -- x backwards from local?
+    p = self.positionToWorld(p)
+    p.y = p.y + 3
+    return p
+end
+
+--- Where to place draftable slices during setup.
+-- @param i (number) : slice index.
+-- @return table : {xyz} position.
+function Position.draftSlice(i)
+    -- Unlike others, scale row by 2x.
+    local col = Position.SLICE.col0 + ((i - 1) % Position.SLICE.numCols)
+    local row = Position.SLICE.row0 + math.floor((i - 1) /  Position.SLICE.numCols) * 2
+    return Position._pos(col, row, Slots.DRAFT_MAT)
+end
+
+--- Where to place draftable factions during setup.
+-- @param i (number) : faction index.
+-- @return table : {xyz} position.
+function Position.draftFaction(i)
+    local col = Position.FACTION.col0 + ((i - 1) % Position.FACTION.numCols)
+    local row = Position.FACTION.row0 + math.floor((i - 1) /  Position.FACTION.numCols)
+    return Position._pos(col, row, Slots.DRAFT_MAT)
+end
+
+--- Where to place draftable seats during setup.
+-- @param i (number) : seat index.
+-- @return table : {xyz} position.
+function Position.draftSeat(i)
+    local numZones = #_zoneHelper.zones()
+
+    -- Match table positions (give up if more than fit).
+    if numZones == 2 then
+        i = ({ 4, 1 })[i]
+    elseif numZones == 3 then
+        i = ({ 4, 1, 2 })[i]
+    elseif numZones == 4 then
+        i = ({ 5, 4, 1, 2 })[i]
+    elseif numZones == 5 then
+        i = ({ 5, 4, 1, 2, 3 })[i]
+    elseif numZones == 6 then
+        i = ({ 6, 5, 4, 1, 2, 3 })[i]
+    end
+
+    local col = Position.SEAT.col0 + ((i - 1) % Position.SEAT.numCols)
+    local row = Position.SEAT.row0 + math.floor((i - 1) /  Position.SEAT.numCols)
+    return Position._pos(col, row, Slots.DRAFT_MAT)
+end
+
+-------------------------------------------------------------------------------
+
+-- Tile allocation system that ensures players get balanced tile hand.
+-- Allocates tiles from three tiers, with minimum and maximum spends for resources/influence.
+-- @author Volverbot for design
+-- @author Milty for scripting and design
+VolverMilty = {
+    tier1 = { 27, 28, 35, 37, 30, 69, 72, 75 },
+    tier2 = { 26, 29, 38, 33, 34, 62, 64, 65, 66, 70, 71, 74, 76 },
+    tier3 = { 19, 20, 21, 22, 23, 24, 25, 31, 32, 36, 59, 60, 61, 63, 73 },
+
+    defaultMinR = 2.5,
+    defaultMinI = 4,
+
+    minR = false,
+    minI = false,
+    minTotal = 9,
+    maxTotal = 13,
+    pushWormholesLegends = false,
+    numAlpha = 0,
+    numBeta = 0,
+    numLegend = 0,
+}
+
+function VolverMilty.permute(list)
+    assert(type(list) == 'table')
+    local shuffled = {}
+    for i, v in ipairs(list) do
+        local j = math.random(1, #shuffled + 1)
+        table.insert(shuffled, j, v)
+    end
+    return shuffled
+end
+
+function VolverMilty.find(target, list) -- find element target's index in list
+    for _, v in ipairs(list) do
+      if v == target then
+        return _
+      end
+    end
+    return nil
+end
+
+function VolverMilty.makeHands(count)
+    assert(type(count) == 'number')
+    -- shuffles tile tier list
+    local randomTier1 = VolverMilty.permute(VolverMilty.tier1)
+    local randomTier2 = VolverMilty.permute(VolverMilty.tier2)
+    local randomTier3 = VolverMilty.permute(VolverMilty.tier3)
+    local adjCount = { count + 1, count + 1, count + 1 }
+    local randTileList = {}
+    for i = 1, count do
+        table.insert(randTileList, i)
+    end
+    randTileList = VolverMilty.permute(randTileList)
+    -- modifies randomized tier 2 tiles to force include legendary planets/wormhole planets based on specified numbers of forced inclusions
+    if VolverMilty.pushWormholesLegends then
+        printToAll('Making sure wormholes and legendary planets are present', 'Yellow')
+        VolverMilty.numLegend = math.random(1,2)
+        VolverMilty.numAlpha = math.random(2,3)
+        VolverMilty.numBeta = math.random(2,3)
+    end
+    -- randomizes which beta planet/legendary planet to force in
+    local randBeta = math.random() >= 0.5
+    local randLegend = math.random() >= 0.5
+    local numReserved = 1
+    local betaChosen = randBeta and 25 or 64
+    --rearranges tile lists to account for forced in systems
+    if VolverMilty.numBeta == 3 then
+        local quannIndex = VolverMilty.find(25, randomTier3)
+        local atlasIndex = VolverMilty.find(64, randomTier2)
+        if randBeta == 0 then
+            randomTier3[randTileList[numReserved]], randomTier3[quannIndex] = randomTier3[quannIndex], randomTier3[randTileList[numReserved]]
+            randomTier2[randTileList[numReserved + 1]], randomTier2[atlasIndex] = randomTier2[atlasIndex], randomTier2[randTileList[numReserved + 1]]
+        else
+            randomTier2[randTileList[numReserved]], randomTier2[atlasIndex] = randomTier2[atlasIndex], randomTier2[randTileList[numReserved]]
+            randomTier3[randTileList[numReserved + 1]], randomTier3[quannIndex] = randomTier3[quannIndex], randomTier3[randTileList[numReserved + 1]]
+        end
+        numReserved = numReserved + 2
+    elseif VolverMilty.numBeta == 2 then
+        local betaTier = randBeta and randomTier3 or randomTier2
+        local betaIndex = VolverMilty.find(betaChosen, betaTier)
+        betaTier[randTileList[numReserved]], betaTier[betaIndex] = betaTier[betaIndex], betaTier[randTileList[numReserved]]
+        numReserved = numReserved + 1
+    end
+    if VolverMilty.numAlpha == 3 then
+        local lodorIndex = VolverMilty.find(26, randomTier2)
+        randomTier2[randTileList[numReserved]], randomTier2[lodorIndex] = randomTier2[lodorIndex], randomTier2[randTileList[numReserved]]
+        numReserved = numReserved + 1
+    end
+    if VolverMilty.numLegend == 2 then
+        local primorIndex = VolverMilty.find(65, randomTier2)
+        local hopesEndIndex = VolverMilty.find(66, randomTier2)
+        randomTier2[randTileList[numReserved]], randomTier2[primorIndex] = randomTier2[primorIndex], randomTier2[randTileList[numReserved]]
+        randomTier2[randTileList[numReserved + 1]], randomTier2[hopesEndIndex] = randomTier2[hopesEndIndex], randomTier2[randTileList[numReserved + 1]]
+    elseif VolverMilty.numLegend == 1 then
+        local legendIndex = VolverMilty.find(randLegend and 65 or 66, randomTier2)
+        randomTier2[randTileList[numReserved]], randomTier2[legendIndex] = randomTier2[legendIndex], randomTier2[randTileList[numReserved]]
+    end
+
+    local result = {}
+    for i = 1, count do
+        local validHand = false
+        local adjustTier = { false, false, false }
+        local cycles = 0
+        while validHand == false do
+            -- makes a hand of tiles from each tier
+            local hand = { randomTier1[i], randomTier2[i], randomTier3[i] }
+            validHand = VolverMilty._verifyHand(hand)
+            -- if hand doesn't hit thresholds, goes on to the next hand combination
+            if validHand == false then
+                if adjustTier[1] == false and adjustTier[2] == false and adjustTier[3] == false then
+                    adjustTier[3] = true
+                end
+                if adjustTier[1] == true then
+                    randomTier1[i], randomTier1[adjCount[1]] = randomTier1[adjCount[1]], randomTier1[i]
+                    adjustTier[1] = false
+                    adjCount[1] = adjCount[1] + 1
+                end
+                if adjustTier[2] == true then
+                    randomTier2[i], randomTier2[adjCount[2]] = randomTier2[adjCount[2]], randomTier2[i]
+                    adjustTier[2] = false
+                    adjCount[2] = adjCount[2] + 1
+                    if adjCount[2] > #VolverMilty.tier2 then
+                        adjustTier[1] = true
+                        adjustTier[2] = false
+                        adjCount[2] = count
+                    end
+                end
+                if adjustTier[3] == true then
+                    randomTier3[i], randomTier3[adjCount[3]] = randomTier3[adjCount[3]], randomTier3[i]
+                    adjustTier[3] = false
+                    adjCount[3] = adjCount[3] + 1
+                    if adjCount[3] > #VolverMilty.tier3 then
+                        adjustTier[2] = true
+                        adjustTier[3] = false
+                        adjCount[3] = count
+                    end
+                end
+            end
+            cycles = cycles + 1
+            if cycles > 1000 then
+                error('infinite loop?')
+            end
+        end
+        table.insert(result, { randomTier1[i], randomTier2[i], randomTier3[i] })
+    end
+    return result
+end
+
+function VolverMilty._verifyHand(tileTable)
+    local optR = 0.0
+    local optI = 0.0
+    -- sums hands optimized resources and influence, compares to minimum values
+    for i, tile in ipairs(tileTable) do
+        local system = _systemHelper.systemFromTile(tile)
+        for j, planet in ipairs(system.planets) do
+            if planet.resources > planet.influence then
+                optR = optR + planet.resources
+            elseif planet.influence > planet.resources then
+                optI = optI + planet.influence
+            else
+                optR = optR + 0.5 * planet.resources
+                optI = optI + 0.5 * planet.influence
+            end
+        end
+    end
+    local minR = VolverMilty.minR or VolverMilty.defaultMinR
+    local minI = VolverMilty.minI or VolverMilty.defaultMinI
+    local minTotal = VolverMilty.minTotal
+    local maxTotal = VolverMilty.maxTotal
+    return optR >= minR and optI >= minI and optR + optI >= minTotal and optR + optI <= maxTotal
+end
+
+function VolverMilty.addRedTiles(hands, count)
+    local redTiles = SystemTiles.getRedTiles()
+    redTiles = VolverMilty.permute(redTiles)
+    local wormholesAlpha = {}
+    local wormholesBeta = {}
+    local betaLess = {}
+    local alphaLess = {}
+    -- modifies redTile list to force include wormholes as specified
+    local randTileList = {}
+    for i=1,#hands do
+        table.insert(randTileList, i)
+    end
+    randTileList = VolverMilty.permute(randTileList)
+    --determines which random alpha wormhole to include
+    local reserveSpots = 1
+    local randAlpha = math.random() > 0.5
+    -- rearranges tile list to account for forced in tiles
+    for _, hand in ipairs(hands) do
+        if VolverMilty.find(25, hand) or VolverMilty.find(64, hand) then
+            wormholesBeta[_] = true
+        else
+            wormholesBeta[_] = false
+            table.insert(betaLess, _)
+        end
+        if VolverMilty.find(26, hand) then
+            wormholesAlpha[_] = true
+        else
+            wormholesAlpha[_] = false
+            table.insert(alphaLess, _)
+        end
+    end
+    if VolverMilty.numBeta > 0 then
+        local betaIndex = VolverMilty.find(40, redTiles)
+        redTiles[20-randTileList[reserveSpots]*2], redTiles[betaIndex] = redTiles[betaIndex], redTiles[20-randTileList[reserveSpots]*2]
+        reserveSpots = reserveSpots + 1
+    end
+    if VolverMilty.numAlpha == 1 then
+        local alphaIndex = VolverMilty.find(randAlpha and 39 or 79, redTiles)
+        redTiles[20-randTileList[reserveSpots]*2], redTiles[alphaIndex] = redTiles[alphaIndex], redTiles[20-randTileList[reserveSpots]*2]
+        reserveSpots = reserveSpots + 1
+    elseif VolverMilty.numAlpha > 1 then
+        local alphaIndex = VolverMilty.find(39, redTiles)
+        local alphaAsteroidIndex = VolverMilty.find(79, redTiles)
+        if randAlpha == 0 then
+            redTiles[20-randTileList[reserveSpots]*2], redTiles[alphaIndex] = redTiles[alphaIndex], redTiles[20-randTileList[reserveSpots]*2]
+            redTiles[20-randTileList[reserveSpots+1]*2], redTiles[alphaAsteroidIndex] = redTiles[alphaAsteroidIndex], redTiles[20-randTileList[reserveSpots+1]*2]
+        else
+            redTiles[20-randTileList[reserveSpots]*2], redTiles[alphaAsteroidIndex] = redTiles[alphaAsteroidIndex], redTiles[20-randTileList[reserveSpots]*2]
+            redTiles[20-randTileList[reserveSpots+1]*2], redTiles[alphaIndex] = redTiles[alphaIndex], redTiles[20-randTileList[reserveSpots+1]*2]
+        end
+    end
+    local betaIndex = VolverMilty.find(40, redTiles)
+    if wormholesBeta[math.floor((20-betaIndex)/2)] == true then
+        local randSlice = betaLess[math.random(#betaLess)]
+        redTiles[betaIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[betaIndex]
+    end
+    local alphaIndex = VolverMilty.find(39, redTiles)
+    local alphaAsteroidIndex = VolverMilty.find(79, redTiles)
+    if wormholesAlpha[math.floor((20-alphaIndex)/2)] == true then
+        local randSlice = alphaLess[math.random(#alphaLess)]
+        redTiles[alphaIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[alphaIndex]
+        wormholesAlpha[randSlice] = true
+        table.remove(alphaLess, VolverMilty.find(randSlice, alphaLess))
+    end
+    if wormholesAlpha[math.floor((20-alphaAsteroidIndex)/2)] == true then
+        local randSlice = alphaLess[math.random(#alphaLess)]
+        redTiles[alphaAsteroidIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[alphaAsteroidIndex]
+    end
+    for _, hand in ipairs(hands) do
+        for _ = 1, count do
+            local tile = assert(table.remove(redTiles))
+            table.insert(hand, tile)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+SliceTokens = {}
+
+--- Create a single object with the home system (grey) and slice tiles,
+-- merging tiles into it as child objects.  The overall slice has a safe guid.
+function SliceTokens.spawn(tiles, name, label, position, rotation)
+    assert(type(tiles) == 'table')
+    assert(type(name) == 'string')
+    assert(type(label) == 'string')
+    assert(type(position) == 'table')
+    assert(type(rotation) == 'table')
+
+    local spawnRotation = { x = 0, y = 180, z = 0 }
+    local scale = { x = 1.4, y = 1, z = 1.4 }  -- removes gutter
+
+    -- Use a grid aligned position, move to requested position later
+    -- (getTilePosition forces grid alignment).
+    local positionGrid = Slice._getTilePosition(0, position, false)
+
+    -- Place a anchor at center so rotation feels natural.
+    -- Bury anchor inside other objects.  Do not use the center tile, because
+    -- want to make sure have a unique GUID (not shared with a system tile).
+    local anchor = SliceTokens._spawnHex(positionGrid, spawnRotation, false)
+    anchor.setScale({ x = 1, y = 0.5, z = 1 })
+    anchor.use_grid = false
+    anchor.use_snap_points = true
+    if name then
+        anchor.setName(name)
+    end
+
+    -- Home system is "south" of center by one grid unit.
+    local homePos = {
+        x = positionGrid.x,
+        y = positionGrid.y,
+        z = positionGrid.z - 6.06
+    }
+
+    -- Label gets dropped when attaching, place label on anchor later.
+    local home = SliceTokens._spawnHex(homePos, spawnRotation, false)
+    home.setScale(scale)
+    if _deletedItemsBag then
+        _deletedItemsBag.call('ignoreGuid', home.getGUID())
+    end
+    anchor.addAttachment(home)
+
+    for i, tile in ipairs(tiles) do
+        local tilePos = Slice._getTilePosition(i, homePos, false)
+        local tileObject = SliceTokens._cloneSystemTile(tile, tilePos, spawnRotation)
+        tileObject.setScale(scale)
+        if _deletedItemsBag then
+            _deletedItemsBag.call('ignoreGuid', tileObject.getGUID())
+        end
+        anchor.addAttachment(tileObject)
+    end
+
+    if label then
+        anchor.createButton({
+            click_function = 'doNothing',
+            function_owner = self,
+            label          = label,
+            position       = { x = 0, y = 0.31, z = 6.06 },
+            rotation       = { x = 0, y = 0, z = 0 },
+            scale          = { x = 1, y = 1, z = 1 },
+            width          = 0,
+            height         = 0,
+            font_size      = 400,
+            font_color     = { r = 0, g = 0, b = 0 }
+        })
+
+    end
+
+    anchor.setPosition(position)
+    anchor.setRotation(rotation)
+    return anchor
+end
+
+function SliceTokens._spawnHex(position, rotation, label)
+    assert(type(position) == 'table')
+    assert(type(rotation) == 'table')
+    assert((not label) or type(label) == 'string')
+
+    local params = {
+        mesh = 'http://cloud-3.steamusercontent.com/ugc/1495712136739988324/528952D008E642AAC461C7B53CFD1CBE16C62F15/',
+        collider = 'http://cloud-3.steamusercontent.com/ugc/1495712136739988406/0EF61A7C53392D9A4F95900FE7274EF978D24B84/',
+        type = 0,
+        material = 3,  -- cardboard
+    }
+    local hex = spawnObject({
+        type              = 'Custom_Model',
+        position          = position,
+        rotation          = rotation,
+        scale             = { x = 1.36, y = 2, z = 1.36 },
+        params            = params,
+        sound             = false,
+        snap_to_grid      = false
+    })
+    hex.setCustomObject(params)
+    hex.setColorTint('Grey')
+    hex.use_grid = false
+    hex.use_snap_points = false
+    if label then
+        hex.createButton({
+            click_function = 'doNothing',
+            function_owner = self,
+            label          = label,
+            position       = { x = 0, y = 1.35, z = 0 },
+            rotation       = { x = 0, y = 0, z = 0 },
+            scale          = { x = 1, y = 1, z = 1 },
+            width          = 0,
+            height         = 0,
+            font_size      = 400,
+            font_color     = { r = 0, g = 0, b = 0 }
+        })
+    end
+    return hex
+end
+
+function SliceTokens._cloneSystemTile(tile, position, rotation)
+    local system = _systemHelper.systemFromTile(tile)
+    if not system then
+        error('Spawn.tileClone: not such tile ' .. tile)
+    end
+    local tileData = SystemTiles._getTileData(system.guid)
+    if not tileData then
+        error('Spawn.tileClone: missing tile ' .. tile)
+    end
+    local tileObject = spawnObjectData({
+        data              = tileData,
+        position          = position,
+        rotation          = rotation,
+        scale             = { x = 1.36, y = 1.36, z = 1.36 },
+        sound             = false,
+        snap_to_grid      = false,
+    })
+    tileObject.use_grid = false
+    tileObject.use_snap_points = false
+    return tileObject
+end
+
+function SliceTokens.getSliceIndex(sliceToken)
+    local letter = string.match(sliceToken.getName(), '^Slice (.)$')
+    if letter then
+        local startPos, endPos = string.find('ABCDEFGHIJKLMNOPQRSTUVWXYZ', letter)
+        return startPos
+    end
+end
+
+function SliceTokens.getSliceName(index)
+    assert(type(index) == 'number')
+    local letter = string.sub('ABCDEFGHIJKLMNOPQRSTUVWXYZ', index, index)
+    return 'Slice ' .. assert(letter)
+end
+
+function SliceTokens.getAll(includeInsideSelf)
+    assert(type(includeInsideSelf) == 'boolean')
+    local result = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Generic' and SliceTokens.getSliceIndex(object) then
+            if includeInsideSelf or (not BoundingBox.insideSelf(object)) then
+                table.insert(result, object)
+            end
+        end
+    end
+    return result
+end
+
+function SliceTokens.stow()
+    for _, object in ipairs(SliceTokens.getAll(true)) do
+        if _deletedItemsBag then
+            _deletedItemsBag.call('ignoreGuid', object.getGUID())
+        end
+        destroyObject(object)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+SeatTokens = {
+    BAG_NAME = 'Randomize Seats',
+    _bagGuid = false
+}
+
+function SeatTokens._getBag()
+    local bag = SeatTokens._bagGuid and getObjectFromGUID(SeatTokens._bagGuid)
+    if bag then
+        return bag
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' and object.getName() == SeatTokens.BAG_NAME then
+            SeatTokens._bagGuid = object.getGUID()
+            return object
+        end
+    end
+    error('SeatTokens._getBag: missing "' .. SeatTokens.BAG_NAME .. '"')
+end
+
+function SeatTokens.moveToken(color, label, position, rotation)
+    assert(type(color) == 'string')
+    assert(type(label) == 'string')
+    assert(type(position) == 'table')
+    assert(type(rotation) == 'table')
+
+    local token = _getByName('GoPiece', color)
+    if token then
+        local collide = false
+        local fast = true
+        token.setPositionSmooth(position, collide, fast)
+        token.setRotationSmooth(rotation, collide, fast)
+    else
+        local bag = SeatTokens._getBag()
+        for _, entry in ipairs(bag.getObjects()) do
+            if entry.name == color then
+                token = bag.takeObject({
+                    position          = position,
+                    rotation          = rotation,
+                    smooth            = true,
+                    guid              = entry.guid
+                })
+            end
+        end
+    end
+    if not token then
+        error('SeatTokens.moveToken: missing token "' .. color .. '"')
+    end
+    token.setScale({ x = 2.5, y = 0.5, z = 2.5 })
+    if label then
+        token.clearButtons()
+        token.createButton({
+            click_function = 'doNothing',
+            function_owner = self,
+            label          = label,
+            position       = { x = 0, y = 0.19, z = 0 },
+            rotation       = { x = 0, y = 0, z = 0 },
+            scale          = { x = 1, y = 1, z = 1 },
+            width          = 0,
+            height         = 0,
+            font_size      = 80,
+            font_color     = { r = 0, g = 0, b = 0 }
+        })
+    end
+    return token
+end
+
+function SeatTokens.getAll(includeInsideSelf)
+    assert(type(includeInsideSelf) == 'boolean')
+    local nameSet = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        nameSet[color] = true
+    end
+    local result = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'GoPiece' and nameSet[object.getName()] then
+            if includeInsideSelf or (not BoundingBox.insideSelf(object)) then
+                table.insert(result, object)
+            end
+        end
+    end
+    return result
+end
+
+function SeatTokens.stow()
+    local bag = SeatTokens._getBag()
+    for _, object in ipairs(SeatTokens.getAll(true)) do
+        object.clearButtons()
+        bag.putObject(object)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+FactionTokens = {
+    BAG_NAME = 'Pick a Faction to Play',
+    _bagGuid = false
+}
+
+function FactionTokens._getBag()
+    local bag = FactionTokens._bagGuid and getObjectFromGUID(FactionTokens._bagGuid)
+    if bag then
+        return bag
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' and object.getName() == FactionTokens.BAG_NAME then
+            FactionTokens._bagGuid = object.getGUID()
+            return object
+        end
+    end
+    error('FactionTokens._getBag: missing "' .. FactionTokens.BAG_NAME .. '"')
+end
+
+function FactionTokens.shuffle()
+    local bag = FactionTokens._getBag()
+    bag.shuffle()
+end
+
+function FactionTokens.placeRandomToken(position, rotation)
+    local bag = FactionTokens._getBag()
+    local token = bag.takeObject({
+        position          = position,
+        rotation          = rotation,
+        smooth            = true,
+    })
+    return token
+end
+
+function FactionTokens.getAll(includeInsideSelf)
+    assert(type(includeInsideSelf) == 'boolean')
+    local nameSet = {}
+    for _, faction in pairs(_factionHelper.allFactions(true)) do
+        nameSet[faction.tokenName .. ' Faction Token'] = true
+    end
+    local result = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Card' and nameSet[object.getName()] then
+            if includeInsideSelf or (not BoundingBox.insideSelf(object)) then
+                table.insert(result, object)
+            end
+        end
+    end
+    return result
+end
+
+function FactionTokens.stow()
+    local bag = FactionTokens._getBag()
+    for _, object in ipairs(FactionTokens.getAll(true)) do
+        bag.putObject(object)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+DraftSelectionMats = {
+    NAME = 'Draft Selections Mat',
+    DESCRIPTION = 'Place your slice, faction, and seat draft selections here'
+}
+
+function DraftSelectionMats.stow()
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Generic' and object.getName() == DraftSelectionMats.NAME then
+            if _deletedItemsBag then
+                _deletedItemsBag.call('ignoreGuid', object.getGUID())
+            end
+            destroyObject(object)
+        end
+    end
+end
+
+function DraftSelectionMats.spawn(color)
+    assert(type(color) == 'string')
+
+    local zoneAttrs = assert(_zoneHelper.zoneAttributes(color))
+    local pos = {
+        x = zoneAttrs.center.x,
+        y = zoneAttrs.center.y + 2,
+        z = zoneAttrs.center.z + 4 * (zoneAttrs.center.z < 0 and 1 or -1)
+    }
+    local rot = {
+        x = 0,
+        y = zoneAttrs.rotation.y,
+        z = 0
+    }
+    local scale = {
+        x = 1,
+        y = 1,
+        z = 1
+    }
+
+    local params = {
+        mesh = 'http://cloud-3.steamusercontent.com/ugc/1734422701007716546/23FC1D77A4E2C9F34C0D5E269C3A0A7706EBB850/',
+        diffuse = 'http://cloud-3.steamusercontent.com/ugc/1499090241450210706/2DA6B757A764A6BC9F6051ABD64E6291135FBA0A/',
+        type = 0,  -- generic
+        material = 3,  -- cardboard
+    }
+    local tile = spawnObject({
+        type              = 'Custom_Model',
+        position          = pos,
+        rotation          = rot,
+        scale             = scale,
+        callback_function = function(object) object.setLock(true) end,
+        sound             = false,
+        snap_to_grid      = false,
+        params            = params,
+    })
+    tile.setCustomObject(params)
+    tile.setName(DraftSelectionMats.NAME)
+    tile.setDescription(DraftSelectionMats.DESCRIPTION)
+    tile.use_grid = false
+    tile.use_snap_points = false
+
+    local snapPoints = {}
+    local lines = {}
+    local lineColor = { r = 1, g = 1, b = 1, a = 0.1 }
+    for col = 0, 2 do
+        for row = 1, 1 do
+            table.insert(snapPoints, {
+                position = Slots.getPosition(2 - col, row, Slots.SELECTION_MAT),
+                rotation = { x = 0, y = 0, z = 0 },
+                rotation_snap = true,
+            })
+            table.insert(lines, Slots.getVectorLine(col, row, Slots.SELECTION_MAT, lineColor))
+        end
+    end
+    tile.setSnapPoints(snapPoints)
+    tile.setVectorLines(lines)
+
+    local playerName = color
+    for _, player in ipairs(Player.getPlayers()) do
+        if player.color == color then
+            playerName = player.steam_name
+            break
+        end
+    end
+    tile.createButton({
+        click_function = 'doNothing',
+        function_owner = self,
+        label          = playerName .. '\nDraft Choices',
+        position       = Slots.getPosition(1, 0, Slots.SELECTION_MAT),
+        width          = 0,
+        height         = 0,
+        font_size      = 400,
+        font_color     = 'Yellow',
+    })
+end
+
+-------------------------------------------------------------------------------
+
+SystemTiles = {
+    _tileGuidToBagGuid = false
+}
+
+function SystemTiles.getRedTiles()
+    local isPoK = _setupHelper.getPoK()
+    local result = {}
+    for _, system in pairs(_systemHelper.systems()) do
+        local isRedTile = false
+        isRedTile = isRedTile or (system.anomalies and #system.anomalies > 0)
+        isRedTile = isRedTile or (not system.planets) or (#system.planets == 0)
+        if system.tile > 91 then
+            isRedTile = false
+        end
+        if system.tile > 51 and not isPoK then
+            isRedTile = false
+        end
+        if system.hyperlane then
+            isRedTile = false
+        end
+        if system.home then
+            isRedTile = false
+        end
+        if system.tile == 81 then
+            isRedTile = false  -- Muaat supernova
+        end
+        if isRedTile then
+            table.insert(result, system.tile)
+        end
+    end
+    return result
+end
+
+function SystemTiles._getTileBag(tileGuid)
+    assert(type(tileGuid) == 'string')
+    if not SystemTiles._tileGuidToBagGuid then
+        SystemTiles._tileGuidToBagGuid = {}
+        local guidToSystem = _systemHelper.systems()
+        local bagSet = {
+            ['Blue Planet Tiles'] = true,
+            ['Red Anomaly Tiles'] = true,
+        }
+        local tileToBag = {}
+        for _, object in ipairs(getAllObjects()) do
+            if object.tag == 'Bag' and bagSet[object.getName()] then
+                local bagGuid = object.getGUID()
+                for _, entry in ipairs(object.getObjects()) do
+                    if guidToSystem[entry.guid] then
+                        SystemTiles._tileGuidToBagGuid[entry.guid] = bagGuid
+                    end
+                end
+            end
+        end
+    end
+    local bagGuid = SystemTiles._tileGuidToBagGuid[tileGuid]
+    return bagGuid and getObjectFromGUID(bagGuid)
+end
+
+function SystemTiles.placeTile(tile, position, rotation)
+    local system = _systemHelper.systemFromTile(tile)
+    if not system then
+        error('SystemTiles._placeTile: not such tile ' .. tile)
+    end
+    local bag = SystemTiles._getTileBag(system.guid)
+    local tileObject = false
+    if bag then
+        tileObject = bag.takeObject({
+            position          = position,
+            rotation          = rotation,
+            smooth            = true,
+            guid              = system.guid
+        })
+    else
+        tileObject = getObjectFromGUID(system.guid)
+        if tileObject then
+            local collide = false
+            local fast = true
+            tileObject.setPositionSmooth(position, collide, fast)
+            tileObject.setRotationSmooth(rotation, collide, fast)
+        end
+    end
+    if not tileObject then
+        error('SystemTiles._placeTile: missing tile ' .. tile)
+    end
+    Wait.time(function() _systemHelper.lockSystemTile(system.guid) end, 3)
+    return tileObject
+end
+
+function SystemTiles._getTileData(tileGuid)
+    -- Find in bag (expected path).
+    local bag = SystemTiles._getTileBag(tileGuid)
+    if bag then
+        for _, tileData in ipairs(bag.getData().ContainedObjects) do
+            if tileData.GUID == tileGuid then
+                return tileData
+            end
+        end
+    end
+    -- Not found in bag, look on table.
+    local tileObject = getObjectFromGUID(tileGuid)
+    if tileObject then
+        return tileObject.getData()
+    end
+    error('SystemTiles._getTileData: missing tile ' .. tileGuid)
+end
+
+-------------------------------------------------------------------------------
+
+Slice = {
+    -- Slice is a mini-map string with tiles in this order.
+    OFFSETS = {
+        { name = 'leftOfHome', x = -1, z = 0.5 },
+        { name = 'frontOfHome', x = 0, z = 1 },
+        { name = 'rightOfHome', x = 1, z = 0.5 },
+        { name = 'leftEquidistant', x = -1, z = 1.5 },
+        { name = 'frontFurther', x = 0, z = 2 },
+    }
+}
+
+--- Compute "R/I TECH LEGENDARY" label from a list of tile numbers.
+function Slice.getLabel(tiles)
+    local r = 0
+    local i = 0
+    local tech = {}
+    local legendary = 0
+    for _, tile in ipairs(tiles) do
+        local system = _systemHelper.systemFromTile(tile)
+        for _, planet in ipairs(system.planets or {}) do
+            r = r + (planet.resources or 0)
+            i = i + (planet.influence or 0)
+            if planet.tech then
+                table.insert(tech, string.sub(planet.tech, 1, 1):upper())
+            end
+            if planet.legendary then
+                legendary = legendary + 1
+            end
+        end
+    end
+    local items = {
+        r .. '/' .. i
+    }
+    if #tech > 0 then
+        table.sort(tech)
+        table.insert(items, table.concat(tech, ''))
+    end
+    if legendary > 0 then
+        local n = legendary
+        table.insert(items, ((n > 1) and n or '') .. 'L')
+    end
+    return table.concat(items, ' ')
+end
+
+--- Swap tiles so no anomalies are adjacent (in this slice).
+function Slice.randomizeAndFixAdjacentAnomalies(tiles)
+    local tiles = VolverMilty.permute(tiles)
+
+    -- Lookup by tile number is slightly expensive (linear).
+    -- Get the relevant systems in one pass.
+    local tileSet = {}
+    for _, tile in ipairs(tiles) do
+        tileSet[tile] = true
+    end
+    local tileToSystem = {}
+    for _, system in pairs(_systemHelper.systems()) do
+        if tileSet[system.tile] then
+            tileToSystem[system.tile] = system
+        end
+    end
+
+    local swapRules = {
+        {
+            check1 = 'leftOfHome',
+            check2 = 'leftEquidistant',
+            swaps = {
+                { 'leftOfHome', 'rightOfHome' },
+                { 'leftEquidistant', 'rightOfHome' },
+                { 'leftEquidistant', 'frontFurther' },
+            },
+        },
+        {
+            check1 = 'leftOfHome',
+            check2 = 'frontOfHome',
+            swaps = {
+                { 'frontOfHome', 'frontFurther' },
+                { 'frontOfHome', 'rightOfHome' },
+            },
+        },
+        {
+            check1 = 'frontOfHome',
+            check2 = 'frontFurther',
+            swaps = {
+                { 'frontOfHome', 'leftOfHome' },
+                { 'frontOfHome', 'rightOfHome' },
+            },
+        },
+        {
+            check1 = 'frontOfHome',
+            check2 = 'leftEquidistant',
+            swaps = {
+                { 'frontOfHome', 'rightOfHome' },
+            },
+        },
+        {
+            check1 = 'frontOfHome',
+            check2 = 'rightOfHome',
+            swaps = {
+                { 'frontOfHome', 'leftOfHome' },
+                { 'frontOfHome', 'leftEquidistant' },
+                { 'frontOfHome', 'frontFurther' },
+            },
+        },
+        {
+            check1 = 'leftEquidistant',
+            check2 = 'frontFurther',
+            swaps = {
+                { 'leftEquidistant', 'leftOfHome' },
+                { 'leftEquidistant', 'rightOfHome' },
+                { 'frontFurther', 'rightOfHome' },
+            },
+        },
+    }
+    local nameToIndex = {}
+    for i, offset in ipairs(Slice.OFFSETS) do
+        nameToIndex[offset.name] = i
+    end
+    local function doSwaps(checkFunction)
+        for _, swapRule in ipairs(swapRules) do
+            local check1 = assert(tiles[nameToIndex[swapRule.check1]])
+            local check2 = assert(tiles[nameToIndex[swapRule.check2]])
+            local system1 = assert(tileToSystem[check1])
+            local system2 = assert(tileToSystem[check2])
+            if checkFunction(system1, system2) then
+                local swap = assert(swapRule.swaps[math.random(1, #swapRule.swaps)])
+                local index1 = assert(nameToIndex[swap[1]])
+                local index2 = assert(nameToIndex[swap[2]])
+                local tile1 = tiles[index1]
+                local tile2 = tiles[index2]
+                tiles[index1] = tile2
+                tiles[index2] = tile1
+            end
+        end
+    end
+
+    -- Separate adjacent same wormholes.
+    local function checkWormholes(system1, system2)
+        assert(type(system1) == 'table' and type(system2) == 'table')
+        local wormholeSet1 = {}
+        for _, wormhole in ipairs(system1.wormholes or {}) do
+            wormholeSet1[wormhole] = true
+        end
+        for _, wormhole in ipairs(system2.wormholes or {}) do
+            if wormholeSet1[wormhole] then
+                return true
+            end
+        end
+    end
+    doSwaps(checkWormholes)
+
+    -- Separate adjacent anomalies (may clobber earlier adjustments).
+    local function checkAnomalies(system1, system2)
+        local anomalies1 = system1.anomalies and #system1.anomalies > 0
+        local anomalies2 = system2.anomalies and #system2.anomalies > 0
+        return anomalies1 and anomalies2
+    end
+    doSwaps(checkAnomalies)
+
+    return tiles
+end
+
+--- Get position given the home system position and tile index.
+-- Optionally apply slice rotation to account for map orientation.
+function Slice._getTilePosition(i, p0, applyRotation)
+    assert(type(i) == 'number', 'bad i')
+    assert(type(p0) == 'table', 'bad p0')
+    assert(type(applyRotation) == 'boolean', 'bad applyRotation')
+
+    local offset = { x = 0, z = 0 }
+    if i > 0 then
+        offset = assert(Slice.OFFSETS[i])
+    end
+
+    local function getOutscribedTileRadius()
+        local x = Grid.sizeX or 7
+        local y = Grid.sizeY or 7
+        assert(x == y, 'error: not a square grid')
+        return x / 2.0
+    end
+
+    local function getInscribedTileRadius()
+        local r = getOutscribedTileRadius()
+        local c = r
+        local b = r / 2.0
+        return math.sqrt(c^2 - b^2)
+    end
+
+    -- Compute position.
+    local dx = getInscribedTileRadius() * 2 * offset.x
+    local dz = getInscribedTileRadius() * 2 * offset.z
+    if applyRotation then
+        local theta = math.atan2(p0.z, p0.x) - (math.pi / 2)
+        local inverse = (theta + math.pi) % (math.pi * 2)
+        local dx2 = math.cos(inverse) * dx - math.sin(inverse) * dz
+        local dz2 = math.sin(inverse) * dx + math.cos(inverse) * dz
+        dx, dz = dx2, dz2
+    end
+    local pos = {
+        x = p0.x + dx,
+        y = p0.y,
+        z = p0.z + dz,
+    }
+
+    -- Convert to hex and back again to be certain pos is grid aligned.
+    local y = pos.y
+    local hex = _systemHelper.hexFromPosition(pos)
+    pos = _systemHelper.hexToPosition(hex)
+    pos = {
+        x = pos.x,
+        y = y,
+        z = pos.z
+    }
+
+    return pos
+end
+
+--- Place system tiles, find tiles in bags or on table.
+function Slice.placeTiles(tiles, homeSystemPosition, applyRotation)
+    assert(type(tiles) == 'table')
+    assert(type(homeSystemPosition) == 'table')
+    assert(type(applyRotation) == 'boolean')
+
+    for i, tile in ipairs(tiles) do
+        local pos = Slice._getTilePosition(i, homeSystemPosition, applyRotation)
+        local rot = { x = 0, y = 180, z = 0 }
+        SystemTiles.placeTile(tile, pos, rot)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function _selectFaction(color, factionTokenName)
+    assert(type(color) == 'string' and type(factionTokenName) == 'string')
+
+    local factionSelector = false
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if name == 'Faction Selector' then
+            local zone = _zoneHelper.zoneFromPosition(object.getPosition())
+            if zone == color then
+                factionSelector = object
+                break
+            end
+        end
+    end
+    assert(factionSelector, 'missing faction selector for ' .. color)
+
+    factionSelector.call('selectFaction', factionTokenName)
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

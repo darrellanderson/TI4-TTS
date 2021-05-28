@@ -1,0 +1,111 @@
+--- Inspect cards.
+-- There is a report of duplicate action cards, seemingly drawn cards not just discard.
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    local keepOpen = true
+    self.addContextMenuItem('Check Actions', function() _verifyDeck('Actions') end, keepOpen)
+    self.addContextMenuItem('Check Secrets', function() _verifyDeck('Secret Objectives') end, keepOpen)
+    self.addContextMenuItem('Check Public 1', function() _verifyDeck('Public Objectives I') end, keepOpen)
+    self.addContextMenuItem('Check Public 2', function() _verifyDeck('Public Objectives II') end, keepOpen)
+    self.addContextMenuItem('Check Relics', function() _verifyDeck('Relics') end, keepOpen)
+    self.addContextMenuItem('Check Cultural', function() _verifyDeck('Cultural Exploration') end, keepOpen)
+    self.addContextMenuItem('Check Hazardous', function() _verifyDeck('Hazardous Exploration') end, keepOpen)
+    self.addContextMenuItem('Check Industrial', function() _verifyDeck('Industrial Exploration') end, keepOpen)
+    self.addContextMenuItem('Check Frontier', function() _verifyDeck('Frontier Exploration') end, keepOpen)
+end
+
+-------------------------------------------------------------------------------
+
+_verifyDeckCoroutineQueue = {}
+
+function _verifyDeck(deckName)
+    table.insert(_verifyDeckCoroutineQueue, deckName)
+    startLuaCoroutine(self, '_verifyDeckCoroutine')
+end
+
+function _verifyDeckCoroutine()
+    local deckName = table.remove(_verifyDeckCoroutineQueue)
+    assert(deckName, 'no deckName')
+    coroutine.yield(0)
+
+    local transform = _deckHelper.getDeckTransform(deckName)
+    assert(transform, 'bad deckName "' .. deckName .. '"')
+    coroutine.yield(0)
+
+    local cardNames = _deckHelper.getCardsWithSource({ deckName = deckName })
+    assert(cardNames and (#cardNames) > 0, 'empty cardNames')
+    coroutine.yield(0)
+
+    -- Create a map from name to initially zero.
+    local cardNameToCount = {}
+    for _, cardName in ipairs(cardNames) do
+        assert(not cardNameToCount[cardName], 'duplicate "' .. cardName .. '"')
+        cardNameToCount[cardName] = 0
+    end
+    coroutine.yield(0)
+
+    -- Count cards (including in decks).
+    for _, object in ipairs(getAllObjects()) do
+        if object.type == 'Card' then
+            local name = object.getName()
+            if cardNameToCount[name] then
+                cardNameToCount[name] = cardNameToCount[name] + 1
+            end
+        elseif object.type == 'Deck' then
+            for _, entry in ipairs(object.getObjects()) do
+                local name = entry.name
+                if cardNameToCount[name] then
+                    cardNameToCount[name] = cardNameToCount[name] + 1
+                end
+            end
+        end
+    end
+
+    -- Card names are unique, expect one of each.
+    local errors = {}
+    for cardName, count in pairs(cardNameToCount) do
+        if count ~= 1 then
+            table.insert(errors, 'ERROR: ' .. count .. ' ' .. cardName)
+        end
+    end
+
+    local message = {
+        'Verifying "' .. deckName .. '", ' .. (#cardNames) .. ' expected.',
+        (#errors) .. ' errors:',
+        table.concat(errors, '\n')
+    }
+    table.insert(message, 'finished')
+    printToAll(table.concat(message, '\n'), 'Grey')
+
+    return 1
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

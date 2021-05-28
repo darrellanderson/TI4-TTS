@@ -1,0 +1,336 @@
+--- Move cards into bags, then bags into boxes.
+
+local FACTIONBOX_TO_BAGNAME_TO_CARDNAMES = {
+    ['Veldyr Sovereignty Box'] = {
+    	['Veldyr Sovereignty Leaders Bag'] = { "Solis Morden", "Vera Khage", "Auberon Elyrin", "Aurora Stormcaller" },
+    	['Veldyr Sovereignty Tech Bag'] = { "Lancer Dreadnought II", "SEIDR Project" },
+    	['Veldyr Sovereignty Promissory Bag'] = { "Branch Office - Tax Haven", "Branch Office - Broadcast Hub", "Branch Office - Reserve Bank", "Branch Office - Orbital Shipyard" },
+    	['Veldyr Sovereignty Planets Bag'] = { "Rhune" },
+    },
+    ['Free Systems Compact Box'] = {
+    	['Free Systems Compact Leaders Bag'] = { "Cordo Haved", "President Cyhn", "Count Otto P'may", "Liberator" },
+    	['Free Systems Compact Tech Bag'] = { "Envoy Network", "Covert Strike Teams" },
+    	['Free Systems Compact Promissory Bag'] = { "Broadcast Teams" },
+    	['Free Systems Compact Planets Bag'] = { "Kroll", "Cyrra", "Idyn" },
+    },
+    ['Li-Zho Dynasty Box'] = {
+    	['Li-Zho Dynasty Leaders Bag'] = { "Vasra Ivo", "Dume Tathu", "Khaz-Rin Li-Zho", "Oro-Zhin Elite" },
+    	['Li-Zho Dynasty Tech Bag'] = { "Wraith Engine", "Heavy Bomber II" },
+    	['Li-Zho Dynasty Promissory Bag'] = { "Trusted Counselor" },
+    	['Li-Zho Dynasty Planets Bag'] = { "Pax", "Kyr", "Vess" },
+    },
+    ["L'Tokk Khrask Box"] = {
+    	["L'Tokk Khrask Leaders Bag"] = { "Udosh B'Rtul", "Hkot Tokal", "Vehl Tikar", "Megalith" },
+    	["L'Tokk Khrask Tech Bag"] = { "Stone's Embrace", "Shattered Sky II" },
+    	["L'Tokk Khrask Promissory Bag"] = { "Stone Speakers" },
+    	["L'Tokk Khrask Planets Bag"] = { "Bohl-Dhur" },
+    },
+    ['Ghemina Raiders Box'] = {
+    	['Ghemina Raiders Leaders Bag'] = { "Korela, The Lady", "Skarvald & Torvar", "Jarl Vel & Jarl Jotrun", "Kantrus, The Lord", "Jotun" },
+    	['Ghemina Raiders Tech Bag'] = { "War Song Implants", "Combat Transport II" },
+    	['Ghemina Raiders Promissory Bag'] = { "Raid Leaders" },
+    	['Ghemina Raiders Planets Bag'] = { "Drah", "Tryyk" },
+    },
+    ['Vaden Banking Clans Box'] = {
+    	['Vaden Banking Clans Leaders Bag'] = { "Yudri Sukhov", "Komdar Borodin", "Putriv Sirvonsk", "Collector" },
+    	['Vaden Banking Clans Tech Bag'] = { "Midas Turbine", "Krovoz Strike Teams" },
+    	['Vaden Banking Clans Promissory Bag'] = { "Vaden Handshake" },
+    	['Vaden Banking Clans Planets Bag'] = { "Vadarian", "Norvus" },
+    },
+    ['Glimmer of Mortheus Box'] = {
+    	['Glimmer of Mortheus Leaders Bag'] = { "Walik", "Komat", "Bayan", "Duuban" },
+    	['Glimmer of Mortheus Tech Bag'] = { "Fabrication Grid", "Illusory Weave Array" },
+    	['Glimmer of Mortheus Promissory Bag'] = { "Secrets of the Weave" },
+    	['Glimmer of Mortheus Planets Bag'] = { "Blaheo", "Empero" },
+    },
+    ['Augurs of Ilyxum Box'] = {
+    	['Augurs of Ilyxum Leaders Bag'] = { "Clodho", "Lachis", "Atropha", "Iledrith"},
+    	['Augurs of Ilyxum Tech Bag'] = { "Sentient Datapool", "Psychographics" },
+    	['Augurs of Ilyxum Promissory Bag'] = { "Read the Fates" },
+    	['Augurs of Ilyxum Planets Bag'] = { "Chiron", "Demis" },
+    },
+    ['Shipwrights of Axis Box'] = {
+    	['Shipwrights of Axis Leaders Bag'] = { "Shipwright ZskNck", "Designer TckVsk", "Demi-Queen MdcKssK", "Forgetender" },
+    	['Shipwrights of Axis Tech Bag'] = {  "Holo-Market Delivery Relay", "Emergency Deployment" },
+    	['Shipwrights of Axis Promissory Bag'] = { "Industry Secrets" },
+    	['Shipwrights of Axis Planets Bag'] = { "Axis" },
+    },
+    ['Olradin League Box'] = {
+    	['Olradin League Leaders Bag'] = { "Baggil Wildpaw", "Knak Half-Ear", "Pahn Silverfur", "Exemplar" },
+    	['Olradin League Tech Bag'] = { "Geosympathic Impeller", "False Flag Operations" },
+    	['Olradin League Promissory Bag'] = { "Incite Revolution" },
+    	['Olradin League Planets Bag'] = { "Sanctuary" },
+    },
+    ['Myko-Mentori Box'] = {
+    	['Myko-Mentori Leaders Bag'] = { "Lactarious Indigo", "Amanita Muscaria", "Coprinus Comatus", "Amandia Pholdis" },
+    	['Myko-Mentori Tech Bag'] = { "Psychoactive Armaments", "Mycelium Ring II" },
+    	['Myko-Mentori Promissory Bag'] = { "Gift of Insight" },
+    	['Myko-Mentori Planets Bag'] = { "Shi-Halaum" },
+    },
+    ['Tnelis Syndicate Box'] = {
+    	['Tnelis Syndicate Leaders Bag'] = { "Davish S'norri", "Fillipo Rois", "Turra Sveyar", "Daedalon" },
+    	['Tnelis Syndicate Tech Bag'] = { "Blockade Runner II", "Daedalon Flight System" },
+    	['Tnelis Syndicate Promissory Bag'] = { "Plots Within Plots" },
+    	['Tnelis Syndicate Planets Bag'] = { "Discordia" },
+    },
+    ['Savages of Cymiae Box'] = {
+    	['Savages of Cymiae Leaders Bag'] = { "Skhot Unit X-12", "Koryl Ferax", "The Voice United", "Revenant" },
+    	['Savages of Cymiae Tech Bag'] = { "Recursive Worm", "Unholy Abomination II" },
+    	['Savages of Cymiae Promissory Bag'] = { "Algorithmic Replication" },
+    	['Savages of Cymiae Planets Bag'] = { "Cymiae" },
+    },
+    ["Roh'Dhna Mechatronics Box"] = {
+    	["Roh'Dhna Mechatronics Leaders Bag"] = { "Rond Bri'Ay", "B-Unit 205643a", "Roh'Vhin Dhna MK4", "Autofabricator" },
+    	["Roh'Dhna Mechatronics Tech Bag"] = { "Terrafactory II", "Contractual Maintenance" },
+    	["Roh'Dhna Mechatronics Promissory Bag"] = { "Automatons" },
+    	["Roh'Dhna Mechatronics Planets Bag"] = { "Prind" },
+    },
+    ['Zelian Purifier Box'] = {
+    	['Zelian Purifier Leaders Bag'] = { "Zelian A", "Zelian B", "Zelian R", "Collider" },
+    	['Zelian Purifier Tech Bag'] = { "Shard Volley", "Impactor II" },
+    	['Zelian Purifier Promissory Bag'] = { "Hyperkinetic Ordinance" },
+    	['Zelian Purifier Planets Bag'] = { "Zelian", "Gen" },
+    },
+    ['Vaylerian Scourge Box'] = {
+    	['Vaylerian Scourge Leaders Bag'] = { "Yvin Korduul", "Pyndil Gonsuul", "Dyln Harthuul", "Eclipse" },
+    	['Vaylerian Scourge Tech Bag'] = { "Scavenger Exos", "Raider II" },
+    	['Vaylerian Scourge Promissory Bag'] = { "Clan's Favor" },
+    	['Vaylerian Scourge Planets Bag'] = { "Vaylar" },
+    },
+    ['Florzen Profiteers Box'] = {
+    	['Florzen Profiteers Leaders Bag'] = { "Sal Gavda", "Quaxdol Junitas", "Banua Gowen", "Privateer" },
+    	['Florzen Profiteers Tech Bag'] = { "Blackmail Programs",  "Corsair II" },
+    	['Florzen Profiteers Promissory Bag'] = { "Underground Market" },
+    	['Florzen Profiteers Planets Bag'] = { "Delmor", "Kyd" },
+    },
+    ['Dih-Mohn Flotilla Box'] = {
+    	['Dih-Mohn Flotilla Leaders Bag'] = { "Jgin Faru", "Clona Bathru", "Verrisus Ypru", "Repairitor" },
+    	['Dih-Mohn Flotilla Tech Bag'] = { "Impressment Programs", "Aegis II" },
+    	['Dih-Mohn Flotilla Promissory Bag'] = { "Combat Drills" },
+    	['Dih-Mohn Flotilla Planets Bag'] = { "Abyssus" },
+    },
+    ['Celdauri Trade Confederation Box'] = {
+    	['Celdauri Trade Confederation Leaders Bag'] = { "George Nobin", "Henry Storcher", "Titus Flavius", "Minuteman" },
+    	['Celdauri Trade Confederation Tech Bag'] = { "Emergency Mobilization", "Trade Port II" },
+    	['Celdauri Trade Confederation Promissory Bag'] = { "Trade Alliance", "Trade Alliance" },
+    	['Celdauri Trade Confederation Planets Bag'] = { "Louk", "Auldane" },
+    },
+    ['Nivyn Star Kings Box'] = {
+    	['Nivyn Star Kings Leaders Bag'] = { "Suldhan Wraeg", "Thussad Krath", "Krill Drakkon", "Voidflare Warden I" },
+    	['Nivyn Star Kings Tech Bag'] = { "Voidwake Missiles", "Voidflare Warden II" },
+    	['Nivyn Star Kings Promissory Bag'] = { "Nivyn Guidance" },
+    	['Nivyn Star Kings Planets Bag'] = { "Ellas" },
+    },
+    ['Mirveda Protectorate Box'] = {
+    	['Mirveda Protectorate Leaders Bag'] = { "Assault Machina", "Logic Machina", "Wrath Machina", "Javelin" },
+    	['Mirveda Protectorate Tech Bag'] = { "Gauss Cannon II", "Low-Orbit Engagement" },
+    	['Mirveda Protectorate Promissory Bag'] = { "Rapid Excavation" },
+    	['Mirveda Protectorate Planets Bag'] = { "Aldra", "Beata" },
+    },
+    ['Kortali Tribunal Box'] = {
+    	['Kortali Tribunal Leaders Bag'] = { "Queen Lucreia", "Queen Lorena", "Queen Nadalia", "Justicar" },
+    	['Kortali Tribunal Tech Bag'] = { "Tempest Warheads", "Deliverance Engine" },
+    	['Kortali Tribunal Promissory Bag'] = { "Blessing of the Queens" },
+    	['Kortali Tribunal Planets Bag'] = { "Ogdun", "Brthkul" },
+    },
+    ['Kollecc Society Box'] = {
+    	['Kollecc Society Leaders Bag'] = { "Captain Dust", "Kado S'Mah-Qar", "Dorrahn Griphyn", "Nightshade Vangaurd" },
+    	['Kollecc Society Tech Bag'] = { "Shrouded Skirmishers", "Seeker Drones" },
+    	['Kollecc Society Promissory Bag'] = { "AI Survey" },
+    	['Kollecc Society Planets Bag'] = { "Susuros" },
+    },
+    ['Zealots of Rhodun Box'] = {
+    	['Zealots of Rhodun Leaders Bag'] = { "Priestess Tuh", "Bishop Ulin", "Saint Binal", "Templar" },
+    	['Zealots of Rhodun Tech Bag'] = { "Pilgrimage Beacons", "Sanctification Field" },
+    	['Zealots of Rhodun Promissory Bag'] = { "Favor of Rhodun" },
+    	['Zealots of Rhodun Planets Bag'] = { "Poh", "Orad" },
+    },
+}
+
+function onLoad(save_state)
+    self.createButton({
+        click_function = 'doPack',
+        function_owner = self,
+        label          = 'PACK',
+        position       = { x = 0, y = 0.51, z = 0 },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = { x = 1, y = 1, z = 1},
+        width          = 400,
+        height         = 200,
+        font_size      = 80
+    })
+end
+
+-------------------------------------------------------------------------------
+
+function doPack()
+    startLuaCoroutine(self, 'doPackCoroutine')
+end
+
+function doPackCoroutine()
+    local dsBox = _getObject('DS Factions', 'Bag')
+    for factionBoxName, bagNameToCardNames in pairs(FACTIONBOX_TO_BAGNAME_TO_CARDNAMES) do
+        local factionBox = _packFactionBox(factionBoxName, bagNameToCardNames)
+        coroutine.yield(0)
+        dsBox.putObject(factionBox)
+    end
+    print('done')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function _getObject(name, tag)
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == tag and object.getName() == name then
+            return object
+        end
+    end
+end
+
+local _deckToIndex = {}
+
+function _getCard(cardName, notCard)
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Card' and object.getName() == cardName then
+            if object ~= notCard then
+                return object
+            end
+        end
+    end
+    -- Not on table, look in decks.
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Deck' then
+            if object.remainder and object.remainder.getName() == cardName then
+                return object.remainder
+            end
+            for _, entry in ipairs(object.getObjects()) do
+                if entry.name == cardName then
+                    local index = _deckToIndex[object] or 0
+                    _deckToIndex[object] = index + 1
+                    return object.takeObject({
+                        position          = object.getPosition() + vector(0, 5 + index * 0.2, 0),
+                        guid              = entry.guid
+                    })
+                end
+            end
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function _packFactionBox(factionBoxName, bagNameToCardNames)
+    print('_packFactionBox "' .. factionBoxName .. '"')
+
+    local factionBox = _getObject(factionBoxName, 'Bag')
+    if not factionBox then
+        error('missing faction box "' .. factionBoxName .. '"')
+    end
+    coroutine.yield(0)
+
+    -- Put cards into bags.
+    for bagName, cardNames in pairs(bagNameToCardNames) do
+        local bag = _getObject(bagName, 'Bag')
+        if not bag then
+            error('missing bag "' .. bagName .. '"')
+        end
+        coroutine.yield(0)
+
+        local prevCard = false  -- hack to avoid finding same card again when listed twice
+        for _, cardName in ipairs(cardNames) do
+            local card = _getCard(cardName, prevCard)
+            if not card then
+                error('missing card "' .. cardName .. '"')
+            end
+            prevCard = card
+            coroutine.yield(0)
+
+            bag.putObject(card)
+            coroutine.yield(0)
+        end
+
+        factionBox.putObject(bag)
+        coroutine.yield(0)
+    end
+
+    -- Pack owner token bags.
+    local tokenName = string.gsub(factionBoxName, 'Box', 'Owner Token')
+    local tokenBagName = tokenName .. 's Bag'
+    local token = _getObject(tokenName, 'Generic')
+    local tokenBag = _getObject(tokenBagName, 'Infinite')
+    coroutine.yield(0)
+    if token and tokenBag then
+        tokenBag.putObject(token)
+        coroutine.yield(0)
+        factionBox.putObject(tokenBag)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    -- Pack command token bags.
+    local tokenName = string.gsub(factionBoxName, 'Box', 'Command Token')
+    local tokenBagName = tokenName .. 's Bag'
+    local token = _getObject(tokenName, 'Generic')
+    local tokenBag = _getObject(tokenBagName, 'Bag')
+    coroutine.yield(0)
+    if token and tokenBag then
+        for i = 16, 1, -1 do
+            if i == 1 then
+                tokenBag.putObject(token)
+                coroutine.yield(0)
+            else
+                local clone = token.clone({
+                    position     = token.getPosition() + vector(0, i, 0),
+                    snap_to_grid = false
+                })
+                coroutine.yield(0)
+                tokenBag.putObject(clone)
+                coroutine.yield(0)
+            end
+        end
+        factionBox.putObject(tokenBag)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    -- Pack system tiles.
+    local tileName = string.gsub(factionBoxName, 'Box', 'Tile')
+    local tile = _getObject(tileName, 'Generic')
+    coroutine.yield(0)
+    if not tile then
+        error('missing tile "' .. tileName .. '"')
+    end
+    if tile then
+        factionBox.putObject(tile)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    -- Pack faction sheets.
+    local sheetName1 = 'The ' .. string.gsub(factionBoxName, 'Box', 'Sheet')
+    local sheetName2 = string.gsub(factionBoxName, 'Box', 'Sheet')
+    local sheet = _getObject(sheetName1, 'Tile') or _getObject(sheetName2, 'Tile')
+    coroutine.yield(0)
+    if not sheet then
+        error('missign sheet "' .. sheetName .. '"')
+    end
+    if sheet then
+        factionBox.putObject(sheet)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    return factionBox
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

@@ -1,0 +1,102 @@
+--- Display contents of ThatRobHuman's box model as an infinite bag.
+-- @author Darrell
+
+local ATTACH_TRANSFORM = {
+    POSITION = {
+        x = 0,
+        y = 2,
+        z = 0
+    },
+    ROTATION = {
+        x = 0,
+        y = 0,
+        z = 0
+    },
+    SCALE = {
+        x = 1,
+        y = 1,
+        z = 1
+    }
+}
+
+local _attached = false
+
+function onLoad(saveState)
+    if not self.tag == 'Infinite' then
+        error (self.getName() .. ': script only applies to infinite bags')
+    end
+
+    if saveState and string.len(saveState) > 0 then
+        _attached = saveState
+        Wait.frames(attachContainedObject, 2)
+    end
+
+    -- There does not appear to be an onReset event, so make a separate item.
+    local function resetBox()
+        _attached = false
+        self.destroyAttachments()
+        self.reset()
+    end
+    self.addContextMenuItem('Reset Box', resetBox)
+end
+
+function onSave()
+    return _attached
+end
+
+-------------------------------------------------------------------------------
+
+function onCollisionEnter(collisionInfo)
+    -- collision_info table:
+    --   collision_object    Object
+    --   contact_points      Table     {Vector, ...}
+    --   relative_velocity   Vector
+    if not _attached and collisionInfo.collision_object.getPosition().y > self.getPosition().y then
+        _attached = collisionInfo.collision_object.getJSON()
+        Wait.frames(attachContainedObject, 2)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function attachContainedObject()
+    self.destroyAttachments()
+
+    local function spawnCallback(object)
+        -- Make scale relative to object scale.
+        local scale = object.getScale()
+        object.setScale({
+            x = scale.x * ATTACH_TRANSFORM.SCALE.x,
+            y = scale.y * ATTACH_TRANSFORM.SCALE.y,
+            z = scale.z * ATTACH_TRANSFORM.SCALE.z,
+        })
+        self.addAttachment(object)
+    end
+
+    local rotation = self.getRotation()
+    local object = spawnObjectJSON({
+        json              = _attached,
+        position          = self.positionToWorld(ATTACH_TRANSFORM.POSITION),
+        rotation          = {
+            x = rotation.x + ATTACH_TRANSFORM.ROTATION.x,
+            y = rotation.y + ATTACH_TRANSFORM.ROTATION.y,
+            z = rotation.z + ATTACH_TRANSFORM.ROTATION.z
+        },
+        scale             = nil,
+        callback_function = spawnCallback,
+        sound             = false,
+        params            = nil,
+        snap_to_grid      = false,
+    })
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

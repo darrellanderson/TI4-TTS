@@ -1,0 +1,14 @@
+MultiRoller:
+- Fix flagship detection for Blue Space factions with multiple flagship options.
+
+BangWhisper:
+- Private message is also sent to anyone in the Teal (Streamer) seat.
+- Public whisper announce now sent to Grey/Black as well as seated players.
+
+Blue Space:
+- Fix HCEN PDS II name.
+
+System helper:
+- Add unique tile numbers for TI3 / pick-a-planet / Blue Space tiles.
+- Add method to get system from tile number.
+- Added anomalies to TI3 tiles Cormund/Everra.

@@ -1,0 +1,317 @@
+-------------------------------------------------------------------------------
+--- Polygon utility functions.
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.Polygon'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.Polygon = assert(not CrLua.Polygon) and {
+    _require = {}
+}
+
+-------------------------------------------------------------------------------
+--- Convert from internal [1,2] points to XYZ tables.
+-- @param polygon table : list of points.
+-- @param y number : optional Y value, defaults to 1.
+-- @return table : list of {x,y,z} points.
+-------------------------------------------------------------------------------
+function CrLua.Polygon.toXYZ(polygon, y)
+    assert(type(polygon) == 'table' and assert(y == nil or type(y) == 'number'))
+    local result = {}
+    for _, vertex in pairs(polygon) do
+        table.insert(result, { x = vertex[1], y = y or 1, z = vertex[2] })
+    end
+    return result
+end
+
+function CrLua.Polygon._testToXYZ()
+    local polygon = { {0, 0}, {1, 1}, {2, 2} }
+    local xyz = CrLua.Polygon.toXYZ(polygon)
+    assert(#xyz == 3)
+    assert(xyz[1].x == 0 and xyz[1].y == 1 and xyz[1].z == 0)
+    assert(xyz[2].x == 1 and xyz[2].y == 1 and xyz[2].z == 1)
+    assert(xyz[3].x == 2 and xyz[3].y == 1 and xyz[3].z == 2)
+end
+
+-------------------------------------------------------------------------------
+--- Convert {xyz} points to [1,2] polygon points.
+-- @param points talbe : list of {xyz} points.
+-- @return table : list of [1,2] polygon points.
+-------------------------------------------------------------------------------
+function CrLua.Polygon.fromXYZ(points)
+    assert(type(points) == 'table')
+    local result = {}
+    for _, point in ipairs(points) do
+        table.insert(result, { point.x, point.z })
+    end
+    return result
+end
+
+function CrLua.Polygon._testFromXYZ()
+    local points = { { x = 1.1, y = 1.2, z = 1.3 }, { x = 2.1, y = 2.2, z = 2.3 }}
+    local polygon = CrLua.Polygon.fromXYZ(points)
+    assert(#polygon == 2)
+    assert(polygon[1][1] == 1.1 and polygon[1][2] == 1.3)
+    assert(polygon[2][1] == 2.1 and polygon[2][2] == 2.3)
+end
+
+-------------------------------------------------------------------------------
+--- Return the bounding box of a polygon.
+-- @param polygon table : list of 2d points, each point is a list of two numbers.
+-- @param optional xIndex : if x is not point[1], find it as point[xIndex].
+-- @param optional yIndex : if y is not point[2], find it as point[yIndex].
+-- @return table : table with min, max points using same xIndex, yIndex.
+-------------------------------------------------------------------------------
+function CrLua.Polygon.boundingBox(polygon, xIndex, yIndex)
+    assert(type(polygon) == 'table')
+
+    local vertexCount = #polygon
+    if #polygon == 0 then
+        return
+    end
+
+    local x = xIndex or 1
+    local y = yIndex or 2
+
+    local min = { [x] = polygon[1][x], [y] = polygon[1][y] }
+    local max = { [x] = polygon[1][x], [y] = polygon[1][y] }
+
+    for i = 2, vertexCount do
+        local vertex = polygon[i]
+        min[x] = math.min(min[x], vertex[x])
+        min[y] = math.min(min[y], vertex[y])
+        max[x] = math.max(max[x], vertex[x])
+        max[y] = math.max(max[y], vertex[y])
+    end
+
+    return { min = min, max = max }
+end
+
+function CrLua.Polygon._testBoundingBox()
+    local polygon = { {0, 0}, {-1, 2}, {1, 0}, {0, -2} }
+    local box = CrLua.Polygon.boundingBox(polygon)
+    assert(box.min[1] == -1 and box.min[2] == -2, box.min[1] .. ', ' .. box.min[2])
+    assert(box.max[1] == 1 and box.max[2] == 2)
+    local box = CrLua.Polygon.boundingBox(polygon, 1, 2)
+    assert(box.min[1] == -1 and box.min[2] == -2, box.min[1] .. ', ' .. box.min[2])
+    assert(box.max[1] == 1 and box.max[2] == 2)
+end
+
+-------------------------------------------------------------------------------
+--- Get bounding box corners.
+-- @param box table : {min, max} points.
+-- @param optional xIndex : if x is not point[1], find it as point[xIndex].
+-- @param optional yIndex : if y is not point[2], find it as point[yIndex].
+-- @return table : list of four corner points using same xIndex, yIndex.
+-------------------------------------------------------------------------------
+function CrLua.Polygon.boundingBoxCorners(box, xIndex, yIndex)
+    assert(type(box) == 'table' and box.min)
+
+    local x = xIndex or 1
+    local y = yIndex or 2
+
+    return {
+        { [x] = box.min[x], [y] = box.min[y] },
+        { [x] = box.min[x], [y] = box.max[y] },
+        { [x] = box.max[x], [y] = box.max[y] },
+        { [x] = box.max[x], [y] = box.min[y] }
+    }
+end
+
+function CrLua.Polygon._testBoundingBoxCorners()
+    local box = { min = { 1, 2 }, max = { 8, 9 } }
+    local corners = CrLua.Polygon.boundingBoxCorners(box)
+    assert(#corners == 4)
+    assert(corners[1][1] == 1 and corners[1][2] == 2)
+    assert(corners[2][1] == 1 and corners[2][2] == 9)
+    assert(corners[3][1] == 8 and corners[3][2] == 9)
+    assert(corners[4][1] == 8 and corners[4][2] == 2)
+end
+
+-------------------------------------------------------------------------------
+--- Is point inside bounding box?
+-- @param box table : {min, max} points.
+-- @param point table : point.
+-- @param optional xIndex : if x is not point[1], find it as point[xIndex].
+-- @param optional yIndex : if y is not point[2], find it as point[yIndex].
+-- @return true if inside.
+-------------------------------------------------------------------------------
+function CrLua.Polygon.boundingBoxInside(box, point, xIndex, yIndex)
+    assert(type(box) == 'table' and box.min)
+
+    local x = xIndex or 1
+    local y = yIndex or 2
+
+    local gteMin = point[x] >= box.min[x] and point[y] >= box.min[y]
+    local lteMax = point[x] <= box.max[x] and point[y] <= box.max[y]
+    return gteMin and lteMax
+end
+
+function CrLua.Polygon._testBoundingBoxInside()
+    local box = { min = { 0, 0 }, max = { 2, 2 } }
+    assert(CrLua.Polygon.boundingBoxInside(box, { 1, 1 }))
+    assert(not CrLua.Polygon.boundingBoxInside(box, { 3, 3 }))
+end
+
+-------------------------------------------------------------------------------
+--- Inset polygon by fixed perpendicular distance.
+-- Requires polygon vertices be given in clockwise order, otherwise will outset!
+-- @see http://alienryderflex.com/polygon_inset/
+-- @see http://alienryderflex.com/intersect/
+-- @param polygon table : list of 2d points, each point is a list of two numbers.
+-- @param inset number : inset distance (negative to outset).
+-- @param optional xIndex : if x is not point[1], find it as point[xIndex].
+-- @param optional yIndex : if y is not point[2], find it as point[yIndex].
+-- @return inset polygon table : new inset polygon, original left as-is.
+-------------------------------------------------------------------------------
+function CrLua.Polygon.inset(polygon, inset, xIndex, yIndex)
+    assert(type(polygon) == 'table' and type(inset) == 'number')
+    assert(#polygon > 2)
+
+    local x = xIndex or 1
+    local y = yIndex or 2
+
+    local function lineIntersection(a, b, c, d)
+        assert(not(a[x] == b[x] and a[y] == b[y]))
+        assert(not(c[x] == d[x] and c[y] == d[y]))
+
+        -- Translate so A is at the origin.
+        --local A = { [x] = 0, [y] = 0 }
+        local B = { [x] = b[x] - a[x], [y] = b[y] - a[y] }
+        local C = { [x] = c[x] - a[x], [y] = c[y] - a[y] }
+        local D = { [x] = d[x] - a[x], [y] = d[y] - a[y] }
+
+        local distAB = math.sqrt((B[x] * B[x]) + (B[y] * B[y]))
+        assert(distAB > 0)
+
+        -- Rotate so B is on the positive X axis.
+        local cos = B[x] / distAB
+        local sin = B[y] / distAB
+        --B = { [x] = distAB, [y] = 0 }
+        C = { [x] = (C[x] * cos) + (C[y] * sin), [y] = (C[y] * cos) - (C[x] * sin) }
+        D = { [x] = (D[x] * cos) + (D[y] * sin), [y] = (D[y] * cos) - (D[x] * sin) }
+        assert(C[y] ~= D[y])  -- parallel lines
+
+        -- Get intersection on the AB x axis line.
+        local ABx = D[x] + ((C[x] - D[x]) * D[y] / (D[y] - C[y]))
+
+        -- Reverse rotation, translation.
+        return { [x] = a[x] + (ABx * cos), [y] = a[y] + (ABx * sin) }
+    end
+
+    local function insetCorner(prev, cur, next)
+        -- Get line segments (preserve winding direction) and distances.
+        local d1 = { [x] = cur[x] - prev[x], [y] = cur[y] - prev[y] }
+        local dist1 = math.sqrt((d1[x] * d1[x]) + (d1[y] * d1[y]))
+        local d2 = { [x] = next[x] - cur[x], [y] = next[y] - cur[y] }
+        local dist2 = math.sqrt((d2[x] * d2[x]) + (d2[y] * d2[y]))
+        assert(dist1 > 0 and dist2 > 0)
+
+        -- Inset line segments prev->cur and cur->next.
+        local inset1 = { [x] = d1[y] * inset / dist1, [y] = -d1[x] * inset / dist1 }
+        local prev1 = { [x] = prev[x] + inset1[x], [y] = prev[y] + inset1[y] }
+        local prev2 = { [x] = cur[x] + inset1[x], [y] = cur[y] + inset1[y] }
+        local inset2 = { [x] = d2[y] * inset / dist2, [y] = -d2[x] * inset / dist2 }
+        local next1 = { [x] = cur[x] + inset2[x], [y] = cur[y] + inset2[y] }
+        local next2 = { [x] = next[x] + inset2[x], [y] = next[y] + inset2[y] }
+
+        -- If both inset line segments share an endpoint, lines are colinear.
+        if prev2[x] == next1[x] and prev2[y] == next1[y] then
+            return next1
+        end
+
+        -- Otherwise get intersection point.
+        return lineIntersection(prev1, prev2, next1, next2)
+    end
+
+    local insetPolygon = {}
+    local numVertices = #polygon
+    for i = 1, #polygon do
+        local prevPt = polygon[((i - 2) % numVertices) + 1]
+        local curPt = polygon[i]
+        local nextPt = polygon[(i % numVertices) + 1]
+
+        table.insert(insetPolygon, insetCorner(prevPt, curPt, nextPt))
+    end
+
+    return insetPolygon
+end
+
+function CrLua.Polygon._testInset()
+    local polygon = { {0, 0}, {1, 1}, {2, 0} }
+    local inset = CrLua.Polygon.inset(polygon, 0.1)
+    assert(#inset == 3)
+    local function almost(point, x, y)
+        return math.abs(point[1] - x) < 0.01 and math.abs(point[2] - y) < 0.01
+    end
+    assert(almost(inset[1], 0.24, 0.1), '1: ' .. inset[1][1] .. ', ' .. inset[1][2])
+    assert(almost(inset[2], 1, 0.85), '2: ' .. inset[2][1] .. ', ' .. inset[2][2])
+    assert(almost(inset[3], 1.76, 0.1), '3: ' .. inset[3][1] .. ', ' .. inset[3][2])
+end
+
+-------------------------------------------------------------------------------
+--- Is the point inside the polygon (2D)?
+-- Uses the "ray casting method".
+-- @see https://love2d.org/wiki/PointWithinShape
+--
+-- @param polygon table : list of 2d points, each point is a list of two numbers.
+-- @param point table : list of 2 numbers.
+-- @param optional xIndex : if x is not point[1], find it as point[xIndex].
+-- @param optional yIndex : if y is not point[2], find it as point[yIndex].
+-- @return boolean : true if point is inside polygon.
+-------------------------------------------------------------------------------
+function CrLua.Polygon.inside(polygon, point, xIndex, yIndex)
+    assert(type(polygon) == 'table' and type(point) == 'table')
+
+    local x = xIndex or 1
+    local y = yIndex or 2
+
+    local numverts = #polygon
+    local tx = point[x]
+    local ty = point[y]
+
+    local vtx0 = polygon[numverts]
+
+    -- get test bit for above/below X axis
+    local yflag0 = vtx0[y] >= ty
+    local inside_flag = false
+
+    for _, vtx1 in ipairs(polygon) do
+        local yflag1 = vtx1[y] >= ty
+
+        -- Check if endpoints straddle (are on opposite sides) of X axis
+        -- (i.e. the Y's differ); if so, +X ray could intersect this edge.
+        -- The old test also checked whether the endpoints are both to the
+        -- right or to the left of the test point.  However, given the faster
+        -- intersection point computation used below, this test was found to
+        -- be a break-even proposition for most polygons and a loser for
+        -- triangles (where 50% or more of the edges which survive this test
+        -- will cross quadrants and so have to have the X intersection computed
+        -- anyway).  I credit Joseph Samosky with inspiring me to try dropping
+        -- the "both left or both right" part of my code.
+        if yflag0 ~= yflag1 then
+            -- Check intersection of pgon segment with +X ray.
+            -- Note if >= point's X; if so, the ray hits it.
+            -- The division operation is avoided for the ">=" test by checking
+            -- the sign of the first vertex wrto the test point; idea inspired
+            -- by Joseph Samosky's and Mark Haigh-Hutchinson's different
+            -- polygon inclusion tests.
+            if ( ((vtx1[y] - ty) * (vtx0[x] - vtx1[x]) >= (vtx1[x] - tx) * (vtx0[y] - vtx1[y])) == yflag1 ) then
+                inside_flag = not inside_flag
+            end
+        end
+
+        -- Move to the next pair of vertices, retaining info as possible.
+        yflag0 = yflag1
+        vtx0 = vtx1
+    end
+
+    return inside_flag
+end
+
+function CrLua.Polygon._testInside()
+    local polygon = { {0,0}, {0,2}, {2,2}, {2,0} }
+    assert(CrLua.Polygon.inside(polygon, {1,1}))
+    assert(not CrLua.Polygon.inside(polygon, {3,3}))
+end

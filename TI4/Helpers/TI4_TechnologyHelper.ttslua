@@ -1,0 +1,582 @@
+--- Technology attributes, tech board use.
+-- @author Jirach08
+-- #include <~/CrLua/Objects/TI4_Helpers/TI4_TechnologyHelper>
+
+function getHelperClient(helperObjectName)
+	local function getHelperObject()
+		for _, object in ipairs(getAllObjects()) do
+			if object.getName() == helperObjectName then return object end
+		end
+		error('missing object "' .. helperObjectName .. '"')
+	end
+	local helperObject = false
+	local function getCallWrapper(functionName)
+		helperObject = helperObject or getHelperObject()
+		if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+		return function(parameters) return helperObject.call(functionName, parameters) end
+	end
+	return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+-------------------------------------------------------------------------------
+
+local _technologies = {
+	["Neural Motivator"] = { type = "Green", requirements = nil, abbrev = 'Neural' },
+	["Psychoarchaeology"] = { type = "Green", requirements = nil, abbrev = 'Pyschoarch', source="PoK" },
+	["Dacxive Animators"] = { type = "Green", requirements = "G", abbrev = 'Dacxive' },
+	["Bio-Stims"] = { type = "Green", requirements = "G", abbrev = 'Bio-Stims', source="PoK" },
+	["Hyper Metabolism"] = { type = "Green", requirements = "GG", abbrev = 'Hyper' },
+	["X-89 Bacterial Weapon"] = { type = "Green", requirements = "GGG", abbrev = 'X-89 B.W.' },
+
+	["Plasma Scoring"] = { type = "Red", requirements = nil, abbrev = 'Plasma' },
+	["AI Development Algorithm"] = { type = "Red", requirements = nil, abbrev = 'AI Dev Algo', source="PoK" },
+	["Magen Defense Grid"] = { type = "Red", requirements = "R", abbrev = 'Magen' },
+	["Self Assembly Routines"] = { type = "Red", requirements = "R", abbrev = 'Self Assembly', source="PoK" },
+	["Duranium Armor"] = { type = "Red", requirements = "RR", abbrev = 'Duranium' },
+	["Assault Cannon"] = { type = "Red", requirements = "RRR", abbrev = 'Assault Cannon' },
+
+	["Antimass Deflectors"] = { type = "Blue", requirements = nil, abbrev = 'Antimass' },
+	["Dark Energy Tap"] = { type = "Blue", requirements = nil, abbrev = 'Dark Energy Tap', source="PoK" },
+	["Gravity Drive"] = { type = "Blue", requirements = "B", abbrev = 'Grav Drive' },
+	["Sling Relay"] = { type = "Blue", requirements = "B", abbrev = 'Sling Relay', source="PoK" },
+	["Fleet Logistics"] = { type = "Blue", requirements = "BB", abbrev = 'Fleet Logistics' },
+	["Light-Wave Deflector"] = { type = "Blue", requirements = "BBB", abbrev = 'Light/Wave' },
+
+	["Sarween Tools"] = { type = "Yellow", requirements = nil, abbrev = 'Sarween' },
+	["Scanlink Drone Network"] = { type = "Yellow", requirements = nil, abbrev = 'Scanlink', source="PoK" },
+	["Graviton Laser System"] = { type = "Yellow", requirements = "Y", abbrev = 'Graviton' },
+	["Predictive Intelligence"] = { type = "Yellow", requirements = "Y", abbrev = 'Pred Intel', source="PoK" },
+	["Transit Diodes"] = { type = "Yellow", requirements = "YY", abbrev = 'Transit' },
+	["Integrated Economy"] = { type = "Yellow", requirements = "YYY", abbrev = 'Integrated Eco.' },
+
+	["Infantry II"] = { type = "unitUpgrade", requirements = "GG", abbrev = 'Infantry II' },
+	["Destroyer II"] = { type = "unitUpgrade", requirements = "RR", abbrev = 'Destroyer II' },
+	["Carrier II"] = { type = "unitUpgrade", requirements = "BB", abbrev = 'Carrier II' },
+	["Space Dock II"] = { type = "unitUpgrade", requirements = "YY", abbrev = 'Space Dock II' },
+
+	["Fighter II"] = { type = "unitUpgrade", requirements = "BG", abbrev = 'Fighter II' },
+	["PDS II"] = { type = "unitUpgrade", requirements = "RY", abbrev = 'PDS II' },
+	["Cruiser II"] = { type = "unitUpgrade", requirements = "RGY", abbrev = 'Cruiser II' },
+	["Dreadnought II"] = { type = "unitUpgrade", requirements = "BBY", abbrev = 'Dread II' },
+	['War Sun'] = { type = "unitUpgrade", requirements = "RRRY", abbrev = 'War Sun' },
+
+	-- faction tech
+	["Letani Warrior II"] = { type = "unitUpgrade", requirements = "GG", abbrev = 'Letani II', faction = true },
+	["Bioplasmosis"] = { type = "Green", requirements = "GG", abbrev = 'Bioplas', faction = true },
+	["L4 Disruptors"] = { type = "Yellow", requirements = "Y", abbrev = 'L4 Disrupt', faction = true },
+	["Non-Euclidean Shielding"] = { type = "Red", requirements = "RR", abbrev = 'N.E.S.', faction = true },
+	["Chaos Mapping"] = { type = "Blue", requirements = "B", abbrev = 'Chaos Map', faction = true },
+	["Floating Factory II"] = { type = "unitUpgrade", requirements = "YY", abbrev = "FF II", faction = true },
+	["Prototype War Sun II"] = { type = "unitUpgrade", requirements = "YRRR", abbrev = "PWS II", faction = true },
+	["Magmus Reactor"] = { type = "Red", requirements = "RR", abbrev = 'Magmus', faction = true },
+	["Quantum Datahub Node"] = { type = "Yellow", requirements = "YYY", abbrev = 'QDHN', faction = true },
+	["Production Biomes"] = { type = "Green", requirements = "GG", abbrev = 'Prod. Biomes', faction = true },
+	["Spec Ops II"] = { type = "unitUpgrade", requirements = "GG", abbrev = 'Spec Ops II', faction = true },
+	["Advanced Carrier II"] = { type = "unitUpgrade", requirements = "BB", abbrev = 'Adv Carrier II', faction = true },
+	["Wormhole Generator"] = { type = "Blue", requirements = "BB", abbrev = 'Wormhole Gen', faction = true },
+	["Dimensional Splicer"] = { type = "Red", requirements = "R", abbrev = 'D. Splicer', faction = true },
+	["Super-Dreadnought II"] = { type = "unitUpgrade", requirements = "BBY", abbrev = 'SuperDread II', faction = true },
+	["Inheritance Systems"] = { type = "Yellow", requirements = "YY", abbrev = 'Inherit. Systems', faction = true },
+	["Mirror Computing"] = { type = "Yellow", requirements = "YYY", abbrev = 'Mirror Comp', faction = true },
+	["Salvage Operations"] = { type = "Yellow", requirements = "YY", abbrev = 'Salvage Ops.', faction = true },
+	["Hybrid Crystal Fighter II"] = { type = "unitUpgrade", requirements = "GB", abbrev = "HCF II", faction = true },
+	["Neuroglaive"] = { type = "Green", requirements = "GGG", abbrev = 'Neuroglaive', faction = true },
+	["Valefar Assimilator X"] = { type = nil, requirements = nil, abbrev = nil, faction = true },
+	["Valefar Assimilator Y"] = { type = nil, requirements = nil, abbrev = nil, faction = true },
+	["Exotrireme II"] = { type = "unitUpgrade", requirements = "BBY", abbrev = 'Exotrireme II', faction = true },
+	["Valkyrie Particle Weave"] = { type = "Red", requirements = "RR", abbrev = 'Valkyrie PW', faction = true },
+	["Spacial Conduit Cylinder"] = { type = "Blue", requirements = "BB", abbrev = 'Spacial Conduit', faction = true },
+	["E-res Siphons"] = { type = "Yellow", requirements = "YY", abbrev = 'E-Res', faction = true },
+	["Lazax Gate Folding"] = { type = "Blue", requirements = "BB", abbrev = 'Lazax Gate', faction = true },
+	["Hegemonic Trade Policy"] = { type = "Yellow", requirements = "YY", abbrev = 'Hegemonic', faction = true },
+	["Instinct Training"] = { type = "Green", requirements = "G", abbrev = 'Instinct Train', faction = true },
+	["Nullification Field"] = { type = "Yellow", requirements = "YY", abbrev = 'Null. Field', faction = true },
+	["Yin Spinner"] = { type = "Green", requirements = "GG", abbrev = 'Yin Spin', faction = true },
+	["Impulse Core"] = { type = "Yellow", requirements = "YY", abbrev = 'Impulse', faction = true },
+	["Mageon Implants"] = { type = "Green", requirements = "GGG", abbrev = 'Mageon', faction = true },
+	["Transparasteel Plating"] = { type = "Green", requirements = "G", abbrev = 'Transparasteel', faction = true },
+	-- PoK faction tech
+	["Temporal Command Suite"] = { type = "Yellow", requirements = "Y", abbrev = 'Temp Cmd Suite', faction = true, source = "PoK" },
+	["Memoria II"] = { type = "unitUpgrade", requirements = "GBY", abbrev = 'Memoria II', faction = true, source = "PoK" },
+	["Vortex"] = { type = "Red", requirements = "R", abbrev = 'Vortex', faction = true, source = "PoK" },
+	["Dimensional Tear II"] = { type = "unitUpgrade", requirements = "YY", abbrev = 'Dim Tear II', faction = true, source = "PoK" },
+	["Aerie Hololattice"] = { type = "Yellow", requirements = "Y", abbrev = 'Aerie Holo', faction = true, source = "PoK" },
+	["Strike Wing Alpha II"] = { type = "unitUpgrade", requirements = "RR", abbrev = 'String Wing II', faction = true, source = "PoK" },
+	["Saturn Engine II"] = { type = "unitUpgrade", requirements = "GYR", abbrev = 'Sat Eng II', faction = true, source = "PoK" },
+	["Hel-Titan II"] = { type = "unitUpgrade", requirements = "YR", abbrev = 'Hel-Titan II', faction = true, source = "PoK" },
+	["Aetherstream"] = { type = "Blue", requirements = "BB", abbrev = 'Aetherstream', faction = true, source = "PoK" },
+	["Voidwatch"] = { type = "Green", requirements = "G", abbrev = 'Voidwatch', faction = true, source = "PoK" },
+	["Crimson Legionnaire II"] = { type = "unitUpgrade", requirements = "GG", abbrev = 'Crimson Legin II', faction = true, source = "PoK" },
+	["Genetic Recombination"] = { type = "Green", requirements = "G", abbrev = 'Gene Recomb', faction = true, source = "PoK" },
+	["Supercharge"] = { type = "Red", requirements = "R", abbrev = 'Supercharge', faction = true, source = "PoK" },
+	["Pre-Fab Arcologies"] = { type = "Green", requirements = "GGG", abbrev = 'Pre-Fab Arc', faction = true, source = "PoK" },
+	-- codex?
+	['????_REDACTED_????'] = { type = "unitUpgrade", requirements = "RR", abbrev = 'Scenario Destroyer', source = "Codex 1" },
+	['???_EXCEPTION_NO_ID_???'] = { type = "Yellow", requirements = "Y", abbrev = 'Scenario Tech', source = "Codex 1" }
+}
+
+-------------------------------------------------------------------------------
+
+function getTechType(name)
+	assert(type(name) == "string")
+	name = string.gsub(name, " Ω$", "")
+	if _technologies[name] then
+		return _technologies[name]['type']
+	end
+	return nil
+end
+
+function getTechRequirements(name)
+	assert(type(name) == "string")
+	name = string.gsub(name, " Ω$", "")
+	if _technologies[name] then
+		return _technologies[name]['requirements']
+	end
+	return nil
+end
+
+function getTechAbbrev(name)
+	assert(type(name) == "string")
+	name = string.gsub(name, " Ω$", "")
+	if _technologies[name] then
+		return _technologies[name]['abbrev']
+	end
+	return nil
+end
+
+function getTechSource(name)
+	assert(type(name) == "string")
+	name = string.gsub(name, " Ω$", "")
+	if _technologies[name] then
+		return _technologies[name]['source']
+	end
+	return nil
+end
+
+function isTechFromName(name)
+	assert(type(name) == "string")
+	name = string.gsub(name, " Ω$", "")
+	if _technologies[name] then
+		return true
+	else
+		return false
+	end
+end
+
+local _techNameSet = false
+
+function getTechNameSet()
+	-- Returns list of all valid technologies.
+	-- Names ending in " Ω" are not in list.
+	if not _techNameSet then
+		_techNameSet = {}
+		for k,_ in pairs(_technologies) do
+			_techNameSet[k] = true
+		end
+	end
+	return _techNameSet
+end
+
+local _techSourceSet = false
+
+function getTechSourceSet()
+	-- Returns list of sources for all technologies.
+	-- Names ending in " Ω" are not in list.
+	if not _techSourceSet then
+		_techSourceSet = {}
+		for k,v in pairs(_technologies) do
+			_techSourceSet[k] = getTechSource(k) or "Base"
+		end
+	end
+	return _techSourceSet
+end
+
+------------------------------------------------------------------------------
+
+function getTechNaturalOrder()
+	local ignoreSourceSet = {
+		['Codex 1'] = true,
+	}
+	local result = {}
+	for tech, attrs in pairs(_technologies) do
+		if attrs.type and not ignoreSourceSet[attrs.source] then
+			table.insert(result, tech)
+		end
+	end
+
+	local typeOrder = { 'Blue', 'Yellow', 'Red', 'Green', 'unitUpgrade' }
+	local typePriority = {}
+	for i, typeValue in ipairs(typeOrder) do
+		typePriority[typeValue] = i
+	end
+
+	local function mySortFunction(a, b)
+		local aTech = assert(_technologies[a])
+		local bTech = assert(_technologies[b])
+
+		-- Faction tech at the end.
+		if aTech.faction and not bTech.faction then
+			return false
+		elseif not aTech.faction and bTech.faction then
+			return true
+		end
+
+		-- Type order.
+		local aPriority = assert(typePriority[aTech.type])
+		local bPriority = assert(typePriority[bTech.type])
+		if aPriority < bPriority then
+			return true
+		elseif aPriority > bPriority then
+			return false
+		end
+
+		-- Prefer fewer prereqs.
+		local aReqs = string.len(aTech.requirements or '')
+		local bReqs = string.len(bTech.requirements or '')
+		if aReqs < bReqs then
+			return true
+		elseif aReqs > bReqs then
+			return false
+		end
+
+		-- Same type, same is-faction, same prereq count.  Prefer base.
+		local aBase = not aTech.source
+		local bBase = not bTech.source
+		if aBase and not bBase then
+			return true
+		elseif not aBase and bBase then
+			return false
+		end
+
+		-- Same everything, use alpha.
+		return a < b
+	end
+	table.sort(result, mySortFunction)
+	return result
+end
+
+local function _testGetTechNaturalOrder()
+	local order = getTechNaturalOrder()
+	for i, tech in ipairs(order) do
+		local attrs = _technologies[tech]
+		local color = 'ffffff'
+		if attrs.type ~= 'unitUpgrade' then
+			color = Color.fromString(attrs.type):toHex()
+		end
+		order[i] = '[' .. color .. ']' .. tech
+	end
+	print('Tech Natural Order:')
+	for i = 1, #order, 20 do
+		local startIndex = i
+		local endIndex = math.min(#order, startIndex + 19)
+		print(table.concat(order, ', ', startIndex, endIndex))
+	end
+end
+
+function getPlayerColorToTechs()
+	local guidToPosition = {}
+	local guidToName = {}
+	for _, object in ipairs(getAllObjects()) do
+		if object.tag == 'Card' then
+			local name = object.getName()
+			name = string.gsub(name, " Ω$", "")
+			if _technologies[name] then
+				local guid = object.getGUID()
+				guidToPosition[guid] = object.getPosition()
+				guidToName[guid] = name
+			end
+		end
+	end
+
+	-- Make sure ALL colors are present, even if the set is empty.
+	local playerColorToTechSet = {}
+	local playerColorToTechs = {}
+	for _, zoneColor in ipairs(_zoneHelper.zones()) do
+		playerColorToTechSet[zoneColor] = {}
+		playerColorToTechs[zoneColor] = {}
+	end
+
+	local guidToZoneColor = _zoneHelper.zonesFromPositions(guidToPosition)
+	for guid, zoneColor in pairs(guidToZoneColor) do
+		local techSet = playerColorToTechSet[zoneColor]
+		local techs = playerColorToTechs[zoneColor]
+		local name = guidToName[guid]
+		if not techSet[name] then
+			techSet[name] = true
+			table.insert(techs, name)
+		end
+	end
+
+	return playerColorToTechs
+end
+
+local function _testGetPlayerColorToTechs()
+	local playerColorToTechs = getPlayerColorToTechs()
+	for color, techs in pairs(playerColorToTechs) do
+		print(color .. ': ' .. table.concat(techs, ', '))
+	end
+end
+
+------------------------------------------------------------------------------
+
+function _getPosParamsFromTechBoard(techBoard)
+	assert(type(techBoard) == 'userdata')
+	local p0
+	local dx
+	local dz
+	-- find grid size and origin of snap points on tech board
+	for _, snap in ipairs(techBoard.getSnapPoints()) do
+		if not p0 then
+			p0 = snap.position
+		else
+			if (not dz) and (snap.position.z < (p0.z - 0.1)) then
+				dz = snap.position.z - p0.z
+			end
+			if (not dx) and (snap.position.x < (p0.x - 0.1)) then
+				dx = p0.x - snap.position.x
+			end
+			if snap.position.x > p0.x then
+				p0.x = snap.position.x
+			end
+			if snap.position.z > p0.z then
+				p0.z = snap.position.z
+			end
+		end
+	end
+	return {
+		p0 = { -- LOCAL SPACE!
+			x = p0.x,
+			y = techBoard.getPosition().y + (techBoard.is_face_down and -1 or 1) * 3,
+			z = p0.z
+		},
+		dpos = {
+			dx = dx,
+			dy = 0,
+			dz = dz
+		}
+	}
+end
+
+function getTechBoardAndCards(color)
+	-- Searches for a tech board in COLOR zone.
+	-- If a tech board is found, returns table with tech board and all tech cards in COLOR zone.
+	assert(type(color) == 'string')
+
+	local guidToPosList = {}
+	local techBoard
+	for _, object in ipairs(getAllObjects()) do
+		local name = object.getName()
+		if (name == "Technology Board") and _zoneHelper.zoneFromPosition(object.getPosition()) == color then
+			techBoard = object
+		elseif isTechFromName(name) then
+			guidToPosList[object.getGUID()] = object.getPosition()
+		end
+	end
+
+	local cardPositionsInZone = {}
+	local zonesForTech = _zoneHelper.zonesFromPositions(guidToPosList)
+	for guid, zoneColor in pairs(zonesForTech) do
+		if zoneColor == color then
+			table.insert(cardPositionsInZone, 1, guidToPosList[guid])
+		end
+	end
+
+	return {
+		techBoard = techBoard,
+		cardPositionsInZone = cardPositionsInZone
+	}
+end
+
+function getFirstVacantPosition(params)
+	-- Checks for collision occupiedPositions in dz direction
+	-- starting from origin p0 with width dx and height dz
+	-- and return first vacant position in dz direction
+	assert(type(params) == "table")
+	assert(type(params.p0) == "table")
+	assert(type(params.dpos) == "table")
+
+	local occupiedPositions = {}
+	if params.occupiedPositions then
+		assert(type(params.occupiedPositions) == "table")
+		occupiedPositions = params.occupiedPositions
+	end
+
+	-- first loop to find only cards in respective column
+	local positionInColumn = {}
+	for _, cardPos in ipairs(occupiedPositions) do
+		if math.floor(cardPos.x/params.dpos.dx+0.5) == math.floor(params.p0.x/params.dpos.dx+0.5) then
+			table.insert(positionInColumn, 1, cardPos)
+		end
+	end
+
+	local pos = _deepcopy(params.p0)
+	-- second loop over the few remaining cards in dx column
+	-- may be more efficient by sorting table, but prob not worth the effort.
+	local vacant = false
+	while not vacant do
+		vacant = true
+		for _, cardPos in ipairs(positionInColumn) do
+			if math.floor(cardPos.z/params.dpos.dz+0.5) == math.floor(pos.z/params.dpos.dz+0.5) then
+				vacant = false
+				pos.z = pos.z + params.dpos.dz
+				break
+			end
+		end
+	end
+	return pos
+end
+
+function getVacantPosOnTechBoard(params)
+	-- params['cardName'] and params['color'] are required.
+	-- params["techBoard"] and params["occupiedPositions"] are optional (provide both or none)
+	--	to potentially avoid multiple getAllObjects() calls.
+	-- params["occupiedPositions"] must be in positionToWorld coordinates.
+	-- returns nil if COLOR has no tech board in zone, else returns {position={}, rotation={}} table.
+	assert(type(params) == "table", "bad params")
+	assert(type(params.cardName) == "string", "bad params.cardName")
+	assert(type(params.color) == "string", "bad params.color")
+
+	if not isTechFromName(params.cardName) then
+		log("getVacantPosOnTechBoard: " .. params.cardName .. " is not a valid Technology Card.")
+		return
+	end
+
+	local techBoard = params.techBoard
+	local occupiedPositions = params.occupiedPositions
+	-- if no techBoard was provided, get tech board and tech cards in COLORs zone
+	if not techBoard then
+		local techBoardAndCards = getTechBoardAndCards(params.color)
+		-- exit if no technology board was found for color
+		if not techBoardAndCards.techBoard then
+			return
+		end
+		techBoard = techBoardAndCards.techBoard
+		occupiedPositions = techBoardAndCards.cardPositionsInZone
+	else
+		if not occupiedPositions then
+			error("_getVacantPosOnTechBoard: got passed params.techBoard without params.occupiedPositions. Requires both or neither.")
+		end
+	end
+
+	assert(type(techBoard) == "userdata", "bad techBoard")
+	assert(type(occupiedPositions) == "table", "bad occupiedPositions")
+
+	-- {['p0'] = pos, ['dx'] = dx, ['dz'] = dz} in techBoard local coordinates
+	local posParams = _getPosParamsFromTechBoard(techBoard)
+	local _columns = {["Blue"]=0, ["Green"]=1, ["Yellow"]=2, ["Red"]=3, ["unitUpgrade"]=4}
+	local column = _columns[getTechType(params.cardName)]
+	if not column then
+		-- Nekro tech has no column, ignore
+		return
+	end
+	if techBoard.is_face_down then
+		column = 4 - column
+	end
+	local p0 = posParams.p0
+	local dpos = posParams.dpos
+	p0.x = p0.x - column * dpos.dx
+
+	for i,pos in ipairs(occupiedPositions) do
+		occupiedPositions[i] = techBoard.positionToLocal(pos)
+	end
+	local vacantPos = getFirstVacantPosition({
+		p0 = p0,
+		dpos = dpos,
+		occupiedPositions = occupiedPositions
+	})
+	return {
+		position = techBoard.positionToWorld(vacantPos),
+		rotation = {
+			x = 0,
+			y = techBoard.getRotation().y,
+			z = 0
+		}
+	}
+end
+
+-- full deep copy of table o
+function _deepcopy(o, seen)
+	seen = seen or {}
+	if o == nil then return nil end
+	if seen[o] then return seen[o] end
+	local no
+	if type(o) == 'table' then
+		no = {}
+		seen[o] = no
+		for k, v in next, o, nil do
+			no[_deepcopy(k, seen)] = _deepcopy(v, seen)
+		end
+		setmetatable(no, _deepcopy(getmetatable(o), seen))
+	else -- number, string, boolean, etc
+		no = o
+	end
+	return no
+end
+
+-------------------------------------------------------------------------------
+
+function _testSpelling()
+	local techSet = _deepcopy(getTechNameSet())
+	local function foundTech(tech)
+		tech = string.gsub(tech, " Ω$", "")
+		assert(techSet[tech], 'missing "' .. tech .. '"')
+		techSet[tech] = nil
+	end
+
+	-- Find a tech deck.
+	local deck = false
+	for _, object in ipairs(getAllObjects()) do
+		if object.tag == 'Deck' and object.getName() == 'Technology Cards' then
+			deck = object
+		end
+	end
+	assert(deck, 'missing tech deck')
+
+	-- Verify tech.
+	for _, entry in ipairs(deck.getObjects()) do
+		foundTech(entry.name)
+	end
+	for _, faction in pairs(_factionHelper.allFactions(true)) do
+		for _, tech in ipairs(faction.factionTech or {}) do
+			foundTech(tech)
+		end
+	end
+
+	-- Any remaining?
+	for tech, _ in pairs(techSet) do
+		print('REMAINING: "' .. tech .. '"')
+	end
+end
+
+function onLoad(saveState)
+    self.setColorTint({ r = 0.25, g = 0.25, b = 0.25 })
+    self.setScale({ x = 2, y = 0.01, z = 2 })
+    self.setName('TI4_TECHNOLOGY_HELPER')
+    self.setDescription('PLEASE LEAVE ON TABLE! This object is only visible to the black (GM) player.')
+
+    -- Only the GM/black player can see this object.  Others can still interact!
+    local invisibleTo = {}
+    for _, color in ipairs(Player.getColors()) do
+        if color ~= 'Black' then
+            table.insert(invisibleTo, color)
+        end
+    end
+    self.setInvisibleTo(invisibleTo)
+
+	self.addContextMenuItem('Test Spelling', _testSpelling)
+	self.addContextMenuItem('Test Nat Order', _testGetTechNaturalOrder)
+	self.addContextMenuItem('Test Player Techs', _testGetPlayerColorToTechs)
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

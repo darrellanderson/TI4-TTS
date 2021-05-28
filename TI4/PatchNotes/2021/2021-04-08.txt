@@ -1,0 +1,6 @@
+v31:
+- Update existing relic cards to new (cleaner) back image.
+- Improved relic front images (thanks waffles).
+- Attachment tokens can now be drawn into hands, now when drawing a relic into hand the token will join it.
+- Add "3p hyperlanes" option to the hyperlanes bag.
+- Map tool now moves custodians token when building a map with a non-centered Mecatol.

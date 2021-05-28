@@ -1,0 +1,254 @@
+-------------------------------------------------------------------------------
+--- Lua list utility functions
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.List'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.List = assert(not CrLua.List) and {
+    _require = {}
+}
+
+-------------------------------------------------------------------------------
+--- Get list index of item.
+-- @param list: table with number indices.
+-- @param item: item to find
+-- @return number or nil: list index, if found.
+-------------------------------------------------------------------------------
+function CrLua.List.indexOf(list, item)
+    assert(type(list) == 'table')
+    for i, v in ipairs(list) do
+        if v == item then
+            return i
+        end
+    end
+end
+
+function CrLua.List._testIndexOf()
+    local list = { 'one', 'two', 'three' }
+    assert(CrLua.List.indexOf(list, 'one') == 1)
+    assert(CrLua.List.indexOf(list, 'two') == 2)
+    assert(CrLua.List.indexOf(list, 'three') == 3)
+    assert(not CrLua.List.indexOf(list, 'four'))
+end
+
+-------------------------------------------------------------------------------
+--- Concatenate two lists.
+-- @param a list: table with number indices.
+-- @param b list: table with number indices.
+-- @return list: list with a's entries followed by b's entries.
+-------------------------------------------------------------------------------
+function CrLua.List.join(a, b)
+    assert(type(a) == 'table' and type(b) == 'table')
+
+    local result = {}
+    for _, v in ipairs(a) do
+        table.insert(result, v)
+    end
+    for _, v in ipairs(b) do
+        table.insert(result, v)
+    end
+    return result
+end
+
+function CrLua.List._testJoin()
+    local a = { 'one', 'two' }
+    local b = { 'three', 'four' }
+    local joined = CrLua.List.join(a, b)
+    assert(#joined == 4)
+    assert(joined[1] == 'one')
+    assert(joined[2] == 'two')
+    assert(joined[3] == 'three')
+    assert(joined[4] == 'four')
+end
+
+-------------------------------------------------------------------------------
+--- Filter list.
+-- @param list : table with number indices.
+-- @param filterFunction function : called with list items, return true to keep.
+-- @return table : list items accepted by filter function.
+-------------------------------------------------------------------------------
+function CrLua.List.filter(list, filterFunction)
+    assert(type(list) == 'table' and type(filterFunction) == 'function')
+
+    local result = {}
+    for _, v in ipairs(list) do
+        if filterFunction(v) then
+            table.insert(result, v)
+        end
+    end
+    return result
+end
+
+function CrLua.List._testFilter()
+    local list = { 1, 4, 5, 2, 5, 7 }
+    local function filterFunction(entry)
+        return entry % 2 == 0
+    end
+    local filtered = CrLua.List.filter(list, filterFunction)
+    assert(#filtered == 2)
+    assert(filtered[1] == 4)
+    assert(filtered[2] == 2)
+end
+
+-------------------------------------------------------------------------------
+--- Map list.
+-- @param list : table with number indices.
+-- @param mapFunction function : call for each list entry to populate result.
+-- @return list : list of map function results for each entry in original list.
+-------------------------------------------------------------------------------
+function CrLua.List.map(list, mapFunction)
+    assert(type(list) == 'table' and type(mapFunction) == 'function')
+
+    local result = {}
+    for _, v in ipairs(list) do
+        local mapped = assert(mapFunction(v))
+        table.insert(result, mapped)
+    end
+    return result
+end
+
+function CrLua.List._testMap()
+    local list = { 1, 3 }
+    local function mapFunction(entry)
+        return entry + 1
+    end
+    local mapped = CrLua.List.map(list, mapFunction)
+    assert(#mapped == 2)
+    assert(mapped[1] == 2)
+    assert(mapped[2] == 4)
+end
+
+-------------------------------------------------------------------------------
+--- Convert a list to a set.
+-- @param list : table with number indices.
+-- @return set : table with list values as keys mapping to true.
+-------------------------------------------------------------------------------
+function CrLua.List.toSet(list)
+    assert(type(list) == 'table')
+
+    local result = {}
+    for _, v in ipairs(list) do
+        result[v] = true
+    end
+    return result
+end
+
+function CrLua.List._testToSet()
+    local list = { 'a', 'b' }
+    local set = CrLua.List.toSet(list)
+    assert(set.a)
+    assert(set.b)
+    assert(not set.c)
+end
+
+-------------------------------------------------------------------------------
+--- Convert the keys of a table to a list.
+-- The list is dependent on table key iteration order, make no assumptions!
+-- @param set table : map from key to true.
+-- @return list : table with number indices.
+-------------------------------------------------------------------------------
+function CrLua.List.fromKeys(set)
+    assert(type(set) == 'table')
+
+    local result = {}
+    for k, v in pairs(set) do
+        table.insert(result, k)
+    end
+    return result
+end
+
+function CrLua.List._testFromKeys()
+    local set = { a = true, b = true }
+    local list = CrLua.List.fromKeys(set)
+    assert(#list == 2, '#list=' .. #list)
+    if list[1] == 'a' then
+        assert(list[1] == 'a' and list[2] == 'b')
+    else
+        assert(list[1] == 'b' and list[2] == 'a')
+    end
+end
+
+-------------------------------------------------------------------------------
+--- Reduce a list to unique elements.
+-- @param list : table with number inidice.
+-- @return list : table with number indices and unique elements.
+-------------------------------------------------------------------------------
+function CrLua.List.unique(list)
+    local result = {}
+    local seen = {}
+    for _, v in ipairs(list) do
+        if not seen[v] then
+            seen[v] = true
+            table.insert(result, v)
+        end
+    end
+    return result
+end
+
+function CrLua.List._testUnique()
+    local list = { 'a', 'b', 'a', 'b', 'c' }
+    local unique = CrLua.List.unique(list)
+    assert(#unique == 3 and unique[1] == 'a' and unique[2] == 'b' and unique[3] == 'c')
+end
+
+-------------------------------------------------------------------------------
+--- Given an updated list, append any new items not in the old list but
+-- otherwise preserve old list order.  Also remove any items in the old
+-- list that are not in the new list.
+-- @param oldList : use this item order.
+-- @param newList : append any new items not in old, remove any old items not in new.
+-- @return list : table with the add/prune modifications.
+-------------------------------------------------------------------------------
+function CrLua.List.pruneAndAppendMissing(oldList, newList)
+    assert(type(oldList) == 'table' and type(newList) == 'table')
+
+    local oldCounts = {}
+    for _, oldItem in ipairs(oldList) do
+        oldCounts[oldItem] = (oldCounts[oldItem] or 0) + 1
+    end
+    local newCounts = {}
+    for _, newItem in ipairs(newList) do
+        newCounts[newItem] = (newCounts[newItem] or 0) + 1
+    end
+
+    -- Start by copying over old items in order, prune any missing from new.
+    local result = {}
+    for _, item in ipairs(oldList) do
+        local newCount = newCounts[item]
+        if newCount then
+            newCounts[item] = newCount > 1 and (newCount - 1)
+            table.insert(result, item)
+        end
+    end
+
+    -- Then add any new entries.
+    for _, item in ipairs(newList) do
+        local oldCount = oldCounts[item]
+        if oldCount then
+            oldCounts[item] = oldCount > 1 and (oldCount - 1)
+        else
+            table.insert(result, item)
+        end
+    end
+
+    return result
+end
+
+function CrLua.List._testPruneAndAppendMissing()
+    local a = { 1, 2, 3, 4, 5 }
+    local b = { 3, 5, 1, 7, 9 }
+    local c = CrLua.List.pruneAndAppendMissing(a, b)
+    for i, v in ipairs({ 1, 3, 5, 7, 9 }) do
+        assert(c[i] == v, 'first: ' .. table.concat(c, ', '))
+    end
+
+    -- Again, this time with some repeating values.
+    local a = { 1, 2, 2, 3, 3, 3, 4, 4, 4, 4 }
+    local b = { 3, 3, 5, 1, 1, 7, 9 }
+    local c = CrLua.List.pruneAndAppendMissing(a, b)
+    for i, v in ipairs({ 1, 3, 3, 5, 1, 7, 9 }) do
+        assert(c[i] == v, 'second: ' .. table.concat(c, ', '))
+    end
+end

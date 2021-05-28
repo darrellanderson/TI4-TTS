@@ -1,0 +1,230 @@
+--- Snap (agenda) laws to grid.
+-- @author Darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+
+local CARD_SCALE_XZ = 2
+
+local SNAP_POINTS = {
+    PADDING = {  -- around edge of grid
+        x = 0.5,
+        z = 0.5
+    },
+    CARD_SIZE = {
+        x = 2 * CARD_SCALE_XZ,
+        z = 3 * CARD_SCALE_XZ
+    },
+    ROTATION = {
+        x = 0,
+        y = 180,
+        z = 180
+    },
+}
+
+-- Snap points are layed out in a 8x3 grid, [row][col] indexing.
+local _snapPointsGrid = false
+local _scriptingZone = false
+
+local _attachedGuidToName = {}
+local _laws = {}
+
+-------------------------------------------------------------------------------
+
+function recomputeLaws()
+    _laws = {}
+    for _, name in pairs(_attachedGuidToName) do
+        _laws[name] = true
+    end
+end
+
+function isRelevantCard(enterObject)
+    assert(type(enterObject) == 'userdata')
+    return enterObject.tag == 'Card' and _deckHelper.isAgendaCard(enterObject.getName())
+end
+
+function onObjectEnterScriptingZone(zone, enterObject)
+    if not enterObject then
+        return
+    end
+    if zone == _scriptingZone and isRelevantCard(enterObject) then
+        enterObject.setScale({
+            x = CARD_SCALE_XZ,
+            y = 1,
+            z = CARD_SCALE_XZ,
+        })
+        _attachedGuidToName[enterObject.getGUID()] = enterObject.getName()
+        recomputeLaws()
+    end
+end
+
+function onObjectLeaveScriptingZone(zone, leaveObject)
+    if not leaveObject then
+        return
+    end
+    if zone == _scriptingZone and isRelevantCard(leaveObject) then
+        leaveObject.setScale({
+            x = 1,
+            y = 1,
+            z = 1,
+        })
+        _attachedGuidToName[leaveObject.getGUID()] = nil
+        recomputeLaws()
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function createScriptingZone()
+    assert(not _scriptingZone)
+
+    local zoneName = self.getGUID() .. ' SCRIPTING ZONE'
+
+    local function getScriptingZone()
+        for _, object in ipairs(getAllObjects()) do
+            if object.tag == 'Scripting' and object.getName() == zoneName then
+                return object
+            end
+        end
+    end
+
+    _scriptingZone = getScriptingZone() or spawnObject({
+        type              = 'ScriptingTrigger',
+        position          = self.getPosition(),
+        rotation          = self.getRotation(),
+        sound             = false,
+        snap_to_grid      = false
+    })
+    _scriptingZone.setName(zoneName)
+end
+
+-- Attaching via joint prevents mat from being movable (???).
+-- Just reposition zone when mat moves.
+function resetScriptingZone()
+    _scriptingZone.setPosition({
+        x = self.getPosition().x,
+        y = self.getPosition().y + 2,
+        z = self.getPosition().z,
+    })
+    _scriptingZone.setRotation(self.getRotation())
+
+    local size = self.getBoundsNormalized().size
+    _scriptingZone.setScale({
+        x = size.x,
+        y = 4,  -- 4 is enough, could make larger to be safe
+        z = size.z,
+    })
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    resetSnapPoints()
+
+    createScriptingZone()
+    resetScriptingZone()
+
+    _attachedGuidToName = (saveState and string.len(saveState) > 0 and JSON.decode(saveState)) or {}
+    recomputeLaws()
+end
+
+function onSave()
+    return JSON.encode(_attachedGuidToName)
+end
+
+function onDrop(playerColor)
+    Wait.time(resetScriptingZone, 3)
+end
+
+function resetSnapPoints()
+    local bounds = self.getBoundsNormalized()
+
+    -- Create as many snap points as fit inside bounds.
+    local numCols = math.floor(bounds.size.x / SNAP_POINTS.CARD_SIZE.x)
+    local numRows = math.floor(bounds.size.z / SNAP_POINTS.CARD_SIZE.z)
+
+    -- Compute spacing in local space.
+    local size = bounds.size
+    local cardSize = SNAP_POINTS.CARD_SIZE
+    local padding = SNAP_POINTS.PADDING
+
+    local x0 = -(size.x / 2) + padding.x + (cardSize.x / 2)
+    local z0 = -(size.z / 2) + padding.z + (cardSize.z / 2)
+    local dx = cardSize.x + padding.x
+    local dz = cardSize.z + padding.x
+
+    _snapPointsGrid = {}
+    local allSnapPoints = {}
+    for row = 0, numRows - 1 do
+        local columnEntries = {}
+        for col = 0, numCols - 1 do
+            local snapPoint = {
+                position = {
+                    x = x0 + col * dx,
+                    y = bounds.size.y,
+                    z = z0 + row * dz
+                },
+                rotation = SNAP_POINTS.ROTATION,
+                rotation_snap = true
+            }
+            table.insert(columnEntries, snapPoint)
+            table.insert(allSnapPoints, snapPoint)
+        end
+        table.insert(_snapPointsGrid, columnEntries)
+    end
+    self.setSnapPoints(allSnapPoints)
+end
+
+-------------------------------------------------------------------------------
+
+function _antiIntellecualRevolution(triggerName)
+    broadcastToAll('Anti-Intellectual Revolution, ' .. triggerName .. ': after researching a technology, destroy one non-fighter ship.', 'Yellow')
+end
+
+function onStrategyCardPlayed(strategyCardGuid)
+    local strategyCard = strategyCardGuid and getObjectFromGUID(strategyCardGuid)
+    strategyCard = strategyCard and strategyCard.getName()
+
+    if strategyCard == 'Technology' and _laws['Anti-Intellectual Revolution'] then
+        _antiIntellecualRevolution(strategyCard .. ' played')
+    end
+end
+
+function onObjectEnterContainer(container, enterObject)
+    local name = enterObject.getName()
+    if enterObject.tag == 'Card' and _laws['Anti-Intellectual Revolution'] then
+        local triggerSet = {
+            ['Focused Research'] = true,
+            ['Technology Rider'] = true,
+            ['Ixthian Artifact'] = true,
+        }
+        if triggerSet[name] and _deckHelper.isDiscard(enterObject.getGUID()) then
+            _antiIntellecualRevolution(name .. ' discarded')
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

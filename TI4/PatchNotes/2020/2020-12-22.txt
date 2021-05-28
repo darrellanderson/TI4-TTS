@@ -1,0 +1,5 @@
+- Fix auto-fill roller tool, bad interaction with the flagship fix in the previous update.
+- Redo attachment tokens with a smaller hammer (nicer looking tokens, especially if MSAA graphics are enabled).
+- Fix Elysium planet size (for detecting owner tokens, etc).
+- Keep aligning things nicely when there are more than 10 explore attachments on a planet.
+- Fix typo on Publicize Weapon Schematics agenda card.

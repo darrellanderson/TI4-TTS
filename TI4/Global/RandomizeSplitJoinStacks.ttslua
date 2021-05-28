@@ -1,0 +1,243 @@
+--- Randomize to split/join stacks and replace units with tokens.
+-- @author original by GarnetBear October 18, 2019
+-- @author updated by Darrell May 2020 to merge groups.
+
+-- Map from replaceable object name to bag name.
+local REPLACE_OBJECTNAME_TO_BAGNAME = {
+    ['x1 Fighter Token'] = 'x1 Fighters Tokens Bag',
+    ['x3 Fighter Token'] = 'x3 Fighters Tokens Bag',
+    ['x1 Infantry'] = 'x1 Infantry Token Bag',
+    ['x3 Infantry'] = 'x3 Infantry Token Bag',
+    ['Commodities/Tradegoods x1'] = 'Commodities/Tradegoods x1 Bag',
+    ['Commodities/Tradegoods x3'] = 'Commodities/Tradegoods x3 Bag',
+    ['$COLOR Fighter'] = '$COLOR Fighter',
+    ['$COLOR Infantry'] = '$COLOR Infantry'
+}
+
+-- Replace consumed items with produced items.  Repeatable entries happen as
+-- much as possible from the input, and ONLY IF no repeatable do the first
+-- non-repeatable (eagerly group, cautiously break apart).  Plastic color is
+-- mandated by the player doing the 'r' randomizing for safety/simplicity.
+local REPLACE_RULES = {
+    {
+        repeatable = true,
+        consume = { count = 3, items = { 'x1 Fighter Token', '$COLOR Fighter' }},
+        produce = { item = 'x3 Fighter Token' },
+    },
+    {
+        repeatable = true,
+        consume = { count = 3, items = { 'x1 Infantry', '$COLOR Infantry' }},
+        produce = { item = 'x3 Infantry' },
+    },
+    {
+        repeatable = true,
+        splitFaceDown = true,
+        consume = { count = 3, item = 'Commodities/Tradegoods x1' },
+        produce = { item = 'Commodities/Tradegoods x3' },
+    },
+    {
+        consume = { item = 'x3 Fighter Token' },
+        produce = { count = 3, item = 'x1 Fighter Token' },
+    },
+    {
+        consume = { item = 'x3 Infantry' },
+        produce = { count = 3, item = 'x1 Infantry' },
+    },
+    {
+        splitFaceDown = true,
+        consume = { item = 'Commodities/Tradegoods x3' },
+        produce = { count = 3, item = 'Commodities/Tradegoods x1' },
+    },
+    {
+        consume = { item = 'x1 Fighter Token' },
+        produce = { item = '$COLOR Fighter' },
+    },
+    {
+        consume = { item = 'x1 Infantry' },
+        produce = { item = '$COLOR Infantry' },
+    },
+    {
+        consume = { item = '$COLOR Fighter' },
+        produce = { item = 'x1 Fighter Token' },
+    },
+    {
+        consume = { item = '$COLOR Infantry' },
+        produce = { item = 'x1 Infantry' },
+    },
+}
+
+local _pendingReplace = assert(not _pendingReplace) and false
+
+local originalOnObjectRandomize = onObjectRandomize
+function onObjectRandomize(object, playerColor)
+    assert(type(object) == 'userdata' and type(playerColor) == 'string')
+
+    if originalOnObjectRandomize then
+        originalOnObjectRandomize(object, playerColor)
+    end
+
+    -- Get consume items from entries (does not remove them from entries).
+    -- @param rule: REPLACE_RULES value.
+    -- @param entries: MAP from index to entry, may have holes!
+    -- @param splitFaceDown boolean: if true, generate separate face up/face down results.
+    -- @return consumable, consumableFaceDown: list of entries map keys to consumable entries.
+    local function getConsumable(rule, entries)
+        assert(rule.consume and type(entries) == 'table')
+        local consumable, consumableFaceDown = {}, {}
+
+        -- For multi-item rules add in item list order (prefer token to plastic when grouping).
+        for _, consumeName in ipairs(rule.consume.items or { rule.consume.item }) do
+            for i, entry in pairs(entries) do
+                if consumeName == entry.consumeName then
+                    if rule.splitFaceDown and entry.object.is_face_down then
+                        table.insert(consumableFaceDown, i)
+                    else
+                        table.insert(consumable, i)
+                    end
+                end
+            end
+        end
+        return consumable, consumableFaceDown
+    end
+
+    -- Get absolute bag name from $COLOR-allowed item name.
+    local function getBag(itemName, playerColor)
+        assert(type(itemName) == 'string' and type(playerColor) == 'string')
+
+        -- Item name $COLOR points to (potentially with $COLOR) bag name.
+        -- Replace any bag name $COLOR for the absolute object name.
+        local bagName = REPLACE_OBJECTNAME_TO_BAGNAME[itemName]
+        assert(bagName)
+        bagName = string.gsub(bagName, '$COLOR', playerColor)
+
+        -- Remember bags for faster future lookups.
+        local bagGuidCache = REPLACE_OBJECTNAME_TO_BAGNAME._bagGuidCache
+        if not bagGuidCache then
+            bagGuidCache = {}
+            REPLACE_OBJECTNAME_TO_BAGNAME._bagGuidCache = bagGuidCache
+        end
+        local bagGuid = bagGuidCache[bagName]
+        local bag = bagGuid and getObjectFromGUID(bagGuid)
+        if not bag then
+            for _, object in ipairs(getAllObjects()) do
+                if (object.tag == 'Bag' or object.tag == 'Infinite') and object.getName() == bagName then
+                    bagGuidCache[bagName] = object.getGUID()
+                    bag = object
+                    break
+                end
+            end
+        end
+        assert(bag)
+        return bag
+    end
+
+    -- Consume once, removing consumed entries from collection.
+    -- @param rule: REPLACE_RULES value.
+    -- @param entries: MAP from index to entry, may have holes!  Gets mutated.
+    -- @param consumable: list of entries map keys to consumable entries.
+    -- @param boolean: did consume happen?
+    local function doConsume(rule, entries, consumable, playerColor)
+        assert(rule.consume and type(entries) == 'table' and type(consumable) == 'table' and type(playerColor) == 'string')
+
+        -- Verify consume units.
+        if #consumable < (rule.consume.count or 1) then
+            return false
+        end
+
+        -- Verify produce units are available.
+        local produceBag = getBag(rule.produce.item, playerColor)
+        if not produceBag then
+            error('itemName=' .. rule.produce.item .. ' color=' .. playerColor)
+        end
+        if produceBag.tag == 'Bag' and produceBag.getQuantity() < (rule.produce.count or 1) then
+            return false
+        end
+
+        -- Om nom nom!
+        local consumeCounts = {}
+        local position, isFaceDown
+        for _ = 1, (rule.consume.count or 1) do
+            local i = table.remove(consumable, 1)  -- consume in list order
+            local entry = entries[i]
+            entries[i] = nil
+            local consumeObject = entry.object
+            local consumeBag = getBag(entry.consumeName, playerColor)
+            consumeCounts[consumeObject.getName()] = (consumeCounts[consumeObject.getName()] or 0) + 1
+            position = position or consumeObject.getPosition()
+            isFaceDown = consumeObject.is_face_down
+            consumeBag.putObject(consumeObject)
+        end
+
+        -- Thppt!
+        local produceCounts = {}
+        for _ = 1, (rule.produce.count or 1) do
+            position.z = position.z + 0.5
+            position.y = position.y + 0.5
+            local produceObject = produceBag.takeObject({
+                position = position,
+                rotation = (rule.splitFaceDown and isFaceDown and {180,0,0}) or {0,0,0},
+            })
+            produceCounts[produceObject.getName()] = (produceCounts[produceObject.getName()] or 0) + 1
+        end
+
+        -- Report.
+        local function getMessage(nameCounts)
+            local message = {}
+            for name, count in pairs(nameCounts) do
+                if #message > 0 then table.insert(message, ', ') end
+                if count > 1 then table.insert(message, count .. ' ') end
+                table.insert(message, '“' .. name .. '”')
+            end
+            return table.concat(message, '')
+        end
+        print('(R) { ' .. getMessage(consumeCounts) .. ' } -> { ' .. getMessage(produceCounts) .. ' }')
+
+        return true
+    end
+
+    local function delayedReplace()
+        for color, entries in pairs(_pendingReplace) do
+            local didConsume = false
+            for _, rule in ipairs(REPLACE_RULES) do
+                if rule.repeatable then
+                    -- Do all repeatable rules as many times as possible.
+                    local consumable1, consumable2 = getConsumable(rule, entries)
+                    while doConsume(rule, entries, consumable1, color) do
+                        didConsume = true
+                    end
+                    while doConsume(rule, entries, consumable2, color) do
+                        didConsume = true
+                    end
+                elseif not didConsume then
+                    -- If singleton and nothing consumed yet, consume ONLY FIRST APPLICABPLE.
+                    local consumable1, consumable2 = getConsumable(rule, entries)
+                    didConsume = doConsume(rule, entries, consumable1, color)
+                    if didConsume then
+                        break
+                    end
+                    didConsume = doConsume(rule, entries, consumable2, color)
+                    if didConsume then
+                        break
+                    end
+                end
+            end
+        end
+        _pendingReplace = false
+    end
+
+    -- If this looks like a replace candidate, queue for processing next frame.
+    -- (Waiting a frame lets randomizing a group gather all peers.)
+    local consumeName = string.gsub(object.getName(), playerColor, '$COLOR')
+    if REPLACE_OBJECTNAME_TO_BAGNAME[consumeName] then
+        if not _pendingReplace then
+            _pendingReplace = {}
+            Wait.frames(delayedReplace, 2)
+        end
+        local byColor = _pendingReplace[playerColor]
+        if not byColor then
+            byColor = {}
+            _pendingReplace[playerColor] = byColor
+        end
+        table.insert(byColor, { object = object, consumeName = consumeName, playerColor = playerColor })
+    end
+end

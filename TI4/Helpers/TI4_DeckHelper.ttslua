@@ -1,0 +1,1931 @@
+--- Shared deck locations, etc.
+-- @author Darrell
+-- #include <~/CrLua/Objects/TI4_Helpers/TI4_DeckHelper>
+
+-- Users should copy this getHelperClient function, and use via:
+--
+-- local deckHelper = getHelperClient('TI4_DECK_HELPER')
+--
+-- Where one can call any main function in this file via the helper.
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+-- DECK_NAME to SOURCE_NAME to CARDS
+-- CARDS were originally a simple string list, however they may also be
+-- a CARD_NAME string key to a CARD_ATTRIBUTES table.
+-- CARD_ATTRIBUTES include:
+-- - purge (boolean) : add a purge menu option.
+-- - score (boolean) : add a score menu option.
+local DECKS = {
+    ['Public Objectives I'] = {
+        transform = {
+            parent = 'Public Objectives I Mat',
+            deck = {
+                position = { x = 7.64, y = 0.26, z = 0.27 },
+                rotation = { x = 0, y = 0, z = 180 },
+            },
+            extraSnapPoints = {
+                p0 = { x = 3.62, y = 0.26, z = 0.27 },
+                d = { x = -2.81, y = 0, z = 0 },
+                count = 5
+            }
+        },
+        score = true,
+        cardNames = {
+            ['Base'] = {
+                'Corner the Market',
+                'Develop Weaponry',
+                'Diversify Research',
+                'Erect a Monument',
+                'Expand Borders',
+                'Found Research Outposts',
+                'Intimidate Council',
+                'Lead From the Front',
+                'Negotiate Trade Routes',
+                'Sway the Council',
+            },
+            ['PoK'] = {
+                'Amass Wealth',
+                'Build Defenses',
+                'Discover Lost Outposts',
+                'Engineer a Marvel',
+                'Explore Deep Space',
+                'Improve Infrastructure',
+                'Make History',
+                'Populate the Outer Rim',
+                'Push Boundaries',
+                'Raise a Fleet',
+            },
+        },
+    },
+    ['Public Objectives II'] = {
+        transform = {
+            parent = 'Public Objectives II Mat',
+            deck = {
+                position = { x = 7.54, y = 0.26, z = 0.34 },
+                rotation = { x = 0, y = 0, z = 180 },
+            },
+            extraSnapPoints = {
+                p0 = { x = 3.69, y = 0.26, z = 0.34 },
+                d = { x = -2.83, y = 0, z = 0 },
+                count = 5
+            }
+        },
+        score = true,
+        cardNames = {
+            ['Base'] = {
+                'Centralize Galactic Trade',
+                'Conquer the Weak',
+                'Form Galactic Brain Trust',
+                'Found a Golden Age',
+                'Galvanize the People',
+                'Manipulate Galactic Law',
+                'Master the Sciences',
+                'Revolutionize Warfare',
+                'Subdue the Galaxy',
+                'Unify the Colonies',
+            },
+            ['PoK'] = {
+                'Achieve Supremacy',
+                'Become a Legend',
+                'Command an Armada',
+                'Construct Massive Cities',
+                'Control the Borderlands',
+                'Hold Vast Reserves',
+                'Patrol Vast Territories',
+                'Protect the Border',
+                'Reclaim Ancient Monuments',
+                'Rule Distant Lands',
+            },
+        },
+    },
+    ['Secret Objectives'] = {
+        transform = {
+            parent = 'Cards Mat',
+            deck = {
+                position = { x = 2.81, y = 0.26, z = -1.86 },
+                rotation = { x = 0, y = 0, z = 180 },
+            }
+        },
+        score = true,
+        shuffleOnDiscard = true,
+        cardNames = {
+            base = {
+                ['Adapt New Strategies'] = { abbr = '2 FACTION TECH' },
+                ['Become the Gatekeeper'] = { abbr = 'ALPHA AND BETA' },
+                ['Control the Region'] = { abbr = '6 SYSTEMS' },
+                ['Cut Supply Lines'] = { abbr = 'BLOCKADE SD' },
+                ['Destroy Their Greatest Ship'] = { abbr = 'DESTORY WS/FLAG' },
+                ['Establish a Perimeter'] = { abbr = '4 PDS' },
+                ['Forge an Alliance'] = { abbr = '4 CULTURAL' },
+                ['Form a Spy Network'] = { abbr = '5 ACTION CARDS' },
+                ['Fuel the War Machine'] = { abbr = '3 SPACE DOCKS' },
+                ['Gather a Mighty Fleet'] = { abbr = '5 DREADNOUGHTS' },
+                ['Learn the Secrets of the Cosmos'] = { abbr = '3 ADJ TO ANOMALY' },
+                ['Make an Example of Their World'] = { abbr = 'BOMBARD LAST GF' },
+                ['Master the Laws of Physics'] = { abbr = '4 TECH 1 COLOR' },
+                ['Mine Rare Minerals'] = { abbr = '4 HAZARDOUS' },
+                ['Monopolize Production'] = { abbr = '4 INDUSTRIAL' },
+                ['Occupy the Seat of the Empire'] = { abbr = 'MR W/ 3 SHIPS' },
+                ['Spark a Rebellion'] = { abbr = 'WIN VS LEADER' },
+                ['Threaten Enemies'] = { abbr = 'SYS ADJ TO HOME' },
+                ['Turn Their Fleets to Dust'] = { abbr = 'SPC LAST SHIP' },
+                ['Unveil Flagship'] = { abbr = 'WIN W/ FLAGSHIP' },
+            },
+            ['PoK'] = {
+                ['Become a Martyr'] = { abbr = 'LOSE IN HOME' },
+                ['Betray a Friend'] = { abbr = 'WIN VS PROM NOTE' },
+                ['Brave the Void'] = { abbr = 'WIN IN ANOMALY' },
+                ['Darken the Skies'] = { abbr = 'WIN IN HOME' },
+                ['Defy Space and Time'] = { abbr = 'WORMHOLE NEXUS' },
+                ['Demonstrate Your Power'] = { abbr = '3 SHIPS SURVIVE' },
+                ['Destroy Heretical Works'] = { abbr = 'PURGE 2 FRAGMENTS' },
+                ['Dictate Policy'] = { abbr = '3 LAWS IN PLAY' },
+                ['Drive the Debate'] = { abbr = 'ELECTED AGENDA' },
+                ['Establish Hegemony'] = { abbr = '12 INFLUENCE' },
+                ['Fight with Precision'] = { abbr = 'AFB LAST FIGHTER' },
+                ['Foster Cohesion'] = { abbr = 'NEIGHBOR W / ALL' },
+                ['Hoard Raw Materials'] = { abbr = '12 RESOURCES' },
+                ['Mechanize the Military'] = { abbr = '4 PLANETS W/ MECH' },
+                ['Occupy the Fringe'] = { abbr = '9 GROUND FORCES' },
+                ['Produce en Masse'] = { abbr = '8 PROD VALUE' },
+                ['Prove Endurance'] = { abbr = 'PASS LAST' },
+                ['Seize an Icon'] = { abbr = 'LEGENDARY PLANET' },
+                ['Stake Your Claim'] = { abbr = 'SHARE SYSTEM' },
+                ['Strengthen Bonds'] = { abbr = 'PROM NOTE' },
+            },
+        },
+    },
+    ['Agenda'] = {
+        transform = {
+            parent = 'Cards Mat',
+            deck = {
+                position = { x = 0.00, y = 0.26, z = -1.86 },
+                rotation = { x = 0, y = 0, z = 180 },
+            },
+            discard = {
+                position = { x = 0.0, y = 0.26, z = 2.53 },
+                rotation = { x = 0, y = 0, z = 0 },
+            }
+        },
+        cardNames = {
+            base = {
+                'Anti-Intellectual Revolution',
+                'Archived Secret',
+                'Arms Reduction',
+                'Classified Document Leaks',
+                'Colonial Redistribution',
+                'Committee Formation',
+                'Compensated Disarmament',
+                'Conventions of War',
+                'Core Mining',
+                'Demilitarized Zone',
+                'Economic Equality',
+                'Enforced Travel Ban',
+                'Executive Sanctions',
+                'Fleet Regulations',
+                ['Holy Planet of Ixth'] = { score = true },
+                'Homeland Defense Act',
+                'Imperial Arbiter',
+                'Incentive Program',
+                'Ixthian Artifact',
+                'Judicial Abolishment',
+                'Minister of Commerce',
+                'Minister of Exploration',
+                'Minister of Industry',
+                'Minister of Peace',
+                'Minister of Policy',
+                'Minister of Sciences',
+                'Minister of War',
+                'Miscount Disclosed',
+                ['Mutiny'] = { score = true },
+                ['Mutiny (For)'] = { score = true },  -- right click rename
+                ['Mutiny (Against)'] = { score = true },  -- right click rename
+                'New Constitution',
+                'Prophecy of Ixth',
+                'Public Execution',
+                'Publicize Weapon Schematics',
+                'Regulated Conscription',
+                'Representative Government',
+                'Research Team: Biotic',
+                'Research Team: Cybernetic',
+                'Research Team: Propulsion',
+                'Research Team: Warfare',
+                ['Seed of an Empire'] = { score = true },
+                'Senate Sanctuary',
+                ['Shard of the Throne'] = { score = true },
+                'Shared Research',
+                'Swords to Plowshares',
+                'Terraforming Initiative',
+                ['The Crown of Emphidia'] = { score = true },
+                'The Crown of Thalnos',
+                'Unconventional Measures',
+                'Wormhole Reconstruction',
+                'Wormhole Research',
+            },
+            ['PoK'] = {
+                'Clandestine Operations',
+                'Galactic Crisis Pact',
+                'Armed Forces Standardization',
+                'Nexus Sovereignty',
+                'Checks and Balances',
+                'Articles of War',
+                'Rearmament Agreement',
+                'Research Grant Reallocation',
+                'Covert Legislation',
+                'Minister of Antiquities',
+                'Search Warrant',
+                ['Political Censure'] = { score = true },
+                'Representative Government (PoK)',
+            },
+        },
+    },
+    ['Actions'] = {
+        transform = {
+            parent = 'Cards Mat',
+            deck = {
+                position = { x = -2.81, y = 0.26, z = -1.86 },
+                rotation = { x = 0, y = 0, z = 180 },
+            },
+            discard = {
+                position = { x = -2.81, y = 0.26, z = 2.53 },
+                rotation = { x = 0, y = 0, z = 0 },
+            }
+        },
+        cardNames = {
+            ['Base'] = {
+                'Ancient Burial Sites',
+                'Assassinate Representative',
+                'Bribery',
+                'Bunker',
+                'Confusing Legal Text',
+                'Construction Rider',
+                'Courageous to the End',
+                'Cripple Defenses',
+                'Diplomacy Rider',
+                'Direct Hit (1)',
+                'Direct Hit (2)',
+                'Direct Hit (3)',
+                'Direct Hit (4)',
+                'Disable',
+                'Distinguished Councilor',
+                'Economic Initiative',
+                'Emergency Repairs',
+                'Experimental Battlestation',
+                'Fighter Prototype',
+                'Fire Team',
+                'Flank Speed (1)',
+                'Flank Speed (2)',
+                'Flank Speed (3)',
+                'Flank Speed (4)',
+                'Focused Research',
+                'Frontline Deployment',
+                'Ghost Ship',
+                ['Imperial Rider'] = { score = true },
+                'In the Silence of Space',
+                'Industrial Initiative',
+                'Infiltrate',
+                'Insubordination',
+                'Intercept',
+                'Leadership Rider',
+                'Lost Star Chart',
+                'Lucky Shot',
+                'Maneuvering Jets (1)',
+                'Maneuvering Jets (2)',
+                'Maneuvering Jets (3)',
+                'Maneuvering Jets (4)',
+                'Mining Initiative',
+                'Morale Boost (1)',
+                'Morale Boost (2)',
+                'Morale Boost (3)',
+                'Morale Boost (4)',
+                'Parley',
+                'Plague',
+                'Political Stability',
+                'Politics Rider',
+                'Public Disgrace',
+                'Reactor Meltdown',
+                'Reparations',
+                'Repeal Law',
+                'Rise of a Messiah',
+                'Sabotage (1)',
+                'Sabotage (2)',
+                'Sabotage (3)',
+                'Sabotage (4)',
+                'Salvage',
+                'Shields Holding (1)',
+                'Shields Holding (2)',
+                'Shields Holding (3)',
+                'Shields Holding (4)',
+                'Signal Jamming',
+                'Skilled Retreat (1)',
+                'Skilled Retreat (2)',
+                'Skilled Retreat (3)',
+                'Skilled Retreat (4)',
+                'Spy',
+                'Summit',
+                'Tactical Bombardment',
+                'Technology Rider',
+                'Trade Rider',
+                'Unexpected Action',
+                'Unstable Planet',
+                'Upgrade',
+                'Uprising',
+                'Veto',
+                'War Effort',
+                'Warfare Rider',
+            },
+            ['Codex 1'] = {
+                'Hack Election',
+                'Harness Energy',
+                'Blitz',
+                'Fighter Conscription',
+                'Forward Supply Base',
+                'Rally',
+                'War Machine (1)',
+                'War Machine (2)',
+                'War Machine (3)',
+                'War Machine (4)',
+                'Master Plan',
+                'Insider Information',
+                'Plagiarize',
+                'Scramble Frequency',
+                'Solar Flare',
+                'Reflective Shielding',
+                'Impersonation',
+                'Sanction',
+                'Counterstroke',
+                'Ghost Squad',
+            },
+            ['PoK'] = {
+                'Exploration Probe',
+                'Nav Suite',
+                'Archaeological Expedition',
+                'Seize Artifact',
+                'Reverse Engineer',
+                "Coup d'Etat",
+                'Decoy Operation',
+                'Deadly Plot',
+                'Waylay',
+                'Divert Funding',
+                'Refit Troops',
+                'Reveal Prototype',
+                'Rout',
+                'Scuttle',
+                'Confounding Legal Text',
+                'Manipulate Investments',
+                'Diplomatic Pressure (1)',
+                'Diplomatic Pressure (2)',
+                'Diplomatic Pressure (3)',
+                'Diplomatic Pressure (4)',
+            },
+        },
+    },
+    ['Planets'] = {
+        transform = {
+            parent = 'Cards Mat',
+            deck = {
+                position = { x = 2.81, y = 0.26, z = 2.53 },
+                rotation = { x = 0, y = 0, z = 180 },
+            },
+        },
+        cardNames = {}
+    },
+    ['Industrial Exploration'] = {
+        transform = {
+            parent = 'Exploration Mat',
+            deck = {
+              position = { x = -2.5, y = 0.26, z = -1.75},
+              rotation = { x = 0, y = 0, z = 180 },
+            },
+            discard = {
+                position = {x = -2.5, y = 0.26, z = 1.75},
+                rotation = { x = 0, y = 0, z = 0 },
+            }
+        },
+        reportRemaining = true,
+        cardNames = {
+            ['PoK'] = {
+                ['Industrial Relic Fragment (1)'] = { purge = true },
+                ['Industrial Relic Fragment (2)'] = { purge = true },
+                ['Industrial Relic Fragment (3)'] = { purge = true },
+                ['Industrial Relic Fragment (4)'] = { purge = true },
+                ['Industrial Relic Fragment (5)'] = { purge = true },
+                'Abandoned Warehouses (1)',
+                'Abandoned Warehouses (2)',
+                'Abandoned Warehouses (3)',
+                'Abandoned Warehouses (4)',
+                'Local Fabricators (1)',
+                'Local Fabricators (2)',
+                'Local Fabricators (3)',
+                'Local Fabricators (4)',
+                'Functioning Base (1)',
+                'Functioning Base (2)',
+                'Functioning Base (3)',
+                'Functioning Base (4)',
+                ['Biotic Research Facility'] = { purge = true },
+                ['Propulsion Research Facility'] = { purge = true },
+                ['Cybernetic Research Facility'] = { purge = true },
+            },
+        },
+    },
+    ['Hazardous Exploration'] = {
+        transform = {
+            parent = 'Exploration Mat',
+            deck = {
+                position = { x = 0, y = 0.26, z = -1.75},
+                rotation = { x = 0, y = 0, z = 180 },
+            },
+            discard = {
+                position = {x = 0, y = 0.26, z = 1.75},
+                rotation = { x = 0, y = 0, z = 0 },
+            }
+        },
+        reportRemaining = true,
+        cardNames = {
+            ['PoK'] = {
+                ['Hazardous Relic Fragment (1)'] = { purge = true },
+                ['Hazardous Relic Fragment (2)'] = { purge = true },
+                ['Hazardous Relic Fragment (3)'] = { purge = true },
+                ['Hazardous Relic Fragment (4)'] = { purge = true },
+                ['Hazardous Relic Fragment (5)'] = { purge = true },
+                ['Hazardous Relic Fragment (6)'] = { purge = true },
+                ['Hazardous Relic Fragment (7)'] = { purge = true },
+                'Expedition (1)',
+                'Expedition (2)',
+                'Expedition (3)',
+                'Core Mine (1)',
+                'Core Mine (2)',
+                'Core Mine (3)',
+                'Volatile Fuel Source (1)',
+                'Volatile Fuel Source (2)',
+                'Volatile Fuel Source (3)',
+                ['Mining World'] = { purge = true },
+                ['Lazax Survivors'] = { purge = true },
+                ['Warfare Research Facility'] = { purge = true },
+                ['Rich World'] = { purge = true },
+            },
+        },
+    },
+    ['Cultural Exploration'] = {
+        transform = {
+            parent = 'Exploration Mat',
+            deck = {
+                position = { x = 2.5, y = 0.26, z = -1.75},
+                rotation = { x = 0, y = 0, z = 180 },
+            },
+            discard = {
+                position = {x = 2.5, y = 0.26, z = 1.75},
+                rotation = { x = 0, y = 0, z = 0 },
+            }
+        },
+        reportRemaining = true,
+        cardNames = {
+            ['PoK'] = {
+                ['Cultural Relic Fragment (1)'] = { purge = true },
+                ['Cultural Relic Fragment (2)'] = { purge = true },
+                ['Cultural Relic Fragment (3)'] = { purge = true },
+                ['Cultural Relic Fragment (4)'] = { purge = true },
+                ['Cultural Relic Fragment (5)'] = { purge = true },
+                ['Cultural Relic Fragment (6)'] = { purge = true },
+                ['Cultural Relic Fragment (7)'] = { purge = true },
+                ['Cultural Relic Fragment (8)'] = { purge = true },
+                ['Cultural Relic Fragment (9)'] = { purge = true },
+                'Mercenary Outfit (1)',
+                'Mercenary Outfit (2)',
+                'Mercenary Outfit (3)',
+                'Freelancers (1)',
+                'Freelancers (2)',
+                'Freelancers (3)',
+                ['Demilitarized Zone (PoK)'] = { purge = true },
+                ['Dyson Sphere'] = { purge = true },
+                ['Paradise World'] = { purge = true },
+                ['Tomb of Emphidia'] = { purge = true },
+                ['Gamma Wormhole'] = { purge = true },
+            },
+        },
+    },
+    ['Frontier Exploration'] = {
+        transform = {
+            parent = 'Exploration Mat',
+            deck = {
+                position = { x = -5, y = 0.26, z = -1.75},
+                rotation = { x = 0, y = 0, z = 180 },
+            },
+            discard = {
+                position = {x  = -5, y = 0.26, z = 1.75},
+                rotation = { x = 0, y = 0, z = 0 },
+            }
+        },
+        reportRemaining = true,
+        cardNames = {
+            ['PoK'] = {
+                ['Unknown Relic Fragment (1)'] = { purge = true },
+                ['Unknown Relic Fragment (2)'] = { purge = true },
+                ['Unknown Relic Fragment (3)'] = { purge = true },
+                ['Enigmatic Device (1)'] = { purge = true },
+                ['Enigmatic Device (2)'] = { purge = true },
+                ['Ion Storm'] = { purge = true },
+                ['Gamma Relay'] = { purge = true },
+                'Lost Crew (1)',
+                'Lost Crew (2)',
+                'Merchant Station (1)',
+                'Merchant Station (2)',
+                'Derelict Vessel (1)',
+                'Derelict Vessel (2)',
+                ['Mirage (Exploration)'] = { purge = true },
+            },
+        },
+    },
+    ['Relics'] = {
+        transform = {
+            parent = 'Exploration Mat',
+            deck = {
+                position = { x = 5, y = 0.26, z = -1.75} ,
+                rotation = { x = 0, y = 0, z = 180 },
+            },
+        },
+        reportRemaining = true,
+        cardNames = {
+            ['PoK'] = {
+                ['Dominus Orb'] = { purge = true },
+                ['Maw of Worlds'] = { purge = true },
+                'Scepter of Emelpar',
+                ['Shard of the Throne (PoK)'] = { score = true },
+                ['Stellar Converter'] = { purge = true },
+                ['The Codex'] = { purge = true },
+                ['The Crown of Emphidia (PoK)'] = { score = true },
+                'The Crown of Thalnos (PoK)',
+                'The Obsidian',
+                "The Prophet's Tears",
+            },
+            ['Codex 2'] = {
+                'Nano-Forge',
+                ['Dynamis Core'] = { purge = true },
+                'JR-XS455-0',  -- careful, use "zero" not "oh"
+            }
+        }
+    },
+
+    ['Legendary Planets'] = {
+        transform = {
+            parent = 'Exploration Mat',
+            deck = {
+                position = { x = 5, y = 0.26, z = 1.75 },
+                rotation = { x = 0, y = 0, z = 180 },
+            },
+        },
+        cardNames = {
+            ['PoK'] = {
+                'Imperial Arms Vault',
+                'Exterrix Headquarters',
+                'The Atrament',
+                'Mirage Flight Academy',
+            }
+        }
+    },
+}
+
+local _parentNameToGuid = {}
+local _cardNameToDeckAttributes = false
+local _cardNameToCardAttributes = false
+local _dealQueue = {}
+local _dealCoroutineIsActive = false
+local _dealCoroutineHeartbeat = false
+
+local function _getParent(parentName)
+    local guid = _parentNameToGuid[parentName]
+    local parent = guid and getObjectFromGUID(guid)
+    if parent then
+        return parent
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == parentName then
+            _parentNameToGuid[parentName] = object.getGUID()
+            return object
+        end
+    end
+end
+
+local function _getDeckAttributes(cardName)
+    assert(type(cardName) == 'string')
+    if not _cardNameToDeckAttributes then
+        _cardNameToDeckAttributes = {}
+        for deckName, deckAttributes in pairs(DECKS) do
+            for cardSource, cardNames in pairs(deckAttributes.cardNames) do
+                for k, v in pairs(cardNames) do
+                    local cardName = type(k) == 'string' and k or v
+                    _cardNameToDeckAttributes[cardName] = deckAttributes
+                end
+            end
+        end
+        -- Add generic promissory notes, attributes point to color.
+        local genericPromissoryNotes = {
+            'Alliance ($COLOR)',
+            'Ceasefire ($COLOR)',
+            'Political Secret ($COLOR)',
+            'Support for the Throne ($COLOR)',
+            'Trade Agreement ($COLOR)',
+        }
+        for _, color in ipairs(Player.getColors()) do
+            local deckAttributes = {
+                transform = {}, -- compute on demand
+                color = color
+            }
+            for _, cardName in ipairs(genericPromissoryNotes) do
+                cardName = string.gsub(cardName, '$COLOR', color)
+                _cardNameToDeckAttributes[cardName] = deckAttributes
+            end
+        end
+        -- Add faction promissory notes, attributes point to faction name.
+        for _, faction in pairs(_factionHelper.allFactions(true)) do
+            local deckAttributes = {
+                transform = {}, -- compute on demand
+                factionName = faction.name
+            }
+            for _, cardName in ipairs(faction.promissoryNotes or {}) do
+                _cardNameToDeckAttributes[cardName] = deckAttributes
+            end
+            _cardNameToDeckAttributes[(faction.shortName or faction.frankenName or '-') .. ' Alliance'] = deckAttributes
+        end
+    end
+    return _cardNameToDeckAttributes[cardName]
+end
+
+local function _getCardAttributes(cardName)
+    assert(type(cardName) == 'string')
+    if not _cardNameToCardAttributes then
+        _cardNameToCardAttributes = {}
+        for _, deckAttributes in pairs(DECKS) do
+            for _, cardNames in pairs(deckAttributes.cardNames) do
+                for cardName, cardAttributes in pairs(cardNames) do
+                    if type(cardName) == 'string' and type(cardAttributes) == 'table' then
+                        _cardNameToCardAttributes[cardName] = cardAttributes
+                    end
+                end
+            end
+        end
+        -- Add other cards.
+        local function addCardAttributes(cardName, addAttrs)
+            local cardAttrs = _cardNameToCardAttributes[cardName]
+            if not cardAttrs then
+                cardAttrs = {}
+                _cardNameToCardAttributes[cardName] = cardAttrs
+            end
+            for k, v in pairs(addAttrs) do
+                cardAttrs[k] = v
+            end
+        end
+        for _, color in ipairs(Player.getColors()) do
+            local cardName = 'Support for the Throne (' .. color .. ')'
+            addCardAttributes(cardName, { score = true })
+        end
+    end
+    return _cardNameToCardAttributes[cardName]
+end
+
+local function _getDeckAttributesByType(deckType)
+    assert(type(deckType) == 'string')
+    return DECKS[deckType]
+end
+
+local function _getTransform(deckAttributes, deckOrDiscard)
+    assert(type(deckAttributes) == 'table' and type(deckOrDiscard) == 'string')
+
+    -- Get the requested transform.
+    local transform = deckAttributes.transform[deckOrDiscard]
+    if transform then
+        local parent = _getParent(deckAttributes.transform.parent)
+        local parentRot = parent and parent.getRotation()
+        return {
+            position = (parent and parent.positionToWorld(transform.position)) or {
+                x = transform.position.x,  -- make a copy, caller may mutate!
+                y = transform.position.y,
+                z = transform.position.z
+            },
+            rotation = {
+                x = transform.rotation.x + (parentRot and parentRot.x or 0),
+                y = transform.rotation.y + (parentRot and parentRot.y or 0),
+                z = transform.rotation.z + (parentRot and parentRot.z or 0),
+            }
+        }
+    end
+
+    -- Special case faction/color to current hand position.
+    if deckOrDiscard == 'player' then
+        local dealToColor = false
+        if deckAttributes.color then
+            dealToColor = deckAttributes.color
+        end
+        if deckAttributes.factionName then
+            local faction = _factionHelper.fromTokenName(deckAttributes.factionName)
+            dealToColor = faction.color
+        end
+        local zone = _zoneHelper.zoneAttributes(dealToColor)
+        if zone then
+            -- First look for a hand.
+            for _, player in ipairs(Player.getPlayers()) do
+                if player.color == dealToColor and player.getHandCount() > 0 then
+                    local hand = player.getHandTransform(1)
+                    return {
+                        position = {
+                            x = hand.position.x,
+                            y = hand.position.y,
+                            z = hand.position.z,
+                        },
+                        rotation = {
+                            x = 0,
+                            y = zone.rotation.y, -- hand rotation is flipped, use zone
+                            z = 0,
+                        }
+                    }
+                end
+            end
+            -- If no hand, use zone.
+            return {
+                position = {
+                    x = zone.center.x,
+                    y = zone.center.y,
+                    z = zone.center.z,
+                },
+                rotation = {
+                    x = 0,
+                    y = zone.rotation.y,
+                    z = 0
+                }
+            }
+        end
+    end
+end
+
+local function _getDeck(deckTransform)
+    assert(type(deckTransform) == 'table')
+    local hits = Physics.cast({
+        origin       = deckTransform.position,
+        direction    = { x = 0, y = -1, z = 0 },
+        type         = 3,  -- box
+        size         = { x = 0.1, y = 4, z = 0.1 },
+    })
+
+    -- First look for a deck.
+    for _, hit in ipairs(hits or {}) do
+        if hit.hit_object.tag == 'Deck' then
+            return hit.hit_object
+        end
+    end
+
+    -- Failing that check if there is a single card.
+    for _, hit in ipairs(hits or {}) do
+        if hit.hit_object.tag == 'Card' then
+            return hit.hit_object
+        end
+    end
+end
+
+--- Expose scorable card names.
+function getScoreCardNameSet()
+    _getDeckAttributes('bogus')  -- make sure table exists
+    _getCardAttributes('bogus')  -- make sure table exists
+    local result = {}
+    for cardName, deckAttrs in pairs(_cardNameToDeckAttributes) do
+        if deckAttrs.score then
+            result[cardName] = true
+        end
+    end
+    for cardName, cardAttrs in pairs(_cardNameToCardAttributes) do
+        if cardAttrs.score then
+            result[cardName] = true
+        end
+    end
+    return result
+end
+
+--- Get a short name used by streamer overlay.
+function getCardAbbreviation(cardName)
+    assert(type(cardName) == 'string')
+    local attrs = _getCardAttributes(cardName)
+    return attrs and attrs.abbr
+end
+
+--- Expose get deck method.
+function getDeck(name)
+    assert(type(name) == 'string')
+    local deckAttributes = DECKS[name]
+    local deckTransform = deckAttributes and _getTransform(deckAttributes, 'deck')
+    local deck = deckTransform and _getDeck(deckTransform)
+    return deck and deck.getGUID()
+end
+
+function getDeckWithReshuffle(name)
+    local deckAttributes = _getDeckAttributesByType(name)
+    local deckTransform = _getTransform(deckAttributes, 'deck')
+    local deck = _getDeck(deckTransform)
+
+    if deck == nil then
+        local deckDiscardTransform = _getTransform(deckAttributes, 'discard')
+        local deckDiscard = _getDeck(deckDiscardTransform)
+        if deckDiscard then
+            deckDiscard.setPosition({
+                x = deckTransform.position.x,
+                y = deckDiscard.getPosition().y,
+                z = deckTransform.position.z
+            })
+            deckDiscard.setRotation(deckTransform.rotation)
+            deckDiscard.setName(deckAttributes.deckName)
+            if deckDiscard.tag == 'Deck' then
+                deckDiscard.shuffle()
+            end
+            if _hasContextMenuItems(deckDiscard) then
+                deckDiscard.clearContextMenu()
+                _applyContextMenuItems(deckDiscard)
+            end
+            deck = deckDiscard
+        end
+    end
+    return deck and deck.getGUID()
+end
+
+--- Given a card name, which deck contains it?
+function getDeckName(cardName)
+    assert(type(cardName) == 'string')
+    local deckAttributes = _getDeckAttributes(cardName)
+    return deckAttributes and deckAttributes.deckName
+end
+
+--- Get deck location (handy for adding cards during setup).
+function getDeckTransform(deckName)
+    local deckAttributes = _getDeckAttributesByType(deckName)
+    return deckAttributes and _getTransform(deckAttributes, 'deck')
+end
+
+--- Get decks with cards from the source (could be some, could be all).
+function getDecksWithSource(source)
+    assert(type(source) == 'string')
+    local result = {}
+    for deckName, deckAttributes in pairs(DECKS) do
+        for cardSource, cardNames in pairs(deckAttributes.cardNames) do
+            if cardSource == source then
+                table.insert(result, deckName)
+            end
+        end
+    end
+    return result
+end
+
+--- Get card names from the given deck with the optional source.
+function getCardsWithSource(params)
+    local deckName = params.deckName
+    local source = params.source
+    assert(type(deckName) == 'string')
+    assert((not source) or (type(source) == 'string'))
+    local deckAttributes = _getDeckAttributesByType(deckName)
+    local result = {}
+    for cardSource, cardNames in pairs(deckAttributes.cardNames) do
+        if (not source) or (cardSource == source) then
+            for k, v in pairs(cardNames) do
+                local cardName = type(k) == 'string' and k or v
+                table.insert(result, cardName)
+            end
+        end
+    end
+    return result
+end
+
+--- Add a homebrew card.
+-- @params params (table): {deckName, cardName} string/string entries.
+-- E.g. _deckHelper.injectCard('Actions', 'My Action Card')
+function injectCard(params)
+    assert(type(params) == 'table', 'params must be a table')
+    assert(type(params.cardName == 'string'), 'params.cardName must be a string')
+    assert((not params.deckName) or type(params.deckName == 'string'), 'deckName')
+    assert((not params.factionName) or type(params.factionName == 'string'), 'deckName')
+
+    -- Make sure _cardNameToDeckAttributes exists.
+    _getDeckAttributes('bogus')
+
+    _cardNameToDeckAttributes[params.cardName] = {
+        transform = {},
+        deckName = params.deckName,
+        factionName = params.factionName,
+    }
+end
+
+-------------------------------------------------------------------------------
+
+function canDiscard(cardName)
+    assert(type(cardName) == 'string')
+    return _getDeckAttributes(cardName) and true
+end
+
+--- Discard this card, optionally removing it from a contiainer.
+function discardCard(params)
+    assert(type(params) == 'table')
+    assert(type(params.guid) == 'string')
+    assert(type(params.name) == 'string')
+    assert(not params.index or (type(params.index) == 'number' and params.index > 0))
+    assert(not params.containerGuid or type(params.containerGuid) == 'string')
+
+    assert(not params.waitForDestroy)  -- deprecated
+
+    local deckAttributes = _getDeckAttributes(params.name)
+    if not deckAttributes then
+        return false
+    end
+
+    -- Where to put it?  Must be a transform to be a take object parameter.
+    local transform = _getTransform(deckAttributes, 'discard')
+    transform = transform or _getTransform(deckAttributes, 'deck')
+    transform = transform or _getTransform(deckAttributes, 'player')
+    if not transform then
+        error('Unable to find destination for "' .. params.name .. '"')
+    end
+    transform.position.y = transform.position.y + 5 + (params.index or 0) / 10
+
+    -- Find the card or container.
+    local container = false
+    local cardObject = false
+    if params.containerGuid then
+        container = getObjectFromGUID(params.containerGuid)
+        if not container then
+            -- Container does not exist anymore.
+            cardObject = getObjectFromGUID(params.guid)
+        elseif container.tag == 'Deck' and container.remainder and container.remainder.getGUID() == params.guid then
+            -- Card is the last card in the deck.
+            cardObject = container.remainder
+        else
+            -- Card is presumably in the container.  Verify.
+            local found = false
+            for _, entry in ipairs(container.getObjects()) do
+                if entry.guid == params.guid then
+                    found = true
+                    break
+                end
+            end
+            assert(found, 'card not found')
+        end
+    else
+        -- Find card on the table.
+        cardObject = getObjectFromGUID(params.guid)
+    end
+
+    -- Move the card.
+    if cardObject then
+        cardObject.setLock(false)
+        local collide = false
+        local fast = true
+        cardObject.setPositionSmooth(transform.position, collide, fast)
+        cardObject.setRotationSmooth(transform.rotation, collide, fast)
+    elseif container then
+        local isLocked = container.getLock()
+        container.setLock(false)
+        cardObject = container.takeObject({
+            guid              = params.guid,
+            position          = transform.position,
+            rotation          = transform.rotation,
+            smooth            = true,
+        })
+        container.setLock(isLocked)
+        assert(cardObject, 'take card from deck failed')
+    else
+        error('discard card: no card or container to look for one ("' .. (params.name or '') .. '")')
+    end
+
+    if deckAttributes.shuffleOnDiscard then
+        _delayedShuffle(deckAttributes)
+    end
+
+    return true
+end
+
+function _delayedShuffle(deckAttributes)
+    if deckAttributes._waitShuffleId then
+        Wait.stop(deckAttributes._waitShuffleId)
+    end
+    local function delayedShuffle()
+        deckAttributes._waitShuffleId = nil
+        local transform = _getTransform(deckAttributes, 'discard')
+        if not transform then
+            transform = _getTransform(deckAttributes, 'deck')
+        end
+        local deck = _getDeck(transform)
+        if deck and deck.tag == 'Deck' then
+            deck.shuffle()
+        end
+    end
+    deckAttributes._waitShuffleId = Wait.time(delayedShuffle, 2)
+end
+
+-------------------------------------------------------------------------------
+
+--- Is the given card in its discard pile?
+function isDiscard(cardGuid)
+    assert(type(cardGuid) == 'string')
+    local cardObject = assert(getObjectFromGUID(cardGuid))
+    assert(cardObject.tag == 'Card')
+    local deckAttributes = _getDeckAttributes(cardObject.getName())
+    local discardTransform = deckAttributes and _getTransform(deckAttributes, 'discard')
+    if discardTransform then
+        local p1 = cardObject.getPosition()
+        local p2 = discardTransform.position
+        local d = math.sqrt((p1.x - p2.x) ^ 2 + (p1.z - p2.z) ^ 2)
+        return d < 1
+    end
+end
+
+--- Make sure dropped card it not going to wrong deck/discard.
+function _verifyCardDrop(cardObject)
+    assert(type(cardObject) == 'userdata' and cardObject.tag == 'Card')
+
+    local function insideDeckTransform(deckTransform)
+        if deckTransform then
+            local p1 = cardObject.getPosition()
+            local p2 = deckTransform.position
+            local d = math.sqrt((p1.x - p2.x) ^ 2 + (p1.z - p2.z) ^ 2)
+            return d < 1 and deckTransform.rotation
+        end
+    end
+
+    local function insideDeckOrDiscard(deckAttributes)
+        local deckTransform = _getTransform(deckAttributes, 'deck')
+        local discardTransform = _getTransform(deckAttributes, 'discard')
+        return insideDeckTransform(deckTransform) or insideDeckTransform(discardTransform)
+    end
+
+    local deckAttributes = _getDeckAttributes(cardObject.getName())
+    if not deckAttributes then
+        return  -- does not belong to a known deck
+    else
+        local rotation = insideDeckOrDiscard(deckAttributes)
+        if rotation then
+            -- Make sure it has the correct rotation.
+            local collide = false
+            local fast = true
+            cardObject.setRotationSmooth(rotation, collide, fast)
+            if deckAttributes.shuffleOnDiscard then
+                _delayedShuffle(deckAttributes)
+            end
+            return  -- dropped in the expected deck area.
+        end
+    end
+
+    for name, otherDeckAttributes in pairs(DECKS) do
+        if name ~= deckAttributes.deckName and insideDeckOrDiscard(otherDeckAttributes) then
+            local message = {
+                'Warning: card from the "',
+                deckAttributes.deckName,
+                '" deck was dropped in the "',
+                otherDeckAttributes.deckName,
+                '" area'
+            }
+            broadcastToAll(table.concat(message, ''), 'Red')
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function deal(params)
+    assert(type(params) == 'table')
+    assert(type(params.deck) == 'string')
+    assert(type(params.color) == 'string')
+    assert(type(params.count) == 'number' and params.count > 0)
+
+    params.deckAttributes = assert(DECKS[params.deck], 'bad deck name')
+
+    local deckWithoutS = string.match(params.deck, '^(.*)s$') or params.deck
+    deckWithoutS = string.lower(deckWithoutS)
+    printToAll('Dealing ' .. params.count .. ' ' .. deckWithoutS .. ' card' .. (params.count > 1 and 's' or '') .. ' to ' .. params.color)
+
+    table.insert(_dealQueue, params)
+
+    -- Paranoia that an error might kill the deal coroutine but leave it marked
+    -- as active.  If active but the heartbeat is too old cancel active status.
+    if _dealCoroutineIsActive and _dealCoroutineHeartbeat and Time.time > (_dealCoroutineHeartbeat + 1) then
+        _dealCoroutineIsActive = false
+        _dealCoroutineHeartbeat = false
+    end
+
+    if not _dealCoroutineIsActive then
+        _dealCoroutineIsActive = true
+        _dealCoroutineHeartbeat = Time.time
+        startLuaCoroutine(self, 'dealCoroutine')
+    end
+end
+
+function dealCoroutine()
+    while #_dealQueue > 0 do
+        local params = table.remove(_dealQueue, 1)
+        local deckTransform = _getTransform(params.deckAttributes, 'deck')
+        local deck = _getDeck(deckTransform)
+
+        _dealCoroutineHeartbeat = Time.time
+
+        if deck.remainder then
+            deck = deck.remainder
+        end
+        while deck.spawning do
+            _dealCoroutineHeartbeat = Time.time
+            coroutine.yield(0)
+        end
+
+        -- Deal as many cards as able.
+        local dealCount = 0
+        if deck then
+            if deck.tag == 'Deck' then
+                dealCount = math.min(params.count, deck.getQuantity())
+            elseif deck.tag == 'Card' then
+                dealCount = 1
+            end
+            params.count = params.count - dealCount
+            --deck.deal(dealCount, params.color)
+            _dealHack(deck, dealCount, params.color)
+            _dealCoroutineHeartbeat = Time.time
+            coroutine.yield(0)
+
+            -- Wait a moment while any deal-in-progress cards move away.
+            local delay = 1
+            if #_dealQueue > 0 and _dealQueue[1].color == params.color then
+                delay = delay + dealCount + 0.1 -- give this deal more time before another to same color
+            end
+            local waitUntil = Time.time + delay
+            while Time.time < waitUntil do
+                _dealCoroutineHeartbeat = Time.time
+                coroutine.yield(0)
+            end
+        end
+
+        -- If not able to deal all cards shuffle discard.
+        if params.count > 0 then
+            local discardTransform = _getTransform(params.deckAttributes, 'discard')
+            local discard = discardTransform and _getDeck(discardTransform)
+
+            if discard then
+                local bounds = discard.getBoundsNormalized()
+                local collide = false
+                local fast = true
+                discard.setPositionSmooth({
+                    x = deckTransform.position.x,
+                    y = deckTransform.position.y + bounds.size.y / 2 + 0.1,
+                    z = deckTransform.position.z
+                }, collide, fast)
+                discard.setRotationSmooth(deckTransform.rotation, collide, fast)
+                _dealCoroutineHeartbeat = Time.time
+                coroutine.yield(0)
+
+                -- Give previous deal and set position smooth time to work.
+                local waitUntil = Time.time + dealCount + 0.1
+                while Time.time < waitUntil or discard.isSmoothMoving() do
+                    _dealCoroutineHeartbeat = Time.time
+                    coroutine.yield(0)
+                end
+                _dealCoroutineHeartbeat = Time.time
+                coroutine.yield(0)
+
+                if discard.tag == 'Deck' then
+                    discard.setName(params.deckAttributes.deckName)
+                    discard.shuffle()
+                    if _hasContextMenuItems(discard) then
+                        discard.clearContextMenu()
+                        _applyContextMenuItems(discard)
+                    end
+                    _dealCoroutineHeartbeat = Time.time
+                    coroutine.yield(0)
+                end
+
+                -- Re-add to front of queue, reattempt next service.
+                table.insert(_dealQueue, 1, params)
+            else
+                -- Not able to deal all and no discard pile?
+                printToAll('Warning: not able to deal ' .. params.count .. ' card' .. (params.count > 1 and 's' or '' ) .. ' from "' .. params.deck .. '" deck to ' .. params.color, 'Red')
+            end
+        end
+    end
+    _dealCoroutineIsActive = false
+    _dealCoroutineHeartbeat = false
+    return 1
+end
+
+--- Possible workaround for a TTS deal bug.  Rare, but TTS can steal a card
+-- from another player's hand instead of from the deck, presumably because it
+-- still thinks that card is in the deck(?).  This workaround replaces normal
+-- dealing with cloning a card, dealing the clone, and deleting the original.
+-- This way if TTS still has a reference to the original it no longer exists.
+-- In that case, if/when the bug arises it might (1) throw an error, (2) do
+-- nothing and not deal a card or (3) realize the card is missing and deal
+-- again, potentially doing the right thing.
+function _dealHack(deck, count, playerColor)
+    assert((deck.tag == 'Deck' or deck.tag == 'Card') and type(count) == 'number' and type(playerColor) == 'string')
+
+    -- Move cards to player zones before clone swap.
+    local zoneAttrs = _zoneHelper.zoneAttributes(playerColor)
+    local p0 = zoneAttrs and zoneAttrs.center or { x = 0, y = 1, z = 0 }
+    local nextPositionIndex = 0
+    local function nextPosition()
+        nextPositionIndex = nextPositionIndex + 1
+        return {
+            x = p0.x,
+            y = p0.y + 3 + nextPositionIndex * 0.2,
+            z = p0.z
+        }
+    end
+    local rotation = {
+        x = 0,
+        y = zoneAttrs.rotation.y,
+        z = deck.getRotation().z
+    }
+
+    local function spawnCallback(card)
+        assert(card and card.tag == 'Card')
+        card.deal(1, playerColor)
+    end
+    local function takeCallback(card)
+        assert(card and card.tag == 'Card')
+        card.setLock(false)
+
+        -- Grab json and spawn a new one.  Clone is simpler but makes a sound.
+        local cardJson = card.getJSON()
+        local spawnParams = {
+            json              = cardJson,
+            position          = nextPosition(),
+            rotation          = card.getRotation(),
+            scale             = card.getScale(),
+            callback_function = spawnCallback,
+            sound             = false,
+            params            = nil,
+            snap_to_grid      = false
+        }
+
+        -- Before destroying the original, mutate it a little as a visual signal
+        -- should TTS somehow preserve it (reports of duplicated actions).
+        local scale = card.getScale()
+        card.setScale({ x = scale.x / 2, y = scale.y, z = scale.z / 2 })
+        card.setDescription('This card is the result of a TTS bug.  Please delete and draw again, and please inform the mod team!')
+
+        card.addTag('DELETED_ITEMS_IGNORE')
+        destroyObject(card)
+
+        local clone = spawnObjectJSON(spawnParams)
+    end
+
+    for i = 1, count do
+        local function delayedTakeCallback(card)
+            assert(card and card.tag == 'Card')
+            card.setLock(true)
+            Wait.time(function() takeCallback(card) end, i - 1)
+        end
+
+        local card = deck.tag == 'Card' and deck
+        if card then
+            local collide = false
+            local fast = true
+            card.setPositionSmooth(nextPosition(), collide, fast)
+            card.setRotationSmooth(rotation, collide, fast)
+            coroutine.yield(0)
+            local function callback()
+                delayedTakeCallback(card)
+            end
+            local function condition()
+                return not card.isSmoothMoving()
+            end
+            Wait.condition(callback, condition, 5, callback)
+        else
+            card = deck.takeObject({
+                position          = nextPosition(),
+                rotation          = rotation,
+                callback_function = delayedTakeCallback,
+                smooth            = true,
+                top               = true
+            })
+            deck = deck.remainder or deck
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Add top/bottom context menu on Agenda cards to discard to top/bottom.
+
+function isAgendaCard(cardName)
+    assert(type(cardName) == 'string')
+    assert(DECKS['Agenda'], 'No agenda deck??')
+    return getDeckName(cardName) == 'Agenda'
+end
+
+local function _putAgendaCard(cardObject, onTop)
+    assert(type(cardObject) == 'userdata' and cardObject.tag == 'Card' and type(onTop) == 'boolean')
+
+    -- Cannot use normal discard method as this is not going to the discard pile.
+    local transform = _getTransform(DECKS['Agenda'], 'deck')
+    assert(transform)
+
+    -- Teleport to near (jump out of hand, if in hand).
+    -- DO NOT SET POSITION SMOOTH, GETS PULLED BACK TO HAND!
+    local nearby = { x = transform.position.x * 0.8, y = transform.position.y + 5, z = transform.position.z * 0.8 }
+    cardObject.setPosition(nearby)
+    cardObject.setRotation(transform.rotation)
+
+    -- Wait a moment for card to leave hand, then place.
+    local function finishPut()
+        -- Smooth to final position.
+        transform.position.y = transform.position.y + (onTop and 3 or 0)
+        local collide = false
+        local fast = false  -- slow so can see it go bottom/top
+        cardObject.setPositionSmooth(transform.position, collide, fast)
+    end
+    Wait.frames(finishPut, 2)
+end
+
+local function _putAgendaTop(playerColor, card)
+    printToAll('Put agenda top', playerColor)
+    _putAgendaCard(card, true)
+end
+local function _putAgendaBottom(playerColor, card)
+    printToAll('Put agenda bottom', playerColor)
+    _putAgendaCard(card, false)
+end
+local function _scoreObjective(playerColor, card)
+    local inHandGuidSet = _zoneHelper.inHand()
+    if inHandGuidSet[card.getGUID()] then
+        return
+    end
+    if card.tag == 'Card' and card.is_face_down then
+        return
+    end
+    printToAll(playerColor .. ' scoring ' .. card.getName(), playerColor)
+
+    local faction = _factionHelper.fromColor(playerColor)
+    local zoneAttributes = _zoneHelper.zoneAttributes(playerColor)
+    local playerCount = _zoneHelper.getPlayerCount()
+    if (not faction) or (not zoneAttributes) then
+        return
+    end
+
+    -- Preserve table layout on card.
+    local bb = { min = { x = 0, z = 0 }, max = { x = 0, z = 0 } }
+    for _, za in ipairs(_zoneHelper.zonesAttributes()) do
+        bb.min.x = math.min(bb.min.x, za.center.x)
+        bb.max.x = math.max(bb.max.x, za.center.x)
+        bb.min.z = math.min(bb.min.z, za.center.z)
+        bb.max.z = math.max(bb.max.z, za.center.z)
+    end
+    local uv = {
+        x = (zoneAttributes.center.x - bb.min.x) / math.max(bb.max.x - bb.min.x, 1),
+        z = (zoneAttributes.center.z - bb.min.z) / math.max(bb.max.z - bb.min.z, 1),
+    }
+    local p0 = card.getPosition()
+    local size = card.getBounds().size
+    size.x = size.x - 0.5  -- inset so owner token is inside card bounds
+    size.z = size.z - 0.5
+    local position = {
+        x = p0.x + (size.x / 2) * ((uv.x - 0.5) * 2),
+        y = p0.y + 3,
+        z = p0.z + (size.z / 2) * ((uv.z - 0.5) * 2)
+    }
+    local rotation = {
+        x = 0,
+        y = card.getRotation().y + 90,
+        z = 0
+    }
+
+    -- Custodians is not card shaped, use a random position inside it.
+    if card.tag == 'Tile' and card.getName() == 'Custodians' then
+        local p0 = card.getPosition()
+        local phi = math.rad(math.random(0, 360))
+        local r = 1
+        position = {
+            x = p0.x + math.sin(phi) * r,
+            y = p0.y + 2,
+            z = p0.z + math.cos(phi) * r
+        }
+    end
+
+    local name = faction.tokenName .. ' Owner Tokens Bag'
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Infinite' and object.getName() == name then
+            object.takeObject({
+                position = position,
+                rotation = rotation,
+                smooth = false
+            })
+            break
+        end
+    end
+end
+local _purgeBagGuid = false
+local function _purgeCard(card)
+    local purgeBag = _purgeBagGuid and getObjectFromGUID(_purgeBagGuid)
+    if not purgeBag then
+        for _, object in ipairs(getAllObjects()) do
+            if object.tag == 'Bag' and object.getName() == 'Purge Bag' then
+                purgeBag = object
+                _purgeBagGuid = object.getGUID()
+            end
+        end
+    end
+    if purgeBag then
+        purgeBag.putObject(card)
+    end
+end
+
+local function _reportRemainingCards(playerColor, object)
+    assert(type(playerColor) == 'string' and type(object) == 'userdata' and object.tag == 'Deck')
+    local names = {}
+    local nameToCount = {}
+    for _, entry in ipairs(object.getObjects()) do
+        local name = string.match(entry.name, '(.*) %(%d+%)') or entry.name
+        local count = nameToCount[name] or 0
+        if count == 0 then
+            table.insert(names, name)
+        end
+        nameToCount[name] = count + 1
+    end
+    table.sort(names)
+    local message = {}
+    for _, name in ipairs(names) do
+        local count = assert(nameToCount[name])
+        count = count > 1 and (count .. ' ') or ''
+        table.insert(message, count .. name)
+    end
+    message = object.getName() .. ' remaining: ' .. table.concat(message, ', ') .. '.'
+    printToColor(message, playerColor, 'Yellow')
+end
+
+local function _reportDiscards(playerColor, deckName)
+    assert(type(playerColor) == 'string' and type(deckName) == 'string')
+    local deckAttributes = DECKS[deckName]
+    local deckTransform = deckAttributes and _getTransform(deckAttributes, 'discard')
+    local deck = deckTransform and _getDeck(deckTransform)
+    local discards = {}
+    if deck then
+        if deck.tag == 'Deck' then
+            for _, entry in ipairs(deck.getObjects()) do
+                table.insert(discards, entry.name)
+            end
+        elseif deck.tag == 'Card' then
+            table.insert(discards, deck.getName())
+        end
+    else
+        table.insert(discards, '<empty>')
+    end
+    local message = 'Actions discards: ' .. table.concat(discards, ', ')
+    printToColor(message, playerColor, 'Yellow')
+end
+
+local function _isScoreObjective(card)
+    if card.tag == 'Tile' and card.getName() == 'Custodians' then
+        return true
+    end
+    if card.tag == 'Card' then
+        local cardName = card.getName()
+        local deckAttrs = _getDeckAttributes(cardName)
+        if deckAttrs and deckAttrs.score then
+            return true
+        end
+        local cardAttrs = _getCardAttributes(cardName)
+        if cardAttrs and cardAttrs.score then
+            return true
+        end
+    end
+end
+
+function _hasContextMenuItems(object)
+    if object.tag == 'Card' then
+        return true
+    elseif object.tag == 'Deck' then
+        local deckAttrs = _getDeckAttributesByType(object.getName())
+        return deckAttrs and deckAttrs.reportRemaining
+    elseif object.tag == 'Tile' then
+        return object.getName() == 'Custodians'
+    end
+end
+
+function _isPurgableCard(cardName)
+    assert(type(cardName) == 'string')
+    local cardAttributes = _getCardAttributes(cardName)
+    if cardAttributes and cardAttributes.purge then
+        return true
+    end
+    -- other special cases here
+end
+
+function _applyContextMenuItems(object)
+    local objectName = object.getName()
+    local deckName = object.tag == 'Card' and getDeckName(objectName)
+    if deckName == 'Agenda' then
+        object.addContextMenuItem('Place Agenda Top', function(playerColor) _putAgendaTop(playerColor, object) end, false)
+        object.addContextMenuItem('Place Agenda Bottom', function(playerColor) _putAgendaBottom(playerColor, object) end, false)
+        if string.match(objectName, '^Mutiny') then
+            object.addContextMenuItem('Set For', function(playerColor) object.setName('Mutiny (For)') end, false)
+            object.addContextMenuItem('Set Against', function(playerColor) object.setName('Mutiny (Against)') end, false)
+            object.addContextMenuItem('Clear For/Against', function(playerColor) object.setName('Mutiny') end, false)
+        end
+    end
+    if _isScoreObjective(object) then
+        object.addContextMenuItem('Score Objective', function(playerColor) _scoreObjective(playerColor, object) end, false)
+    end
+
+    if object.tag == 'Card' and _isPurgableCard(object.getName()) then
+        object.addContextMenuItem('Purge Card', function(playerColor) _purgeCard(object) end)
+    end
+    if object.tag == 'Card' and object.getName() == 'The Codex' then
+        object.addContextMenuItem('Report discards', function(playerColor) _reportDiscards(playerColor, 'Actions') end)
+    end
+
+    if object.tag == 'Deck' then
+        local deckAttrs = _getDeckAttributesByType(objectName)
+        if deckAttrs and deckAttrs.reportRemaining then
+            object.addContextMenuItem('Report Remaining', function(playerColor) _reportRemainingCards(playerColor, object) end, false)
+        end
+    end
+end
+
+function onObjectSpawn(object)
+    if _hasContextMenuItems(object) then
+        _applyContextMenuItems(object)
+    end
+end
+
+function onObjectDrop(playerColor, droppedObject)
+    if droppedObject.tag == 'Card' then
+        _verifyCardDrop(droppedObject)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+local function _splitDecks()
+    -- Get per-card info.
+    local cardNameToInfo = {}
+    local deckNameToSources = {}
+    for deckName, deckAttributes in pairs(DECKS) do
+        deckNameToSources[deckName] = {}
+        for source, cardNames in pairs(deckAttributes.cardNames) do
+            for k, v in pairs(cardNames) do
+                local cardName = type(k) == 'string' and k or v
+                cardNameToInfo[cardName] = {
+                    cardName = cardName,
+                    deckName = deckName,
+                    source = source
+                }
+            end
+            table.insert(deckNameToSources[deckName], source)
+        end
+    end
+    for deckName, sources in pairs(deckNameToSources) do
+        table.sort(deckNameToSources[deckName])  -- consistent order
+    end
+
+    -- Find cards.
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Card' then
+            local info = cardNameToInfo[object.getName()]
+            if info then
+                info.card = object
+            end
+        elseif object.tag == 'Deck' then
+            for _, entry in ipairs(object.getObjects()) do
+                local info = cardNameToInfo[entry.name]
+                if info then
+                    info.guid = entry.guid
+                    info.deck = object
+                end
+            end
+        end
+    end
+
+    -- Organize by deck/source.
+    local deckNameToSourceToInfos = {}
+    for cardName, info in pairs(cardNameToInfo) do
+        local sourceToInfos = deckNameToSourceToInfos[info.deckName]
+        if not sourceToInfos then
+            sourceToInfos = {}
+            deckNameToSourceToInfos[info.deckName] = sourceToInfos
+        end
+        local infos = sourceToInfos[info.source]
+        if not infos then
+            infos = {}
+            sourceToInfos[info.source] = infos
+        end
+        table.insert(infos, info)
+    end
+
+    -- Move cards.
+    for deckName, sourceToInfos in pairs(deckNameToSourceToInfos) do
+        local transform = _getTransform(DECKS[deckName], 'deck')
+        local pos = transform.position
+        pos.y = pos.y + 5
+        local rot = transform.rotation
+
+        -- Remove first, let that be the base pile (preserving deck name).
+        table.remove(deckNameToSources[deckName], 1)
+        rot.y = (rot.y + 90) % 360
+
+        for i, source in ipairs(deckNameToSources[deckName]) do
+            for _, info in ipairs(sourceToInfos[source]) do
+                if info.deck and info.deck.remainder then
+                    info.card = info.deck.remainder
+                    info.deck = nil
+                end
+                if info.card then
+                    info.card.setPosition({ x = pos.x, y = pos.y, z = pos.z })
+                    info.card.setRotation({ x = rot.x, y = rot.y, z = rot.z })
+                elseif info.deck then
+                    info.deck.takeObject({
+                        guid              = info.guid,
+                        position          = { x = pos.x, y = pos.y, z = pos.z },
+                        rotation          = { x = rot.x, y = rot.y, z = rot.z },
+                        smooth            = false,
+                    })
+                else
+                    print('missing "' .. info.cardName .. '"')
+                end
+                pos.y = pos.y + 0.2
+            end
+            rot.y = (rot.y + 90) % 360
+        end
+    end
+
+    -- Rename split decks.
+    local function delayedRename()
+        for deckName, sourceToInfos in pairs(deckNameToSourceToInfos) do
+            local pos = _getTransform(DECKS[deckName], 'deck').position
+            local hits = Physics.cast({
+                origin       = pos,
+                direction    = { x = 0, y = -1, z = 0 },
+                type         = 3,  -- box
+                size         = { x = 0.1, y = 10, z = 0.1 }
+            }) -- returns {{Vector point, Vector normal, float distance, Object hit_object}, ...}
+            for _, hit in ipairs(hits or {}) do
+                if hit.hit_object.tag == 'Deck' then
+                    local deck = hit.hit_object
+                    local cardName = deck.getObjects()[1].name
+                    local info = cardNameToInfo[cardName]
+                    if info and string.len(deck.getName()) == 0 then
+                        deck.setName(info.source .. ' ' .. info.deckName)
+                    end
+                    -- Sanity check
+                    if info then
+                        for _, entry in ipairs(deck.getObjects()) do
+                            local info2 = cardNameToInfo[entry.name]
+                            if info2 then
+                                assert(info2.deckName == info.deckName, 'mismatch ' .. entry.name)
+                            else
+                                print('no info for ' .. entry.name)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        print('split decks finished')
+    end
+    Wait.time(delayedRename, 5)
+end
+
+-- Helper to read deck positions based on deck locations (hard coded above).
+local function _reportDeckPositionsInParentSpace()
+    local parentNameSet = {}
+    for deckName, deckAttributes in pairs(DECKS) do
+        parentNameSet[deckAttributes.transform.parent] = true
+    end
+
+    local parentNameToObject = {}
+    local deckNameToObject = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if parentNameSet[name] then
+            parentNameToObject[name] = object
+        end
+        if DECKS[name] then
+            deckNameToObject[name] = object
+        end
+    end
+
+    for deckName, deckAttributes in pairs(DECKS) do
+        local deck = assert(deckNameToObject[deckName], 'missing ' .. deckName)
+        local parent = assert(parentNameToObject[deckAttributes.transform.parent], 'missing ' .. deckAttributes.transform.parent)
+        local p = parent.positionToLocal(deck.getPosition())
+        print(table.concat({
+            deckName,
+            math.floor(p.x * 1000) / 1000,
+            math.floor(p.y * 1000) / 1000,
+            math.floor(p.z * 1000) / 1000,
+        }, ' '))
+    end
+end
+
+function resetPlanetCardNames()
+    -- Some planet names get reused.  Keep the lowest tile number for each.
+    local planetNameToTile = {}
+    for _, system in pairs(_systemHelper.systems()) do
+        for _, planet in ipairs(system.planets or {}) do
+            local tile = planetNameToTile[planet.name]
+            if tile then
+                tile = math.min(tile, system.tile)
+            else
+                tile = system.tile
+            end
+            planetNameToTile[planet.name] = tile
+        end
+    end
+
+    local planetSourceToNames = {
+        ['Base'] = {},
+        ['PoK'] = {},
+        ['Other'] = {}
+    }
+    for planetName, tile in pairs(planetNameToTile) do
+        if tile >= 1 and tile <= 51 then
+            table.insert(planetSourceToNames.Base, planetName)
+        elseif tile >= 52 and tile <= 82 then
+            table.insert(planetSourceToNames.PoK, planetName)
+        else
+            table.insert(planetSourceToNames.Other, planetName)
+        end
+    end
+
+    local deckAttributes = assert(DECKS['Planets'])
+    deckAttributes.cardNames = planetSourceToNames
+end
+
+function resetSnapPoints()
+    local parentNameToSnapPoints = {}
+    for deckName, deckAttributes in pairs(DECKS) do
+        local snapPoints = parentNameToSnapPoints[deckAttributes.transform.parent]
+        if not snapPoints then
+            snapPoints = {}
+            parentNameToSnapPoints[deckAttributes.transform.parent] = snapPoints
+        end
+        if deckAttributes.transform.deck then
+            table.insert(snapPoints, {
+                position = deckAttributes.transform.deck.position,
+                rotation = deckAttributes.transform.deck.rotation,
+                rotation_snap = true
+            })
+        end
+        if deckAttributes.transform.discard then
+            table.insert(snapPoints, {
+                position = deckAttributes.transform.discard.position,
+                rotation = deckAttributes.transform.discard.rotation,
+                rotation_snap = true
+            })
+        end
+        if deckAttributes.transform.extraSnapPoints then
+            local p0 = deckAttributes.transform.extraSnapPoints.p0
+            local d = deckAttributes.transform.extraSnapPoints.d
+            for i = 0, deckAttributes.transform.extraSnapPoints.count - 1 do
+                table.insert(snapPoints, {
+                    position = {
+                        x = p0.x + d.x * i,
+                        y = p0.y + d.y * i,
+                        z = p0.z + d.z * i,
+                    },
+                    rotation = deckAttributes.transform.deck.rotation,
+                    rotation_snap = true
+                })
+            end
+        end
+    end
+
+    local parentNameToObject = {}
+    for _, object in ipairs(getAllObjects()) do
+        local snapPoints = parentNameToSnapPoints[object.getName()]
+        if snapPoints then
+            object.setSnapPoints(snapPoints)
+        end
+    end
+end
+
+function onLoad(saveState)
+    self.setColorTint({ r = 0.25, g = 0.25, b = 0.25 })
+    self.setScale({ x = 2, y = 0.01, z = 2 })
+    self.setName('TI4_DECK_HELPER')
+    self.setDescription('Shared helper functions used by other objects, PLEASE LEAVE ON TABLE! This object is only visible to the black (GM) player.')
+
+    -- Only the GM/black player can see this object.  Others can still interact!
+    local invisibleTo = {}
+    for _, color in ipairs(Player.getColors()) do
+        if color ~= 'Black' then
+            table.insert(invisibleTo, color)
+        end
+    end
+    self.setInvisibleTo(invisibleTo)
+
+    -- Add deck names to attributes.
+    for deckName, attributes in pairs(DECKS) do
+        attributes.deckName = deckName
+    end
+
+    -- Test methods.
+    self.addContextMenuItem('Split decks', _splitDecks, false)
+    self.addContextMenuItem('Get locations', _reportDeckPositionsInParentSpace, false)
+    self.addContextMenuItem('Discard cards', testDiscardCards, false)
+    self.addContextMenuItem('Discard deck', testDiscardDeck, false)
+    self.addContextMenuItem('Deal 1', function(color) testDeal(color, 1) end, false)
+    self.addContextMenuItem('Deal 3', function(color) testDeal(color, 3) end, false)
+
+    resetPlanetCardNames()
+    resetSnapPoints()
+
+    local function delayedApplyContextMenuItems()
+        for _, object in ipairs(getAllObjects()) do
+            if _hasContextMenuItems(object) then
+                _applyContextMenuItems(object)
+            end
+        end
+    end
+    Wait.frames(delayedApplyContextMenuItems, 7)
+end
+
+function testDiscardCards()
+    -- Discard any loose cards.
+    local cards = {}
+    local decks = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Card' then
+            print('found ' .. object.getName())
+            table.insert(cards, object)
+        elseif object.tag == 'Deck' then
+            table.insert(decks, object)
+        end
+    end
+
+    for i, card in ipairs(cards) do
+        discardCard({
+            guid = card.getGUID(),
+            name = card.getName(),
+            index = i
+        })
+    end
+
+    -- Find and discard all the Sabotage cards from inside a deck.
+    for _, deck in ipairs(decks) do
+        local entries = {}
+        for _, entry in ipairs(deck.getObjects()) do
+            if string.match(entry.name, '^Sabotage') then
+                table.insert(entries, entry)
+            end
+        end
+        for i, entry in ipairs(entries) do
+            discardCard({
+                guid = entry.guid,
+                name = entry.name,
+                index = i,
+                containerGuid = deck.getGUID()
+            })
+        end
+    end
+end
+
+function testDiscardDeck()
+    local decks = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Deck' then
+            table.insert(decks, object)
+        end
+    end
+
+    -- Test discard deck.
+    for _, deck in ipairs(decks) do
+        if deck.getName() == 'Actions' then
+            discardDeck({
+                guid = deck.getGUID(),
+                name = deck.getName(),
+                index = nil
+            })
+        end
+    end
+end
+
+function testDeal(color, count)
+    deal({
+        deck = 'Actions',
+        color = color,
+        count = count,
+    })
+end
+
+-------------------------------------------------------------------------------
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

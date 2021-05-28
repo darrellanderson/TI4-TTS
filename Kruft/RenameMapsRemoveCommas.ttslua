@@ -1,0 +1,41 @@
+function onLoad()
+    self.addContextMenuItem("comma kill", function() startLuaCoroutine(self, 'commaKillCoroutine') end)
+end
+
+function commaKillCoroutine()
+    local guidToInfo = {}
+    for _, entry in ipairs(self.getObjects()) do
+        local bracketed = string.match(entry.name, '%[(.*,.*)%]')
+        if bracketed then
+            local fixed = {}
+            for value in string.gmatch(bracketed, '([^,]+)') do
+                value = string.match(value, '^%s*(.-)%s*$')  -- trim
+                value = string.gsub(value, ' ', '') -- remove internal spaces (prefer underscore?)
+                table.insert(fixed, value)
+            end
+            local fixed = table.concat(fixed, ' ')
+            local newName = string.gsub(entry.name, bracketed, fixed)
+            print('FOUND ' .. entry.name .. ' -> ' .. newName)
+            guidToInfo[entry.guid] = {
+                name = entry.name,
+                newName = newName
+            }
+        end
+    end
+
+    local pos = self.getPosition() + vector(0, 4, 0)
+    for guid, info in pairs(guidToInfo) do
+        local object = self.takeObject({
+            position          = pos,
+            guid              = guid,
+        })
+        while object.spawning do
+            coroutine.yield(0)
+        end
+        object.setName(info.newName)
+        self.putObject(object)
+        coroutine.yield(0)
+    end
+
+    return 1
+end

@@ -1,0 +1,3 @@
+- Streamer overlay game data now keeps face down (exhausted) factions.
+- System tiles now unpack flat on table (some were not, clipping faction border lines).
+- Add rules clarification to "The Codex" description.

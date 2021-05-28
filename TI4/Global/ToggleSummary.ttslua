@@ -1,0 +1,27 @@
+function toggleSummary(player, summaryId)
+    -- Get visibility as a set.
+    local vis = UI.getAttribute(summaryId, 'visibility') or ''
+    local visSet = {}
+    for color in string.gmatch(vis, '[^|]+') do
+        visSet[color] = true
+    end
+
+    -- Toggle visibility.
+    if visSet[player.color] then
+        visSet[player.color] = nil
+    else
+        visSet[player.color] = true
+    end
+
+    -- Recreate visibility string.
+    local visList = {}
+    for color, _ in pairs(visSet) do
+        table.insert(visList, color)
+    end
+    vis = table.concat(visList, '|')
+    local active = #visList > 0
+
+    -- Apply.
+    UI.setAttribute(summaryId, 'visibility', vis)
+    UI.setAttribute(summaryId, 'active', active)
+end

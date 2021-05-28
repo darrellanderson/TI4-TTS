@@ -1,0 +1,19 @@
+- New VolverMilty PoK system tile dealer tool (in tools bag) to deal balanced tiles to players (thanks Volver, Milty).
+- 8 new PoK maps (thanks The_AV8R).
+- Fix Titan attach tokens to show the correct image on attach.
+- Move Mallice closer to map, adjust other items to fit.
+- Fix "Experimental Battlestation".
+- Update mech collider to make it (slightly) harder to knock over.
+- Fix roller mech attributes to display space combat when available.
+- Update roller mech image (thanks x3n).
+- Move purge bag near relic purge bags.
+- Arena tile Mirage support (thanks JabberWocky).
+- Add legendary planet count to slice values from map tool.
+- Fix X89Ω card back image.
+- Muaat Supernova tile now unpacks inside a bag for smaller footprint.
+- Fix color switcher PoK bug.
+- Fix 6p Draft Bag builder tool, caution: not PoK aware.
+- Hide PoK factions on faction selector if not using PoK.
+- "Clear" on Map Tool now clears Frontier tokens.
+- Update PoK faction sheets to match base game color/contrast (thanks x3n).
+- Swap gravity rift token for cleaner image (thanks waffles).

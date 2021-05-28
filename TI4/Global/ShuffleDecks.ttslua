@@ -1,0 +1,40 @@
+--- Shuffle decks when the game first starts.
+-- @author Darrell
+local originalOnLoad = onLoad
+function onLoad(saveState)
+    if originalOnLoad then
+        originalOnLoad(saveState)
+    end
+
+    local shuffleSet = {
+        ['Public Objectives I'] = 'Deck',
+        ['Public Objectives II'] = 'Deck',
+        ['Secret Objectives'] = 'Deck',
+        ['Agenda'] = 'Deck',
+        ['Actions'] = 'Deck',
+        ['Pick a Race to Play'] = 'Bag',
+        ['Blue Planet Tiles'] = 'Bag',
+        ['Red Anomaly Tiles'] = 'Bag',
+        ['Randomize Seats'] = 'Bag',
+    }
+    local toShuffle = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        local tag = object.tag
+        if tag == 'Bag' and string.match(name, ' Command Tokens Bag$') then
+            return  -- loaded a game in progress, abort!
+        end
+        local expectTag = shuffleSet[name]
+        if expectTag and tag == expectTag then
+            table.insert(toShuffle, object)
+        end
+    end
+    local shuffled = {}
+    for _, object in ipairs(toShuffle) do
+        object.shuffle()
+        table.insert(shuffled, object.getName())
+    end
+    if #shuffled > 0 then
+        printToAll('Shuffled: ' .. table.concat(table.sort(shuffled), ', ') .. '.')
+    end
+end

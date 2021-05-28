@@ -1,0 +1,79 @@
+--- Given a set of overlap destinations (say, cards) and sources (say, tokens),
+-- build a map from source to destinations it is inside wrt XZ plane.
+-- @author Darrell
+
+local TAG = 'CrLua.TTS.Overlap'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.TTS = CrLua.TTS or {}
+CrLua.TTS.Overlap = assert(not CrLua.TTS.Overlap) and {
+    _require = {}
+}
+
+function CrLua.TTS.Overlap.overlap(srcs, dsts)
+    assert(type(srcs) == 'table' and type(dsts) == 'table')
+
+    -- Cheap but potentially wrong inside check.  It will never have a false
+    -- positive so use this first to eliminate quickly, then move on to the
+    -- more expensive check to be sure.
+    local function maybeInside(bb, p)
+        return p.x >= bb.min.x and p.x <= bb.max.x and p.z >= bb.min.z and p.z <= bb.max.z
+    end
+
+    -- This is a more expensive but more thorough "inside" test.
+    local function definitelyInside(src, dst)
+        -- Fill this is later if needed, the bb check is correct assuming
+        -- objects are at 90 degree rotations about Y.
+        return true
+    end
+
+    local dstToSrcs = {}
+    for _, dst in ipairs(dsts) do
+        -- Compute a bounding box to fast-fail things outside it.
+        local bounds = dst.getBounds()
+        local bb = {
+            min = {
+                x = bounds.center.x - bounds.size.x / 2,
+                z = bounds.center.z - bounds.size.z / 2,
+            },
+            max = {
+                x = bounds.center.x + bounds.size.x / 2,
+                z = bounds.center.z + bounds.size.z / 2,
+            }
+        }
+        for _, src in ipairs(srcs) do
+            if src ~= dst and maybeInside(bb, src.getPosition()) then
+                if definitelyInside(src, dst) then
+                    local srcs = dstToSrcs[dst]
+                    if not srcs then
+                        srcs = {}
+                        dstToSrcs[dst] = srcs
+                    end
+                    table.insert(srcs, src)
+                end
+            end
+        end
+    end
+    return dstToSrcs
+end
+
+function CrLua.TTS.Overlap._testOverlap()
+    local srcs = {}
+    local dsts = {}
+    for _, object in ipairs(getAllObjects()) do
+        if string.match(object.getName(), ' Token$') then
+            table.insert(srcs, object)
+        end
+        if object.tag == 'Card' then
+            table.insert(dsts, object)
+        end
+    end
+    local dstToSrcs = CrLua.TTS.Overlap.overlap(srcs, dsts)
+    for dst, srcs in pairs(dstToSrcs) do
+        local names = {}
+        for _, src in ipairs(srcs) do
+            table.insert(names, dst.getName())
+        end
+        print(dst.getName() .. ': ' .. table.concat(names, ', '))
+    end
+end

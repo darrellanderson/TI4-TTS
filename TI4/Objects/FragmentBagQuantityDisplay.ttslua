@@ -1,0 +1,152 @@
+--- Display quatity on a bag.
+
+local FRAGMENT_COUNT = {
+    ['Cultural Relic Fragment'] = 9,
+    ['Hazardous Relic Fragment'] = 7,
+    ['Industrial Relic Fragment'] = 5,
+    ['Unknown Relic Fragment'] = 3,
+}
+
+local _processDeckOnDestroySet = {}
+local _processDeckQueue = false
+
+function onLoad(save_state)
+    assert(self.tag == 'Bag')
+    self.createButton({
+        click_function = '_doNothing',
+        function_owner = self,
+        label          = '0',
+        position       = { 0, 2, 1.25 },
+        rotation       = { -50, 0, 0 },
+        width          = 1400,
+        height         = 1000,
+        font_size      = 1200,
+        color          = 'Black',
+        font_color     = self.getColorTint(),
+    })
+    _updateQuantityDisplay()
+end
+
+function filterObjectEnter(enterObject)
+    if enterObject.tag == 'Deck' then
+        return true
+    end
+    if enterObject.tag == 'Card' then
+        local bagFragmentType = string.match(self.getName(), '^(.* Relic Fragment)s Bag$')
+        local cardFragmentType = string.match(enterObject.getName(), '^(.* Relic Fragment)')
+        return bagFragmentType == cardFragmentType
+    end
+    return false
+end
+
+function onObjectEnterContainer(container, enterObject)
+    if container == self then
+        if enterObject.tag == 'Deck' then
+            _processDeckOnDestroySet[enterObject.getGUID()] = true
+            return
+        end
+        _updateQuantityDisplay()
+    end
+end
+
+function onObjectLeaveContainer(container, leaveObject)
+    if container == self then
+        if leaveObject.tag == 'Deck' then
+            return
+        end
+        _updateQuantityDisplay()
+    end
+end
+
+function onObjectDestroy(dyingObject)
+    if dyingObject.tag == 'Deck' then
+        local guid = dyingObject.getGUID()
+        if _processDeckOnDestroySet[guid] then
+            _processDeckOnDestroySet[guid] = nil
+            if not _processDeckQueue then
+                _processDeckQueue = {}
+                startLuaCoroutine(self, '_processDeckCoroutine')
+            end
+            table.insert(_processDeckQueue, guid)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function _doNothing()
+end
+
+function _updateQuantityDisplay()
+    local buttons = self.getButtons()
+    assert(buttons and #buttons == 1)
+    local button = buttons[1]
+
+    local quantity = self.getQuantity()
+    local fragmentType = string.match(self.getName(), '^(.* Relic Fragment)s Bag$')
+    local total = FRAGMENT_COUNT[fragmentType] or '?'
+
+    button.label = quantity .. '/' .. total
+    self.editButton(button)
+end
+
+function _processDeckCoroutine()
+    -- Wait a moment for the dying object to fully go away.
+    for _ = 1, 5 do
+        coroutine.yield(0)
+    end
+
+    local pos1 = self.getPosition()
+    local pos2 = self.getPosition()
+    pos1.y = pos1.y + 5
+    pos2.y = pos2.y + 8
+
+    while true do
+        local guid = _processDeckQueue and (#_processDeckQueue > 0) and table.remove(_processDeckQueue)
+        if not guid then
+            _processDeckQueue = false
+            break
+        end
+
+        local deck = self.takeObject({
+            position          = pos1,
+            smooth            = false,
+            guid              = guid
+        })
+        while deck.spawning do
+            coroutine.yield(0)
+        end
+        deck.setLock(true)
+
+        local remainder = false
+        for i = 1, deck.getQuantity() do
+            -- Get the top card.
+            deck.setLock(false)
+            local card = remainder or deck.takeObject({
+                position          = pos2,
+                smooth            = false,
+            })
+            deck.setLock(true)
+            remainder = deck.remainder
+            coroutine.yield(0)
+            assert(card.tag == 'Card')
+
+            card.setLock(false)
+
+            if filterObjectEnter(card) then
+                self.putObject(card)
+            else
+                local p = self.getPosition()
+                p.x = p.x - 5
+                p.y = p.y + 3 + i * 0.2
+                local collide = false
+                local fast = true
+                card.setPositionSmooth(p, collide, fast)
+            end
+
+            coroutine.yield(0)
+        end
+    end
+
+    return 1
+end

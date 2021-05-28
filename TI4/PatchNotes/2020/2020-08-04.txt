@@ -1,0 +1,28 @@
+Table:
+- Reset action card images, use same back for all cards.
+
+Global:
+- Stop (R) from trying to swap units for tokens when hovering over a unit bag.
+- Rotate infantry to be upright when dropped.
+
+Unpack:
+- Fix flagship duplication bug.
+
+Map tool:
+- If Mecatol Rex is missing build map about the center of the table.
+
+MultiRoller:
+- "Blitz" action card support.
+- Turn buttons green when put into Franken mode.
+
+Auto-fill MultiRoller:
+- "Blitz" action card support.
+
+Auto-fill MultiRoller Arena (in variants):
+- Keep fighter/infantry tokens on the bottom when warping (thanks waffles for the suggestion).
+
+Here/AFK:
+- Report when flipped (need faction sheet to detect color).
+
+Show Me Units! (in variants):
+- New object to highlight units by type/color for 20 seconds.

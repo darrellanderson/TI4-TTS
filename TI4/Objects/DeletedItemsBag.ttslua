@@ -1,0 +1,230 @@
+--- Store copies of deleted objects.
+-- @author original (unknown)
+-- @author Darrell
+--
+-- Darrell June 2020:
+-- - Improve awareness when objects move between containers.  Fixes a race where
+-- this would copy action cards during the window when the graveyard was moving
+-- them to discard piles.
+-- - Rather than scanning all containers on every delete, keep track of objects
+-- added to other containers and ignore them when TTS deletes.
+-- - Stop processing deletions for a few seconds after an error (closing the game?).
+
+-- Placing an object in a container triggers onObjectEnterContainer, followed
+-- by onObjectDestroy when TTS gets around to garbage collection.  Keep track
+-- of these objects between enter and destroy, do not consider "deleted".
+local objectEnteredContainerSet = {}
+
+-- Set of objects that will be put in self, used to print a warning when adding
+-- an unexpected object.
+local objectWillEnterSelfSet = {}
+
+local searchingContainers = {} -- map from container guid to search-in-progress containers
+local lastErrorTimestamp = false
+
+local enableDebugMessages = false
+
+local ignoreGuidSet = {}
+
+-- Add a way for external objects to tell us to ignore a deletion.
+function ignoreGuid(guid)
+    ignoreGuidSet[guid] = true
+end
+
+function onLoad()
+    debugMessage('DEBUG MESSAGES ARE ENABLED')
+    createButton()
+end
+
+function onObjectStateChange(changedObject, oldGuid)
+    ignoreGuidSet[oldGuid] = true
+end
+
+function onObjectEnterContainer(bag, enterObject)
+    if bag == self then
+        if objectWillEnterSelfSet[enterObject] then
+            objectWillEnterSelfSet[enterObject] = nil
+        else
+            print("WARNING: Object " .. enterObject.getName() .. " directly added to deleted objects bag.")
+        end
+    end
+    objectEnteredContainerSet[enterObject] = true
+end
+
+function onObjectLeaveContainer(bag, leaveObject)
+    if bag == self then
+        print("Restoring " .. leaveObject.getName())
+    end
+end
+
+function onObjectSearchStart(container)
+    searchingContainers[container.guid] = container
+end
+
+function onObjectSearchEnd(container)
+    searchingContainers[container.guid] = nil
+end
+
+function onObjectDestroy(dyingObject)
+    -- No regrets.
+    if dyingObject == self or string.find(dyingObject.getName(), 'TI4 Deleted Items') then
+        objectEnteredContainerSet[dyingObject] = nil
+        return
+    end
+
+    local guid = dyingObject.getGUID()
+    if guid and ignoreGuidSet[guid] then
+        ignoreGuidSet[guid] = nil
+        return
+    end
+
+    -- In addition to calling "ignoreGuid" objects can set this tag.
+    if dyingObject.hasTag('DELETED_ITEMS_IGNORE') then
+        return
+    end
+
+    -- Closing a game destroys objects, which can cause weird errors.
+    -- It turns out TTS does not respect pcall, errors out without pcall return.
+    -- Since we don't trust pcall, mark ourself as having an error, then AFTER
+    -- handling the object clear the error state.  Yuck?
+    if not lastErrorTimestamp or (Time.time - lastErrorTimestamp) > 5 then
+        lastErrorTimestamp = Time.time
+
+        if objectEnteredContainerSet[dyingObject] then
+            -- Typical deletion after putting something in a bag or deck.
+            objectEnteredContainerSet[dyingObject] = nil
+        elseif shouldZombie(dyingObject) then
+            local guid = dyingObject.getGUID()
+            local json = dyingObject.getJSON()
+            -- Wait a moment before cloning, in case was a state change event.
+            local function delayedPutSelf()
+                if ignoreGuidSet[guid] then
+                    ignoreGuidSet[guid] = nil
+                    return
+                end
+                local zombie = spawnObjectJSON({
+                    json              = json,
+                    position          = self.getPosition() + vector(0, 5, 0),
+                    sound             = false,
+                    snap_to_grid      = false
+                })
+                objectWillEnterSelfSet[zombie] = true
+                self.putObject(zombie)
+            end
+            Wait.time(delayedPutSelf, 0.5)
+        end
+
+        lastErrorTimestamp = false
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function createButton()
+    self.createButton({
+        click_function = "emptySelf",
+        function_owner = self,
+        label          = "Empty",
+        position       = {0,2,1.25},
+        rotation       = {-50,0,0},
+        width          = 500,
+        height         = 300,
+        font_size      = 100,
+        color          = "Black",
+        font_color     = "White",
+        tooltip        = "Empty Bag"
+    })
+end
+
+function emptySelf()
+    self.reset()
+end
+
+function debugMessage(message)
+    if enableDebugMessages then print(message) end
+end
+
+function shouldZombie(object)
+    local name = object.getName()
+
+    if not object or not object.guid then
+        debugMessage('shouldZombie: rejecting not object')
+        return false
+    end
+
+    -- Ignore some types.
+    if object.tag == 'Dice' then
+        debugMessage('shouldZombie: ignored object tag')
+        return false
+    end
+    if object.tag == 'Fog' then
+        debugMessage('shouldZombie: ignored object tag')
+        return false
+    end
+
+    if object.tag == 'Deck' and object.remainder then
+        return false
+    end
+
+    -- Accept commnd tokens, reject other tokens.
+    if string.match(name, 'Command Token') then
+        debugMessage('shouldZombie: accepting command token')
+        return true
+    end
+    if string.match(name, 'Token') or string.match(name, 'Commodities/Tradegoods') or string.match(name, 'x[13] Infantry') then
+        debugMessage('shouldZombie: rejecting non-command token')
+        return false
+    end
+
+    -- Is this object in a search-in-progress container?
+    -- Technically a guid match is not a guarantee that it is the same
+    -- object, but given the player is currently searching the container
+    -- it seems like a safe bet.
+    for _, container in pairs(searchingContainers) do
+        for _, entry in ipairs(container.getObjects()) do
+            if entry.guid == object.guid then
+                return false
+            end
+        end
+    end
+
+    -- If a card is being deleted after being added to a deck that is
+    -- normally caught by the enter-container event.  However, when (g)rouping
+    -- multiple cards to make a deck it is not.  To detect those (rare?)
+    -- legal deletions scan decks for the card.
+    if object.tag == 'Card' then
+        local guid = object.getGUID()
+        for _, otherObject in ipairs(getAllObjects()) do
+            if otherObject.tag == 'Deck' then
+                for _, entry in ipairs(otherObject.getObjects()) do
+                    if entry.guid == guid then
+                        return false
+                    end
+                end
+            end
+        end
+    end
+
+    return true
+end
+
+function createZombie(dyingObject)
+    debugMessage('zombify object')
+    local zombie = dyingObject.clone({
+        position = dyingObject.getPosition(),
+        snap_to_grid = dyingObject.use_grid
+    })
+    zombie.setLock(false)  -- unlock so can drag out of self
+    return zombie
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

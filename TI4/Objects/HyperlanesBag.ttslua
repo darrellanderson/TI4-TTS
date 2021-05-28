@@ -1,0 +1,299 @@
+--- Add/remove hyperlanes
+-- @author Darrell
+-- #include <~/CrLua/Objects/TI4_HyperlanesBag>
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        local function copyTable(t)
+            if t and type(t) == 'table' then
+                local copy = {}
+                for k, v in pairs(t) do
+                    copy[k] = type(v) == 'table' and copyTable(v) or v
+                end
+                t = copy
+            end
+            return t
+        end
+        return function(parameters) return copyTable(helperObject.call(functionName, parameters)) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+
+function onLoad(saveState)
+    self.addContextMenuItem('Add 5p hyperlanes', add5pHyperlanes)
+    self.addContextMenuItem('Add 3p hyperlanes', add3pHyperlanes)
+    self.addContextMenuItem('Add 2p heads up', add2pHeadsUp)
+end
+
+function add5pHyperlanes()
+    local tileToTransform = {
+        [86] = {
+            position = {0.00, 1.14, -18.19},
+            rotation = {0.00, 180.00, 0.00}
+        },
+        [83] = {
+            position = {5.24, 1.14, -15.17},
+            rotation = {0.00, 180.00, 0.00}
+        },
+        [88] = {
+            position = {5.27, 1.14, -9.08},
+            rotation = {0.00, 180.00, 0.00}
+        },
+        [85] = {
+            position = {0.03, 1.14, -6.08},
+            rotation = {0.00, 180.00, 0.00}
+        },
+        [87] = {
+            position = {-5.23, 1.14, -9.10},
+            rotation = {0.00, 180.00, 0.00}
+        },
+        [84] = {
+            position = {-5.25, 1.14, -15.16},
+            rotation = {0.00, 0.00, 0.00}
+        },
+    }
+
+    local guidToTransform = {}
+    for tile, transform in pairs(tileToTransform) do
+        local system = assert(_systemHelper.systemFromTile(tile))
+        guidToTransform[system.guid] = transform
+    end
+
+    -- Do not assume tiles exist, only place if inside self.
+    for _, entry in ipairs(self.getObjects()) do
+        local transform = guidToTransform[entry.guid]
+        if transform then
+            self.takeObject({
+                guid              = entry.guid,
+                position          = transform.position,
+                rotation          = transform.rotation,
+                callback_function = function(object) object.setLock(true) end,
+                smooth            = true,
+            })
+        end
+    end
+end
+
+function add3pHyperlanes()
+    local transforms = {
+        -- north
+        {
+            tile = 86,
+            position = {0.00, 1.14, 18.19},
+            rotation = {0.00, 0.00, 0.00}
+        },
+        {
+            tile = 83,
+            position = {-5.24, 1.14, 15.17},
+            rotation = {0.00, 180.00, 0.00}
+        },
+        {
+            tile = 88,
+            position = {-5.27, 1.14, 9.08},
+            rotation = {0.00, 0.00, 0.00}
+        },
+        {
+            tile = 85,
+            position = {0.00, 1.14, 6.08},
+            rotation = {0.00, 0.00, 0.00}
+        },
+        {
+            tile = 87,
+            position = {5.23, 1.14, 9.10},
+            rotation = {0.00, 0.00, 0.00}
+        },
+        {
+            tile = 84,
+            position = {5.25, 1.14, 15.16},
+            rotation = {0.00, 0.00, 0.00}
+        },
+
+        -- southeast
+        {
+            tile = 86,
+            position = {15.75, 1.14, -9.09},
+            rotation = {0.00, 120.00, 0.00}
+        },
+        {
+            tile = 83,
+            position = {15.75, 1.14, -3.03},
+            rotation = {0.00, 300.00, 0.00}
+        },
+        {
+            tile = 88,
+            position = {10.5, 1.14, 0},
+            rotation = {0.00, 120.00, 0.00}
+        },
+        {
+            tile = 85,
+            position = {5.25, 1.14, -3.03},
+            rotation = {0.00, 120.00, 0.00}
+        },
+        {
+            tile = 87,
+            position = {5.25, 1.14, -9.09},
+            rotation = {0.00, 120.00, 0.00}
+        },
+        {
+            tile = 84,
+            position = {10.5, 1.14, -12.12},
+            rotation = {0.00, 120.00, 0.00}
+        },
+
+        -- southwest
+        {
+            tile = 86,
+            position = {-15.75, 1.14, -9.09},
+            rotation = {0.00, 240.00, 0.00}
+        },
+        {
+            tile = 83,
+            position = {-15.75, 1.14, -3.03},
+            rotation = {0.00, 300.00, 0.00}
+        },
+        {
+            tile = 88,
+            position = {-10.5, 1.14, 0},
+            rotation = {0.00, 120.00, 0.00}
+        },
+        {
+            tile = 85,
+            position = {-5.25, 1.14, -3.03},
+            rotation = {0.00, 240.00, 0.00}
+        },
+        {
+            tile = 87,
+            position = {-5.25, 1.14, -9.09},
+            rotation = {0.00, 0.00, 0.00}
+        },
+        {
+            tile = 84,
+            position = {-10.5, 1.14, -12.12},
+            rotation = {0.00, 0.00, 0.00}
+        },
+
+    }
+
+    local guidToTransforms = {}
+    for _, transform in pairs(transforms) do
+        local system = assert(_systemHelper.systemFromTile(transform.tile))
+        local transforms = guidToTransforms[system.guid]
+        if not transforms then
+            transforms = {}
+            guidToTransforms[system.guid] = transforms
+        end
+        table.insert(transforms, transform)
+    end
+
+    local mapTool = false
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == 'TI4 Map Tool' then
+            mapTool = object
+            break
+        end
+    end
+
+    -- Do not assume tiles exist, only place if inside self.
+    for _, entry in ipairs(self.getObjects()) do
+        local transforms = guidToTransforms[entry.guid]
+        if transforms then
+            for i, transform in ipairs(transforms) do
+                if i == 1 then
+                    self.takeObject({
+                        guid              = entry.guid,
+                        position          = transform.position,
+                        rotation          = transform.rotation,
+                        callback_function = function(object) object.setLock(true) end,
+                        smooth            = true,
+                    })
+                elseif mapTool then
+                    local system = _systemHelper.systemFromGuid(entry.guid)
+                    mapTool.call('cloneSystem', {
+                        system            = system,
+                        position          = {
+                            x = transform.position[1],
+                            y = transform.position[2],
+                            z = transform.position[3],
+                        },
+                        rotation          = transform.rotation,
+                        lock              = true,
+                    })
+                end
+            end
+        end
+    end
+end
+
+function add2pHeadsUp()
+    local guidToTransform = {
+        ['c131ce'] = {
+            position = {10.50, 1.20, 12.12},
+            rotation = {0.00, 240.00, 0.00}
+        },
+        ['b74682'] = {
+            position = {15.75, 1.20, 9.09},
+            rotation = {0.00, 120.00, 0.00}
+        },
+        ['a64a36'] = {
+            position = {15.75, 1.14, -9.09},
+            rotation = {0.00, 112, 0.00}
+        },
+        ['bed0e0'] = {
+            position = {10.50, 1.14, -12.12},
+            rotation = {0.00, 300.00, 0.00}
+        },
+        ['81a64a'] = {
+            position = {-10.50, 1.14, -12.12},
+            rotation ={0.00, 240.00, 0.00}
+        },
+        ['b34afa'] = {
+            position = {-15.75, 1.14, -9.09},
+            rotation = {0.00, 240, 0.00}
+        },
+        ['a35ea3'] = {
+            position = {-15.75, 1.20, 9.09},
+            rotation = {0.00, 0.00, 0.00}
+        },
+        ['613593'] = {
+            position = {-10.50, 1.20, 12.12},
+            rotation = {0.00, 180.00, 0.00}
+        },
+    }
+
+    -- Do not assume tiles exist, only place if inside self.
+    for _, entry in ipairs(self.getObjects()) do
+        local transform = guidToTransform[entry.guid]
+        if transform then
+            self.takeObject({
+                guid              = entry.guid,
+                position          = transform.position,
+                rotation          = transform.rotation,
+                callback_function = function(object) object.setLock(true) end,
+                smooth            = true,
+            })
+        end
+    end
+end
+
+
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

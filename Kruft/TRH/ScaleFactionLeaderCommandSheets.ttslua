@@ -1,0 +1,181 @@
+--- JabberWocky fixed unit upgrade cards not fitting, needs to scale some stuff.
+-- Do that here.
+
+local SCALE = {
+    LEADER_SHEET = {
+        x = 0.950, -- currently 1
+        y = 1,
+        z = 0.950
+    },
+    COMMAND_SHEET = {
+        x = 1.328, -- currently 1.4
+        y = 0.1,
+        z = 1.328
+    },
+    FACTION_SHEET = {
+        x = 4.436, -- currently 4.64
+        y = 1,
+        z = 4.436
+    },
+}
+
+local PATTERN = {
+    LEADER_SHEET = '^Leader Sheet %((.*)%)$', -- match color
+    COMMAND_SHEET = '^Command Sheet %((.*)%)$', -- match color
+    FACTION_SHEET = '^(.*) Sheet$', -- match faction long name
+    FACTION_BOX = '^(.*) Box$', -- match faction token name
+}
+
+-------------------------------------------------------------------------------
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+
+local _colorSet = {}
+local _factionNameSet = {}
+local _deletePendingSet = {}
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    for _, color in ipairs(Player.getColors()) do
+        _colorSet[color] = true
+    end
+    for _, faction in pairs(_factionHelper.allFactions(true)) do
+        _factionNameSet[faction.name] = true
+        _factionNameSet[faction.tokenName] = true
+    end
+    self.addContextMenuItem('fix sheets scale', function() startLuaCoroutine(self, 'fixSheetsScaleCoroutine') end)
+end
+
+function onObjectDestroy(dyingObject)
+    _deletePendingSet[dyingObject.getGUID()] = nil
+end
+
+-------------------------------------------------------------------------------
+
+function safeUnlockAndPutObject(bag, object)
+    assert(type(bag) == 'userdata' and type(object) == 'userdata')
+    assert(bag.tag == 'Bag' or bag.tag == 'Infinite')
+    object.setLock(false)
+    local guid = object.getGUID()
+    _deletePendingSet[guid] = true
+    bag.putObject(object)
+    while _deletePendingSet[guid] do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+end
+
+function safeTakeObjectAndLock(bag, guid)
+    assert(type(bag) == 'userdata' and ((not guid) or type(guid) == 'string'))
+    local pos = bag.getPosition()
+    local object = bag.takeObject({
+        guid = guid,
+        position = { x = pos.x, y = pos.y + 5, z = pos.z },
+        smooth = false
+    })
+    while object.spawning do
+        coroutine.yield(0)
+    end
+    object.setLock(true)
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+    return object
+end
+
+-------------------------------------------------------------------------------
+
+function processSheet(sheetObject)
+    assert(type(sheetObject) == 'userdata' and sheetObject.tag ~= 'Bag')
+    local name = sheetObject.getName()
+    local leaderSheetColor = string.match(name, PATTERN.LEADER_SHEET)
+    if leaderSheetColor and _colorSet[leaderSheetColor] then
+        sheetObject.setScale(SCALE.LEADER_SHEET)
+    end
+    local commandSheetColor = string.match(name, PATTERN.COMMAND_SHEET)
+    if commandSheetColor and _colorSet[commandSheetColor] then
+        sheetObject.setScale(SCALE.COMMAND_SHEET)
+    end
+    local factionSheetFaction = string.match(name, PATTERN.FACTION_SHEET)
+    if factionSheetFaction and _factionNameSet[factionSheetFaction] then
+        sheetObject.setScale(SCALE.FACTION_SHEET)
+    end
+end
+
+function searchForSheets(bag)
+    assert(type(bag) == 'userdata' and bag.tag == 'Bag')
+    for _, entry in ipairs(bag.getObjects()) do
+        local leaderSheetColor = string.match(entry.name, PATTERN.LEADER_SHEET)
+        if leaderSheetColor and _colorSet[leaderSheetColor] then
+            local leaderSheet = safeTakeObjectAndLock(bag, entry.guid)
+            processSheet(leaderSheet)
+            safeUnlockAndPutObject(bag, leaderSheet)
+        end
+        local commandSheetColor = string.match(entry.name, PATTERN.COMMAND_SHEET)
+        if commandSheetColor and _colorSet[commandSheetColor] then
+            local commandSheet = safeTakeObjectAndLock(bag, entry.guid)
+            processSheet(commandSheet)
+            safeUnlockAndPutObject(bag, commandSheet)
+        end
+        local factionSheetFaction = string.match(entry.name, PATTERN.FACTION_SHEET)
+        if factionSheetFaction and _factionNameSet[factionSheetFaction] then
+            local factionSheet = safeTakeObjectAndLock(bag, entry.guid)
+            processSheet(factionSheet)
+            safeUnlockAndPutObject(bag, factionSheet)
+        end
+    end
+end
+
+function searchForFactionBoxes(bag)
+    assert(type(bag) == 'userdata' and bag.tag == 'Bag')
+    for _, entry in ipairs(bag.getObjects()) do
+        local factionName = string.match(entry.name, PATTERN.FACTION_BOX)
+        if factionName and _factionNameSet[factionName] then
+            local factionBox = safeTakeObjectAndLock(bag, entry.guid)
+            searchForSheets(factionBox)
+            safeUnlockAndPutObject(bag, factionBox)
+        end
+    end
+end
+
+function fixSheetsScaleCoroutine()
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' then
+            searchForSheets(object)
+            searchForFactionBoxes(object)
+        else
+            processSheet(object)
+        end
+    end
+    print('FIX SHEETS SCALE FINISHED, REDO SETUP TO ADJUST PLACEMENT')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

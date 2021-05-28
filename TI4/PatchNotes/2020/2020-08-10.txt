@@ -1,0 +1,25 @@
+Typos:
+- A few action cards, one phase 2 objective ("Galatic"), "Fighter prototype" capitalize "P".
+
+MultiRoller:
+- Accept new capitalization of "Fighter Prototype"
+
+Token Sweeper ("Unpack"):
+- Fix get tokens bug.
+
+Franken:
+- Added "custom setup.." to select/ban options.
+
+Faction borders, Auto-fill MultiRoller:
+- Migrate to shared faction helper for flagship names.
+
+Other:
+- Added technology board to the variants bag.
+- Removed "{R}" messages when swapping plastic with tokens.
+- Added "!tealme" command for streamers.  Changes the player's color to teal, with no hand so will not receive deal-to-all cards and also can see !whisper message contents.
+- Fix "pick a faction to play" cards to have hidden backs.
+- Reset small green fighter to correct size.
+
+System Tiles:
+- Use ThatRobHuman's new system tile mesh and collider for an 88% reduction in image size.
+- Update system helper and MultiRoller Arena to work with new tile models.

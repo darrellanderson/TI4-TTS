@@ -1,0 +1,144 @@
+--- Sample faction injection.
+-- Blue Space reserves the 3000s system tile number.  Start these at 3101.
+
+-------------------------------------------------------------------------------
+
+-- Faction attributes:
+-- - key : matches faction sheet name.
+-- - tokenName : "tokenName Owner Token", etc.
+-- - frankenName : "frankenName Starting Units" tile, etc.
+-- - home : home system tile number.
+-- - startingUnits : unit name to number (use underscore for Space_Dock, War_Sun).
+-- - startingTech : list of tech names.
+-- - flagship : flagship name.
+-- - flagshipDescription : added to tooltip.
+-- - abilities : list of faction ability names (must match franken tiles).
+-- - units : list of all unit overrides and upgrades associated with faction (excluding flagship).
+local FACTIONS = {
+    ['The Veldyr Sovereignty'] = {
+        tokenName = 'Veldyr Sovereignty',
+        frankenName = 'Veldyr',
+        home = 3101,
+        startingUnits = { Dreadnought = 1, Carrier = 1, Fighter = 2, Infantry = 4, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'Dark Energy Tap', 'AI-Development Algorithm' },
+        flagship = 'Richtyrian',
+        flagshipDescription = 'When this ship makes a combat roll, it rolls 1 additional die for each round of combat that has been resolved this combat.',
+        abilities = { 'Corporate Entity', 'Targeted Acquisition' },
+        units = { 'Lancer Dreadnought I', 'Lancer Dreadnought II' },
+    },
+}
+
+-------------------------------------------------------------------------------
+
+-- System attributes:
+-- - key: guid.
+-- - tile: number (0 for homebrew).
+-- - home: boolean, true if a home system.
+-- - planets: list of planet tables.
+-- - wormholes: list of strings.
+-- - anomalies: list of strings.
+-- - rotate: override, degrees number.
+-- - localY: override tile height (ghosts home system).
+--
+-- Planet attributes:
+-- - name: string.
+-- - resources: number.
+-- - influence: number.
+-- - trait: string {cultural|industrial|hazardous}.
+-- - tech: string {red|green|yellow|blue}.
+-- - position: table with {xz}: override, local space.
+-- - radius: number: override, local space.
+-- - legendary: boolean.
+local HOME_SYSTEMS = {
+    ['PUT_TILE_GUID_HERE'] = {
+        tile = 3101,
+        home = true,
+        planets = {
+            { name = 'Rhune', resources = 3, influence = 4 },
+        }
+    },
+}
+
+-------------------------------------------------------------------------------
+
+-- Unit attributes:
+--
+-- - key : name.
+--
+-- - antiFighterBarrage {dice=#,hit=#} table.
+-- - bombardment {dice=#,hit=#,extraDice=#} table.
+-- - capacity number.
+-- - cost number : cost per unit.
+-- - disablePlanetaryShield boolean.
+-- - groundCombat {dice=#,hit=#,anyPlanet} table.
+-- - move number.
+-- - name string : unit name when base unit is replaced (faction or unit upgrade).
+-- - override string : base unit type if this is a faction override.
+-- - planetaryShield boolean.
+-- - spaceCannon {dice=#,hit=#,range=#,extraDice=#} table.
+-- - spaceCombat {dice=#,hit=#,extraHitsOn={count=#,value=#},diceAsCount=boolean}.
+-- - sustainDamage boolean.
+-- - unitLimit number : at most N units roll dice (Experimental Battlestation).
+-- - upgrade string : base unit type if this is a unit upgrade technology.
+--
+-- The groundCombat.anyPlanet means unit participates in ground combat for any
+-- planet in the system (e.g. Naalu fighters with the flagship).
+--
+-- The spaceCombat.extraHitsOn attribute is for expressing Jol-Nar's flagship,
+-- which gets 2 additional hits on a 9 or 10, extraHitsOn={count=2,value=9}.
+--
+-- spaceCombat.diceAsCount is an awkward way for Winnu flagship to signal the
+-- dice number is non-standard, and should override unit count for MultiRoller.
+--
+-- See TI4_UnitHelper.ttslua for defaults.
+local UNITS = {
+    ['Richtyrian'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 }
+    },
+    ['Lancer Dreadnought I'] = {
+        override = 'Dreadnought',
+        spaceCannon = { dice = 1, hit = 7, range = 0 },
+    },
+    ['Lancer Dreadnought II'] = {
+        upgrade = 'Dreadnought',
+        spaceCannon = { dice = 1, hit = 5, range = 0 },
+        move = 2,
+    },
+}
+
+-------------------------------------------------------------------------------
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
+
+function onLoad(saveState)
+    for name, faction in pairs(FACTIONS) do
+        faction.name = name
+        _factionHelper.injectFaction(faction)
+    end
+    for guid, system in pairs(HOME_SYSTEMS) do
+        system.guid = guid
+        _systemHelper.injectSystem(system)
+    end
+    for name, unit in pairs(UNITS) do
+        unit.name = name
+        _unitHelper.injectUnitOverride(unit)
+    end
+end

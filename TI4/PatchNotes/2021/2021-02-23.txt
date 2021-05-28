@@ -1,0 +1,6 @@
+v23
+- Fix map tool parsing error when replacing the center system.
+- New "SCPT 2021 Tournament Draft" tool, in the tools bag.
+- Homebrew may mark custom cards as "do not ready" during the end of status phase.
+- New "Share anonymized game stats" setup option to opt-in to sharing game stats such as factions, scores, technologies, and the like for aggregate analysis.
+- New trophy token next to the scoreboard, drop it in a player area to congratulate the winner (and if using game stats, trigger an update to capture end-of-game stats).

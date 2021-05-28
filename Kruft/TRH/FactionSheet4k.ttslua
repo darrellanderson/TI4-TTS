@@ -1,0 +1,203 @@
+--- Reset command and owner tokens to use ThatRobHuman's new mesh / UV map.
+-- @author darrell
+
+local _deletedItems = false
+local _deletePendingSet = {}
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    _deletedItems = getObjectByName('Bag', 'TI4 Deleted Items')
+    self.addContextMenuItem('Mutate', mutate)
+end
+
+function onObjectDestroy(dyingObject)
+    _deletePendingSet[dyingObject.getGUID()] = nil
+end
+
+function getObjectByName(tag, name)
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == tag and object.getName() == name then
+            return object
+        end
+    end
+    error('getObjectByName: missing "' .. name .. '"')
+end
+
+-------------------------------------------------------------------------------
+
+function mutate()
+    startLuaCoroutine(self, 'mutateCoroutine')
+end
+
+local _1 = {}
+local _2 = {}
+
+local function mutateJson(json, name)
+    assert(type(json) == 'string')
+    json = JSON.decode(json)
+
+    local top = _1[name] or 'http://localhost:8080/4k?img=' .. json.CustomImage.ImageURL
+    local bot = _2[name] or 'http://localhost:8080/4k?img=' .. json.CustomImage.ImageSecondaryURL
+
+    -- If there are multiple versions out there, merge into a single image.
+    _1[name] = top
+    _2[name] = bot
+
+    json.CustomImage.ImageURL = top
+    json.CustomImage.ImageSecondaryURL = bot
+
+    print('json.CustomImage.ImageURL ' .. json.CustomImage.ImageURL)
+    print('json.CustomImage.ImageSecondaryURL ' .. json.CustomImage.ImageSecondaryURL)
+
+    return JSON.encode_pretty(json)
+end
+
+local function mutateObject(object)
+    assert(type(object) == 'userdata')
+    print('mutating ' .. object.getName())
+
+    local guid = object.getGUID()
+    local json = object.getJSON()
+    local originalLock = object.getLock() or false
+
+    json = mutateJson(json, object.getName())
+    local spawnParams = {
+        json              = json,
+        position          = object.getPosition(),
+        rotation          = object.getRotation(),
+        scale             = object.getScale(),
+        callback_function = nil,
+        sound             = false,
+        params            = nil,
+        snap_to_grid      = object.use_grid
+    }
+
+    -- Delete object, wait for delete to actually happen before reusing guid!
+    if _deletedItems then
+        _deletedItems.call('ignoreGuid', guid)
+    end
+    _deletePendingSet[guid] = true
+    destroyObject(object)
+    object = nil
+    while _deletePendingSet[guid] do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    local object = spawnObjectJSON(spawnParams)
+    assert(object.getGUID() == guid)
+
+    -- Wait for spawn, plus extra time for texture to load.
+    object.setLock(true)
+    while object.spawning do
+        coroutine.yield(0)
+    end
+    local waitUntil = Time.time + 1
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+
+    -- Make sure both front/back are visible to force images to load.
+    object.setRotation({0, 0, 0})
+    local waitUntil = Time.time + 5
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+    object.setRotation({0, 0, 180})
+    local waitUntil = Time.time + 5
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+    object.setRotation(spawnParams.rotation)
+    local waitUntil = Time.time + 1
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+
+    object.setLock(originalLock)
+
+    return object
+end
+
+function mutateCoroutine()
+    local outerBagNameSet = {
+        ['Factions'] = true,
+        ['Faction Sheets/Tokens'] = true,
+        ['Blue Space Faction Pack'] = true
+    }
+    local outerBags = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' and outerBagNameSet[object.getName()] then
+            print('found outer bag: ' .. object.getName())
+            table.insert(outerBags, object)
+        end
+    end
+
+    local function takeSheet(bag)
+        local p = bag.getPosition()
+        for _, entry in ipairs(bag.getObjects()) do
+            if string.match(entry.name, ' Sheet$') then
+                return bag.takeObject({
+                    guid = entry.guid,
+                    position = { x = p.x, y = p.y + 5, z = p.z },
+                    smooth = false
+                })
+            end
+        end
+        error('missing ' .. bag.getName() .. '/' .. name)
+    end
+
+    for _, outerBag in ipairs(outerBags) do
+        for _, entry in ipairs(outerBag.getObjects()) do
+            local tokenName = string.match(entry.name, '^(.*) Box$')
+            if tokenName then
+
+                local p = outerBag.getPosition()
+                local box = outerBag.takeObject({
+                    guid = entry.guid,
+                    position = { x = p.x, y = p.y + 5, z = p.z },
+                    smooth = false
+                })
+                box.setLock(true)
+                while box.spawning do coroutine.yield(0) end
+                coroutine.yield(0)
+                coroutine.yield(0)
+
+                local sheet = takeSheet(box)
+                sheet.setLock(true)
+                while sheet.spawning do coroutine.yield(0) end
+                coroutine.yield(0)
+                coroutine.yield(0)
+
+                sheet = mutateObject(sheet)
+
+                sheet.setLock(false)
+                box.putObject(sheet)
+                coroutine.yield(0)
+                coroutine.yield(0)
+
+                box.setLock(false)
+                outerBag.putObject(box)
+                coroutine.yield(0)
+                coroutine.yield(0)
+
+            end
+        end
+    end
+
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

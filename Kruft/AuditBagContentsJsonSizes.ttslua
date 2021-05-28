@@ -1,0 +1,66 @@
+local SHEET_ID = '1uoh6B-eRmfPbPvEQbFufaQ-Xw1Hg6Gn4EoeRExBpGf8'
+local AUDIT_THRESHOLD = 1024 * 1024
+
+function onLoad(save_state)
+    self.addContextMenuItem('Audit JSON', auditJson)
+end
+
+function auditJson()
+    startLuaCoroutine(self, 'auditJsonCoroutine')
+end
+
+function auditBag(bag, sheetName)
+    assert(bag.tag == 'Bag' and type(sheetName) == 'string')
+    local cells = {}
+    local p = bag.getPosition()
+    for i, entry in ipairs(bag.getObjects()) do
+        local inner = bag.takeObject({
+            guid = entry.guid,
+            position = { x = p.x, y = p.y + 20, z = p.z },
+            smooth = false
+        })
+        coroutine.yield(0)
+
+        cells['A' .. i] = inner.getName()
+        cells['B' .. i] = inner.getGUID()
+        cells['C' .. i] = string.len(inner.getJSON())
+
+        bag.putObject(inner)
+        coroutine.yield(0)
+    end
+    CrLua.TTS.Spreadsheet.update('Audit', SHEET_ID, sheetName, cells)
+end
+
+function auditJsonCoroutine()
+    local guidToJsonByteSize = {}
+
+    -- Get all.
+    local cells = {}
+    for i, object in ipairs(getAllObjects()) do
+        local jsonByteSize = string.len(object.getJSON())
+        guidToJsonByteSize[object.getGUID()] = jsonByteSize
+        cells['A' .. i] = object.getName()
+        cells['B' .. i] = object.getGUID()
+        cells['C' .. i] = jsonByteSize
+    end
+    --CrLua.TTS.Spreadsheet.update('Audit', SHEET_ID, 'Table', cells)
+
+    -- Audit larger objects.
+    --auditBag(getObjectFromGUID('ca491f'), 'Variants')
+    auditBag(getObjectFromGUID('ce487e'), 'Franken(1)')
+
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+#include <~/CrLua/CrLua>
+#include <~/CrLua/LockGlobals>
+
+#include <~/CrLua/LockTable>
+#include <~/CrLua/Log>
+
+#include <~/CrLua/TTS/Spreadsheet>
+
+CrLua.assertRequired({ 'TTS.Spreadsheet' }) -- do this BEFORE lock
+CrLua.lock()

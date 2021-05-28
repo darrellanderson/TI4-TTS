@@ -1,0 +1,28 @@
+local _scheduleAsapQueue = false
+
+--- Request a function run "soon" but run at most one per frame.
+-- Good for spreading out load for upkeep stuff.
+-- @param params (table) : { guid, functionName, arg } table.
+function scheduleAsap(params)
+    assert(type(params) == 'table')
+    assert(type(params.guid) == 'string')
+    assert(type(params.functionName) == 'string')
+    assert(type(params.arg) ~= 'userdata')
+    local function processAsapQueue()
+        local params = _scheduleAsapQueue and table.remove(_scheduleAsapQueue, 1)
+        if not params then
+            _scheduleAsapQueue = false
+            return
+        end
+        Wait.frames(processAsapQueue, 1) -- schedule BEFORE running in case function errors out
+        local object = getObjectFromGUID(params.guid)
+        if object then
+            object.call(params.functionName, params.arg)
+        end
+    end
+    if not _scheduleAsapQueue then
+        _scheduleAsapQueue = {}
+        Wait.frames(processAsapQueue, 1)
+    end
+    table.insert(_scheduleAsapQueue, params)
+end

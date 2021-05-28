@@ -1,0 +1,12 @@
+v17:
+- Fix typo in "Strike Wing Ambuscade" card name (roller now uses it).
+- Count Winnu agent in the build area (thanks Jabberwocky).
+- Count AI Dev Algo in the build area (thanks Jabberwocky).
+- Support for additional per-side system attributes (homebrew request).
+- Map tool now places legendary planet cards face up.
+- Map tool now ignores in-hand system tiles when saving map strings.
+- Hide hands tool now uses larger hidden zones in case hands get larger than the hand area.
+- Added "purge card" option to "the codex" relic card.
+- Increase PDS size.
+- Fix default 7p home system positions.
+- Add "2p heads up" hyperlanes placement right-click option on hyperlanes bag.

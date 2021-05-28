@@ -1,0 +1,19 @@
+function onLoad(save_state)
+    self.addContextMenuItem('DO IT', doIt)
+end
+
+function doIt()
+    local dir = 'file:////Users/darrell/Downloads/'
+    local assets = UI.getCustomAssets()
+    for _, asset in ipairs(assets) do
+        local infoName = string.match(asset.name, '^(.*Info)$')
+        if infoName then
+            asset.url = dir .. 'FactionInfoSheets/' .. infoName .. '.jpg'
+        end
+        local buttonName = string.match(asset.name, '^(.*Button)$')
+        if buttonName then
+            asset.url = dir .. 'FactionSelectionImages/Faction Picker Buttons/' .. buttonName .. '.jpg'
+        end
+    end
+    UI.setCustomAssets(assets)
+end

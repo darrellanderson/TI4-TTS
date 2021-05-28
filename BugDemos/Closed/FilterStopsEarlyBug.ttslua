@@ -1,0 +1,6 @@
+function filterObjectEnter(enter_object)
+    _n = (_n or 0) + 1
+    local result = (_n % 2) == 0
+    print('filter: ' .. _n .. ' ' .. tostring(result))
+    return result
+end

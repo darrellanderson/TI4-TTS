@@ -1,0 +1,368 @@
+--- TI4 Graveyard bag v3.0, move objects inserted into this bag to correct locations.
+-- @author original by Mantis
+-- @author card handling by GarnetBear
+-- @author May 2020 update by Darrell
+-- @author v3 May 2020 update by Darrell
+--
+-- v3.1: safer transition when two cards forming a deck, and vice versa.
+-- v3.2: wait for TTS before moving to final destination in order to preserve guid.
+-- v3.3 [August 2020]: migrate to deck helper.
+-- v3.4 [March 2021]: deck helper now synchronous, do heavy lifting internally
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+local _exploreHelper = getHelperClient('TI4_EXPLORE_HELPER')
+
+-- Bag with faction tokens.
+local PICK_FACTION_BAG = 'Pick a Faction to Play'
+local EXPLORE_TOKEN_BAG = 'Exploration Bag'
+
+local REPORT_CARDS_LIMIT = 20
+
+-------------------------------------------------------------------------------
+
+local _reportTrashed = {}
+
+local _exploreTokenNameSet = false
+local _objectNameToBagGuid = {}
+
+local _deckNameToDiscardIndex = {}
+
+local _guidAwaitingDestroySet = {}
+local _guidPendingMoveSet = {}
+
+local _coroutineStartTime = false
+
+-------------------------------------------------------------------------------
+
+local function reportTrashed(objectName)
+    assert(type(objectName) == 'string')
+
+    local deckName = _deckHelper.getDeckName(objectName)
+    if deckName == 'Secret Objectives' then
+        objectName = 'Secret Objective' -- ALWAYS hide secrets
+        deckName = false
+    end
+    if deckName then
+        local cards = _reportTrashed[deckName]
+        if not cards then
+            cards = {}
+            _reportTrashed[deckName] = cards
+        end
+        if type(cards) == 'table' then
+            if #cards < REPORT_CARDS_LIMIT then
+                table.insert(cards, objectName)
+            elseif #cards == REPORT_CARDS_LIMIT then
+                table.insert(cards, '...')
+            end
+        elseif type(cards) == 'number' then
+            _reportTrashed[deckName] = (_reportTrashed[deckName] or 0) + 1
+        end
+    else
+        _reportTrashed[objectName] = (_reportTrashed[objectName] or 0) + 1
+    end
+end
+
+local function printAndResetReportTrashed()
+    local message = {}
+    for name, countOrCards in pairs(_reportTrashed or {}) do
+        local count = type(countOrCards) == 'table' and #countOrCards or countOrCards
+        local cards = type(countOrCards) == 'table' and countOrCards
+        local plural = count > 1 and (not string.match(name, '[ys]$') and 's') or ''
+        if cards then
+            cards = table.concat(cards, ', ')
+            table.insert(message, count .. ' ' .. name .. plural .. ' (' .. cards .. ')')
+        else
+            table.insert(message, count .. ' ' .. name .. plural)
+        end
+    end
+    if #message > 0 then
+        message = 'Graveyard moving ' .. table.concat(message, ', ')
+        printToAll(message, 'Yellow')
+    end
+    _reportTrashed = {}
+end
+
+-------------------------------------------------------------------------------
+
+--- Get bag for object.
+local function getBag(object)
+    assert(type(object) == 'userdata')
+    local objectName = object.getName()
+
+    -- Do we already know where to put it?
+    local bagGuid = _objectNameToBagGuid[objectName]
+    local bag = bagGuid and getObjectFromGUID(bagGuid)
+    if bag then
+        return bag
+    end
+
+    -- Look for and remember bag if found.  If more than one choose closest
+    -- (reduces objects from flying over the table).
+    -- Remember via guid to prevent trying to access a deleted bag later.
+    -- Do not store "nacks" for objects with no bag, it could be unpacked!
+    local acceptBag = {
+        [objectName] = true,
+        [objectName .. ' Bag'] = true,
+        [objectName .. 's Bag'] = true,
+    }
+    if string.match(objectName, ' Faction Token$') then
+        acceptBag[PICK_FACTION_BAG] = true
+    end
+
+    if not _exploreTokenNameSet then
+        _exploreTokenNameSet = {}
+        for _, tokenName in ipairs(_exploreHelper.getExploreTokenNames()) do
+            _exploreTokenNameSet[tokenName] = true
+        end
+    end
+    if _exploreTokenNameSet[objectName] then
+        acceptBag[EXPLORE_TOKEN_BAG] = true
+    end
+
+    local bestDistance = false
+    for _, candidate in ipairs(getAllObjects()) do
+        local tag = candidate.tag
+        local name = candidate.getName()
+        if (tag == 'Bag' or tag == 'Infinite') and acceptBag[name] then
+            local p1 = self.getPosition()
+            local p2 = candidate.getPosition()
+            local dSq = ((p1.x - p2.x) ^ 2 + (p1.z - p2.z) ^ 2)
+            if not bestDistance or dSq < bestDistance then
+                bag = candidate
+                bestDistance = dSq
+            end
+        end
+    end
+    _objectNameToBagGuid[objectName] = bag and bag.getGUID()
+    return bag
+end
+
+local function resetDiscardIndex()
+    _deckNameToDiscardIndex = {}
+end
+
+local function getAndIncrementDiscardIndex(deckName)
+    assert(type(deckName) == 'string')
+    local index = _deckNameToDiscardIndex[deckName] or 1
+    _deckNameToDiscardIndex[deckName] = index + 1
+    return index
+end
+
+-------------------------------------------------------------------------------
+
+local function canMove(object)
+    assert(type(object) == 'userdata')
+
+    -- Singleton card.
+    if object.tag == 'Card' then
+        local cardName = object.getName()
+        if _deckHelper.canDiscard(cardName) then
+            return true
+        end
+    end
+
+    -- Deck.  Can at least one card be discarded?
+    if object.tag == 'Deck' then
+        for _, entry in ipairs(object.getObjects()) do
+            if _deckHelper.canDiscard(entry.name) then
+                return true
+            end
+        end
+    end
+
+    -- Arbitrary object.  Is there a bag for it?
+    local bag = getBag(object)
+    if bag then
+        return true
+    end
+end
+
+-- Returns:
+-- - true : move complete
+-- - false : cannot move, stow given object in self
+-- - object : call again next frame with that object
+local function moveAtLeastPartially(object)
+    assert(type(object) == 'userdata')
+
+    -- Singleton card.  Check if deckHelper can discard it.
+    if object.tag == 'Card' then
+        local cardName = object.getName()
+        if _deckHelper.canDiscard(cardName) then
+            local deckName = _deckHelper.getDeckName(cardName) or '-'
+            local index = getAndIncrementDiscardIndex(deckName)
+            local success = _deckHelper.discardCard({
+                guid = object.getGUID(),
+                name = cardName,
+                index = index
+            })
+            if success then
+                reportTrashed(cardName)
+            end
+            return success
+        end
+    end
+
+    -- Deck.  Can at least one card be discarded?
+    if object.tag == 'Deck' then
+        for _, entry in ipairs(object.getObjects()) do
+            local cardName = entry.name
+            if _deckHelper.canDiscard(cardName) then
+                local deckName = _deckHelper.getDeckName(entry.name) or '-'
+                local index = getAndIncrementDiscardIndex(deckName)
+                local success = _deckHelper.discardCard({
+                    guid = entry.guid,
+                    name = cardName,
+                    containerGuid = object.getGUID(),
+                    index = index
+                })
+                assert(type(success) == 'boolean')
+                if success then
+                    reportTrashed(cardName)
+                    return object.remainder or object
+                end
+                return false
+            end
+        end
+    end
+
+    -- Arbitrary object.  Is there a bag for it?
+    local bag = getBag(object)
+    if bag then
+        local objectName = object.getName()
+        bag.putObject(object)
+        reportTrashed(objectName)
+        return true
+    end
+
+    return false
+end
+
+-------------------------------------------------------------------------------
+
+function _getFirst(set)
+    for k, v in pairs(set) do
+        return k, v
+    end
+end
+
+function _waitForEnteringObjects()
+    while _getFirst(_guidAwaitingDestroySet) do
+        coroutine.yield(0)
+    end
+end
+
+function _getObjectToMove()
+    local guid = _getFirst(_guidPendingMoveSet)
+    if guid then
+        _guidPendingMoveSet[guid] = nil
+        local pos = self.getPosition() + vector(0, 5, 0)
+        local object = self.takeObject({
+            position          = pos,
+            rotation          = { x = 0, y = 0, z = 180 },
+            smooth            = false,
+            guid              = guid,
+        })
+        assert(object)
+        return object
+    end
+end
+
+function processMoveObjectsCoroutine()
+    resetDiscardIndex()
+
+    while true do
+        _waitForEnteringObjects()
+        coroutine.yield(0)
+
+        local object = _getObjectToMove()
+        if not object then
+            break
+        end
+        object.setLock(true)
+        coroutine.yield(0)
+        object.setLock(false)
+
+        -- Keep moving until done or fail.
+        while true do
+            local success = moveAtLeastPartially(object)
+            if success == true then
+                break
+            elseif success == false then
+                self.putObject(object)
+                break
+            elseif type(success) == 'userdata' then
+                object = success
+            else
+                error('bad type')
+            end
+            object.setLock(true)
+            coroutine.yield(0)
+            object.setLock(false)
+        end
+        coroutine.yield(0)
+    end
+
+    printAndResetReportTrashed()
+    _coroutineStartTime = false
+    return 1
+end
+
+function maybeStartProcessMoveObjectsCouroutine()
+    local now = Time.time
+    if (not _coroutineStartTime) or (now - _coroutineStartTime > 10) then
+        _coroutineStartTime = now
+        startLuaCoroutine(self, 'processMoveObjectsCoroutine')
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function onObjectEnterContainer(container, enterObject)
+    if container == self and canMove(enterObject) then
+        _guidAwaitingDestroySet[enterObject.getGUID()] = true
+        maybeStartProcessMoveObjectsCouroutine()
+    end
+end
+
+function onObjectLeaveContainer(container, leaveObject)
+    if container == self then
+        -- Not normally needed, but just in case an object moves by non-self means.
+        local guid = leaveObject.getGUID()
+        _guidAwaitingDestroySet[guid] = nil
+        _guidPendingMoveSet[guid] = nil
+    end
+end
+
+function onObjectDestroy(dyingObject)
+    local guid = dyingObject.getGUID()
+    if _guidAwaitingDestroySet[guid] then
+        _guidAwaitingDestroySet[guid] = nil
+        _guidPendingMoveSet[guid] = true
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

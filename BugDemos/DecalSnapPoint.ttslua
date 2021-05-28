@@ -1,0 +1,23 @@
+local DECAL_IMAGE = 'http://cloud-3.steamusercontent.com/ugc/1664608586482116921/F85FD87CF8A6DFE53848109CAE961533AE05A7B7/'
+
+function onObjectSpawn(object)
+    if object.type == 'Card' then
+        object.setDecals({
+            {
+                name = 'demo',
+                url = DECAL_IMAGE,
+                position = { x = 0, y = 0.4, z = 0 },
+                rotation = { x = 90, y = 180, z = 0 },
+                scale = { x = 0.6, y = 0.6, z = 1 },
+
+            },
+            {
+                name = 'demo',
+                url = DECAL_IMAGE,
+                position = { x = 0, y = -0.4, z = 0 },
+                rotation = { x = 270, y = 180, z = 0 },
+                scale = { x = 0.6, y = 0.6, z = 1 },
+            }
+        })
+    end
+end

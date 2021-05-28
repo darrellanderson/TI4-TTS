@@ -1,0 +1,11 @@
+Color Switcher:
+- Fix card/deck names for pink and brown, prevented switching to them.
+
+Build Area:
+- Allow decks as well as card (looks inside decks, Alister suggestion).
+
+Autofill MultiRoller:
+- Fix PDS2 handling for some Blue Space factions.
+
+Strategy Cards:
+- Only return tokens in the table area (one Blue Space faction places them on foreign faction sheets).

@@ -1,0 +1,863 @@
+--- SCPT 2021 Tournament Draft
+-- (script) @author Darrell
+-- #include <~/CrLua/Objects/SCPT_2021_Draft>
+-- https://cdn.discordapp.com/attachments/535582218077339659/812945113884917770/unknown.png
+--
+-- ╔═══════════════╗
+-- ║ SLICES (6)    ║
+-- ╠═══════════════╣
+-- ║ POOL (12)     ║
+-- ╠═══════════════╣
+-- ║ NOMINATED (6) ║
+-- ╠═══════════════╣
+-- ║ LIMBO (12)    ║
+-- ╠═══════════════╣
+-- ║ BAN (6)       ║
+-- ╚═══════════════╝
+--
+-- 1. Randomize draft order.
+-- 2. Deal 4 factions to each player.
+-- 3. Simultaneously place 1 into POOL.
+-- 4. Simultaneously place 1 into BAN.
+-- 5. Move remaining 12 into LIMBO.
+-- 6. In draft order, players either:
+-- - Move 1 from LIMBO to NOMINATED.
+-- - Move 1 from NOMINATED to POOL.
+-- 7. In snake order, players select either:
+-- - Faction from POOL.
+-- - Slice from SLICES.
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _gameDataHelper = getHelperClient('TI4_GAME_DATA_HELPER')
+local _setupHelper = getHelperClient('TI4_SETUP_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local DRAFT_SELECTION_MAT_NAME = 'SCPT 2021 Tournament Draft Selection'
+local DRAFT_SELECTION_MAT_DESC = "Leave this in the player area.\n\nPlace this player's selected faction and slice selection here.\n\nWhen finished click the final button on the main draft mat to move players."
+local DRAFT_SELECTION_MAT_IMG = 'http://cloud-3.steamusercontent.com/ugc/1765946078498473751/3DF7E8F0188A2F9BFC767480B9AFE3172BAE6B84/'
+
+local CLOCK_SECONDS = 8 * 3600
+
+local MAPS = {
+    ['2021 Prelim'] = {
+        mapString = '26 61 64 59 31 63 76 45 69 41 65 68 72 79 66 80 36 67 0 73 47 0 74 46 0 37 49 0 30 50 0 29 40 0 70 48',
+        sliceNames = {
+            White = 'Girls’\nNight\nOut',
+            Blue = 'Miller\nHigh\nSlice',
+            Purple = 'Mobile\nSlice\nGundam',
+            Yellow = 'Down\nWith The\nSliceness',
+            Red = 'Rigely\nField',
+            Green = 'Las\nVegas',
+        }
+    },
+    ['2021 Semifinals'] = {
+    },
+    ['2021 Finals'] = {
+    }
+}
+
+local _snapPointsGrid = false
+local _draftOrder = false
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    local function lookAtMe(playerColor)
+        Player[playerColor].lookAt({
+            position = self.getPosition(),
+            pitch    = 90,
+            yaw      = self.getRotation().y + 180,
+            distance = 30
+        })
+    end
+    self.addContextMenuItem('Look at me', lookAtMe)
+
+    for name, map in pairs(MAPS) do
+        local function setMapString(playerColor)
+            if map.mapString then
+                local mapTool = _findByName('TI4 Map Tool', 'Tile')
+                if mapTool then
+                    mapTool.call('setMapString', map.mapString)
+                end
+            else
+                printToColor('The "' .. name .. '" map is not available', playerColor, 'Yellow')
+            end
+        end
+        self.addContextMenuItem('Map: ' .. name, function(playerColor) setMapString(playerColor) end)
+    end
+
+    local buttons = {
+        {
+            label = 'Randomize draft\norder, place slice\ntokens',
+            onClick = 'randomizeDraft',
+            tooltip = false,
+        },
+        {
+            label = 'Deal 4 factions\nto each player',
+            onClick = 'deal4Factions',
+            tooltip = false,
+        },
+        {
+            label = 'Players\nsimultaneously\nplace 1 faction\ninto POOL',
+            onClick = false,
+            tooltip = false,
+        },
+        {
+            label = 'Players\nsimultaneously\nplace 1 faction\ninto BAN',
+            onClick = false,
+            tooltip = false,
+        },
+        {
+            label = 'Move remaining\n12 factions\ninto LIMBO',
+            onClick = 'moveRemainingFactionsToLimbo',
+            tooltip = 'Moves faction tokens from player hands to the LIMBO area',
+        },
+        {
+            label = 'Draft order move:\nLIMBO to NOMINATED\nor\nNOMINATED to POOL.',
+            onClick = 'assignTurnOrderDraft',
+            tooltip = 'Assign turn order to draft order',
+        },
+        {
+            label = 'Snake select:\nfaction from POOL\nor\nslice from SLICES',
+            onClick = 'assignTurnOrderReverse',
+            tooltip = 'Reverse turn order; do this after the first snake segment',
+        },
+        {
+            label = 'Move players\ninto slices,\nrandomize speaker,\nstart timer',
+            onClick = 'movePlayersIntoSlices',
+            tooltip = 'FIRST place chosen slice and faction token in CURRENT player areas, click to move players to their selected colors/factions'
+        }
+    }
+
+    local x0 = -15.89
+    local y = 0.42
+    local z0 = -11.2
+    local dx = 4.54
+    local dz = 3.2
+
+    _snapPointsGrid = {}
+    for row = 0, 7 do
+        local snapPointsRow = {}
+        for col = 0, 7 do
+            table.insert(snapPointsRow, {
+                position = {
+                    x = -(x0 + col * dx),
+                    y = 0,
+                    z = z0 + row * dz
+                }
+            })
+        end
+        table.insert(_snapPointsGrid, snapPointsRow)
+    end
+
+    self.clearButtons()
+    for i, button in ipairs(buttons) do
+        self.createButton({
+            click_function = button.onClick or 'doNothing',
+            function_owner = self,
+            label          = i .. '. ' .. assert(button.label),
+            position       = {
+                x = x0,
+                y = y,
+                z = z0 + dz * (i - 1),
+            },
+            width          = button.onClick and 1900 or 0,
+            height         = button.onClick and 1200 or 0,
+            font_size      = 200,
+            font_color     = button.onClick and 'Black' or 'White',
+            tooltip        = button.tooltip or button.label
+        })
+    end
+
+    self.setVectorLines({
+        {
+            points         = {
+                {
+                    x = -x0,
+                    y = y - 0.01,
+                    z = z0 - dz / 2,
+                },
+                {
+                    x = -x0,
+                    y = y - 0.01,
+                    z = z0 + dz * 7.5,
+                },
+            },
+            color          = { r = 0.1, g = 0.1, b = 0.1, a = 0.98 },
+            thickness      = dx,
+            loop           = false,
+            square         = true,
+        },
+    })
+end
+
+function doNothing()
+end
+
+-------------------------------------------------------------------------------
+
+function randomizeDraft()
+    if not _setupHelper.getPoK() then
+        broadcastToAll('SCPT draft: please do setup with PoK enabled first', 'Red')
+        return
+    end
+
+    self.setLock(true)
+
+    -- Generate random draft order.
+    local colors = _zoneHelper.zones()
+    _draftOrder = {}
+    math.randomseed(os.time())
+    while #colors > 0 do
+        local color =  table.remove(colors, math.random(#colors))
+        table.insert(_draftOrder, color)
+    end
+    Turns.enable = false
+    Turns.type = 2
+    Turns.reverse_order = false
+    Turns.order = _draftOrder
+    Turns.turn_color = _draftOrder[1]
+    Turns.enable = true
+    printToAll('SCPT draft order: ' .. table.concat(_draftOrder, ', '), 'Yellow')
+
+    -- Place slice tokens (in draft order to make it obvious).
+    local sliceBag = _findByName('Randomize Seats', 'Bag')
+    if not sliceBag then
+        broadcastToAll('Missing "Randomize Seats" bag, aborting', 'Red')
+        return
+    end
+    local row = _snapPointsGrid[2]
+    local colorToPos = {}
+    for i, color in ipairs(_draftOrder) do
+        local p = assert(row[i + 2].position)
+        p = self.positionToWorld(p) + vector(0, 3, 0)
+        colorToPos[color] = p
+    end
+    local colorToSliceToken = {}
+    for _, entry in ipairs(sliceBag.getObjects()) do
+        local p = colorToPos[entry.name]
+        if p then
+            local sliceToken = sliceBag.takeObject({
+                position          = p,
+                rotation          = self.getRotation(),
+                smooth            = true,
+                guid              = entry.guid
+            })
+            colorToPos[entry.name] = nil  -- consume
+            colorToSliceToken[entry.name] = sliceToken
+        end
+    end
+
+    -- If any colorToPos remain the token was not found.
+    for color, pos in pairs(colorToPos) do
+        -- Is the token on the table?
+        local sliceToken = _findByName(color, 'GoPiece')
+        if sliceToken then
+            local collide = false
+            local fast = false
+            sliceToken.setPositionSmooth(pos, collide, fast)
+            sliceToken.setRotationSmooth(self.getRotation(), collide, fast)
+        else
+            sliceToken = spawnObject({
+                type              = 'go_game_piece_white',
+                position          = pos,
+                rotation          = self.getRotation(),
+                scale             = { x = 2.5, y = 2.5, z = 2.5 },
+                sound             = false,
+                snap_to_grid      = false
+            })
+            sliceToken.setName(color)
+            sliceToken.setColorTint(color)
+            sliceToken.use_hands = true
+            sliceToken.use_snap_points = true
+            sliceToken.use_grid = false
+        end
+        colorToSliceToken[color] = sliceToken
+    end
+
+    -- Create a faction selection mat in each player area.
+    _deleteDraftSelectionMats()
+    for _, color in ipairs(_draftOrder) do
+        _spawnDraftSelectionMat(color)
+    end
+
+    -- Flatten slice tokens.
+    for _, sliceToken in pairs(colorToSliceToken) do
+        local scale = sliceToken.getScale()
+        sliceToken.setScale({ x = scale.x, y = 0.5, z = scale.z })
+    end
+
+    -- If map string is empty add prelim.
+    local mapString = false
+    local mapTool = _findByName('TI4 Map Tool', 'Tile')
+    if mapTool then
+        mapString = mapTool.call('getMapString')
+        if string.len(mapString) == 0 then
+            mapString = MAPS['2021 Prelim'].mapString
+            mapTool.call('setMapString', mapString)
+        end
+    end
+
+    local mapSliceNames = false
+    for _, map in pairs(MAPS) do
+        if mapString and map.mapString == string.upper(mapString) then
+            mapSliceNames = map.sliceNames
+        end
+    end
+    if mapSliceNames then
+        -- Assign slice names to slice tokens (if given).
+        for color, sliceName in pairs(mapSliceNames or {}) do
+            local sliceToken = colorToSliceToken[color]
+            if sliceToken then
+                sliceToken.clearButtons()
+                sliceToken.createButton({
+                    click_function = 'doNothing',
+                    function_owner = self,
+                    label          = string.upper(sliceName),
+                    position       = { x = 0, y = 0.19, z = 0 },
+                    rotation       = { x = 0, y = 0, z = 0 },
+                    scale          = { x = 1, y = 1, z = 1 },
+                    width          = 0,
+                    height         = 0,
+                    font_size      = 80,
+                    font_color     = { r = 0, g = 0, b = 0}
+                })
+            end
+
+            local homeSystemTile = _findByName('Home System Location (' .. color .. ')', 'Generic')
+            if homeSystemTile then
+                homeSystemTile.clearButtons()
+                homeSystemTile.createButton({
+                    click_function = 'doNothing',
+                    function_owner = self,
+                    label          = string.upper(sliceName),
+                    position       = { x = 0, y = 0.21, z = 0 },
+                    rotation       = { x = 0, y = 0, z = 0 },
+                    scale          = { x = 1, y = 1, z = 1 },
+                    width          = 0,
+                    height         = 0,
+                    font_size      = 400,
+                    font_color     = { r = 0, g = 0, b = 0}
+                })
+
+            end
+        end
+    end
+end
+
+function deal4Factions()
+    if not _setupHelper.getPoK() then
+        broadcastToAll('SCPT draft: please do setup with PoK enabled first', 'Red')
+        return
+    end
+
+    local factionBag = _findByName('Pick a Faction to Play', 'Bag')
+    if not factionBag then
+        broadcastToAll('Missing "Pick a Faction to Play" bag, aborting', 'Red')
+        return
+    end
+    for _, color in ipairs(_zoneHelper.zones()) do
+        factionBag.deal(4, color)
+    end
+end
+
+function assignTurnOrderDraft()
+    if not _setupHelper.getPoK() then
+        broadcastToAll('SCPT draft: please do setup with PoK enabled first', 'Red')
+        return
+    end
+    if not _draftOrder then
+        broadcastToAll('SCPT draft: please click "Randomize draft" first', 'Red')
+        return
+    end
+
+    Turns.enable = false
+    Turns.order = _draftOrder
+    Turns.turn_color = _draftOrder[1]
+    Turns.enable = true
+    printToAll('SCPT draft order: ' .. table.concat(_draftOrder, ', '), 'Yellow')
+end
+
+function assignTurnOrderReverse()
+    if not _setupHelper.getPoK() then
+        broadcastToAll('SCPT draft: please do setup with PoK enabled first', 'Red')
+        return
+    end
+    if not _draftOrder then
+        broadcastToAll('SCPT draft: please click "Randomize draft" first', 'Red')
+        return
+    end
+
+    Turns.reverse_order = not Turns.reverse_order
+    local message = Turns.reverse_order and 'reverse' or 'forward'
+    printToAll('SCPT snake order: ' .. message, 'Yellow')
+end
+
+function moveRemainingFactionsToLimbo()
+    if not _setupHelper.getPoK() then
+        broadcastToAll('SCPT draft: please do setup with PoK enabled first', 'Red')
+        return
+    end
+
+    local factionTokens = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        for i = 1, player.getHandCount() do
+            for _, object in ipairs(player.getHandObjects(i)) do
+                if string.match(object.getName(), ' Faction Token$') then
+                    table.insert(factionTokens, object)
+                end
+            end
+        end
+    end
+    local slots = {}
+    for row = 6, 7 do
+        for col = 3, 8 do
+            local p = _snapPointsGrid[row][col].position
+            p = self.positionToWorld(p) + vector(0, 1, 0)
+            if not _factionTokenAtPosition(p) then
+                table.insert(slots, p)
+            end
+        end
+    end
+    for i, factionToken in ipairs(factionTokens) do
+        local p = slots[i]
+        if p then
+            factionToken.setPosition(p)
+            factionToken.setRotation(self.getRotation())
+        end
+    end
+end
+
+function movePlayersIntoSlices()
+    if not _setupHelper.getPoK() then
+        broadcastToAll('SCPT draft: please do setup with PoK enabled first', 'Red')
+        return
+    end
+
+    local errors = false
+
+    -- Find slice and faction tokens.
+    local colorSet = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        colorSet[color] = true
+    end
+    local colorToFactionToken = {}
+    local colorToSliceToken = {}
+    local factionTokensBag = false
+    local sliceTokensBag = false
+    local speakerToken = false
+    local clock = false
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if object.tag == 'Card' and string.match(name, ' Faction Token$') then
+            local zone = _zoneHelper.zoneFromPosition(object.getPosition())
+            if zone then
+                if colorToFactionToken[zone] then
+                    errors = errors or {}
+                    table.insert(errors, zone .. ' has multiple faction tokens')
+                else
+                    colorToFactionToken[zone] = object
+                end
+            end
+        end
+        if object.tag == 'GoPiece' and colorSet[name] then
+            local zone = _zoneHelper.zoneFromPosition(object.getPosition())
+            if zone then
+                if colorToSliceToken[zone] then
+                    errors = errors or {}
+                    table.insert(errors, zone .. ' has multiple slice tokens')
+                else
+                    colorToSliceToken[zone] = object
+                end
+            end
+        end
+        if object.tag == 'Bag' and name == 'Pick a Faction to Play' then
+            factionTokensBag = object
+        end
+        if object.tag == 'Bag' and name == 'Randomize Seats' then
+            sliceTokensBag = object
+        end
+        if object.tag == 'Generic' and name == 'Speaker Token' then
+            speakerToken = object
+        end
+        if object.tag == 'Clock' then
+            clock = object
+        end
+    end
+    for _, color in ipairs(_zoneHelper.zones()) do
+        if not colorToFactionToken[color] then
+            errors = errors or {}
+            table.insert(errors, color .. ' does not have a faction token')
+        end
+        if not colorToSliceToken[color] then
+            errors = errors or {}
+            table.insert(errors, color .. ' does not have a slice token')
+        end
+    end
+    assert(factionTokensBag, 'faction tokens bag')
+    assert(sliceTokensBag, 'slice tokens bag')
+    assert(speakerToken, 'speaker token')
+
+    -- At this point each player area has exactly one faction and slice token.
+    -- Abort if any problems.
+    if errors then
+        local message = 'Error: ' .. table.concat(errors, ', ')
+        broadcastToAll(message, 'Red')
+        return
+    end
+
+    -- Move the players to grey so seats are empty.
+    local colorToPlayer = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        colorToPlayer[player.color] = player
+    end
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local player = colorToPlayer[color]
+        if player then
+            player.changeColor('Grey')
+        end
+    end
+
+    -- Move the players and select faction.
+    for i, color in ipairs(_zoneHelper.zones()) do
+        local player = colorToPlayer[color]
+        local factionToken = assert(colorToFactionToken[color])
+        local sliceToken = assert(colorToSliceToken[color])
+
+        local playerName = player and player.steam_name or '<none>'
+        local factionName = string.match(factionToken.getName(), '^(.*) Faction Token')
+        local sliceColor = sliceToken.getName()
+        local message = {
+            '(' .. i .. ')',
+            playerName,
+            'drafted',
+            factionName,
+            'in slice',
+            sliceColor
+        }
+        message = table.concat(message, ' ')
+        local messageColor = sliceToken.getName()
+        printToAll(message, messageColor)
+
+        -- Wait to act both to spread load and keep draft messages together.
+        local function delayedApply()
+            if player then
+                player.changeColor(sliceColor)
+            end
+            _selectFaction(sliceColor, factionToken.getName())
+            factionTokensBag.putObject(factionToken)
+            sliceToken.clearButtons()
+            sliceTokensBag.putObject(sliceToken)
+        end
+        Wait.frames(delayedApply, i)
+    end
+
+    -- Other cleanup.
+    _deleteDraftSelectionMats()
+
+    -- Assign speaker.
+    math.randomseed(os.time())
+    local colors = _zoneHelper.zones()
+    local speaker = colors[math.random(1, #colors)]
+    broadcastToAll('SCPT 2021 Tournament draft: assigning speaker to ' .. speaker, 'Yellow')
+    local zoneAttrs = _zoneHelper.zoneAttributes(speaker)
+    local pos = {
+        x = zoneAttrs.center.x,
+        y = zoneAttrs.center.y + 5,
+        z = zoneAttrs.center.z + 6 * (zoneAttrs.center.z < 0 and 1 or -1)
+    }
+    local rot = {
+        x = 0,
+        y = zoneAttrs.rotation.y,
+        z = 0
+    }
+    local collide = false
+    local fast = false
+    speakerToken.setPositionSmooth(pos, collide, fast)
+    speakerToken.setRotationSmooth(rot, collide, fast)
+
+    Turns.enable = false
+    Turns.reverse_order = false
+
+    -- Start clock!
+    if clock then
+        clock.setLock(true)
+        clock.Clock.setValue(CLOCK_SECONDS)
+        clock.Clock.pauseStart()
+        broadcastToAll('SCPT 2021 Tournament draft: complete, starting clock', 'Yellow')
+    end
+
+    startLuaCoroutine(self, '_addExtraGameDataCoroutine')
+end
+
+-------------------------------------------------------------------------------
+
+function _findByName(name, tag)
+    assert(type(name) == 'string' and type(tag) == 'string')
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == tag and object.getName() == name then
+            return object
+        end
+    end
+end
+
+function _deleteDraftSelectionMats()
+    local draftSelectionMats = {}
+    local deletedItemsBag = false
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if name == DRAFT_SELECTION_MAT_NAME then
+            table.insert(draftSelectionMats, object)
+        end
+        if object.tag == 'Bag' and name == 'TI4 Deleted Items' then
+            deletedItemsBag = object
+        end
+    end
+    assert(deletedItemsBag, 'deleted items bag')
+    for _, draftSelectionMat in ipairs(draftSelectionMats) do
+        deletedItemsBag.call('ignoreGuid', draftSelectionMat.getGUID())
+        destroyObject(draftSelectionMat)
+    end
+end
+
+function _spawnDraftSelectionMat(color)
+    assert(type(color) == 'string')
+    local zoneAttrs = assert(_zoneHelper.zoneAttributes(color))
+    local pos = {
+        x = zoneAttrs.center.x,
+        y = zoneAttrs.center.y + 2,
+        z = zoneAttrs.center.z + 4 * (zoneAttrs.center.z < 0 and 1 or -1)
+    }
+    local rot = {
+        x = 0,
+        y = zoneAttrs.rotation.y,
+        z = 0
+    }
+    local scale = {
+        x = 5,
+        y = 1,
+        z = 5
+    }
+
+    local params = {
+        image = DRAFT_SELECTION_MAT_IMG,
+        type = 3,  -- rounded
+        thickness = 0.4
+    }
+    local tile = spawnObject({
+        type              = 'Custom_Tile',
+        position          = pos,
+        rotation          = rot,
+        scale             = scale,
+        callback_function = function(object) object.setLock(true) end,
+        sound             = false,
+        snap_to_grid      = false,
+        params            = params,
+    })
+    tile.setCustomObject(params)
+    tile.setName(DRAFT_SELECTION_MAT_NAME)
+    tile.setDescription(DRAFT_SELECTION_MAT_DESC)
+    tile.use_grid = false
+    tile.use_snap_points = false
+
+    tile.setSnapPoints({
+        {
+            position         = { x = -0.5, y = params.thickness + 0.01, z = 0.5 },
+            rotation         = { x = 0, y = 0, z = 0 },
+            rotation_snap    = true,
+        },
+        {
+            position         = { x = 0.5, y = params.thickness + 0.01, z = 0.5 },
+            rotation         = { x = 0, y = 0, z = 0 },
+            rotation_snap    = true,
+        },
+    })
+
+    local playerName = color
+    for _, player in ipairs(Player.getPlayers()) do
+        if player.color == color then
+            playerName = player.steam_name
+            break
+        end
+    end
+    tile.createButton({
+        click_function = 'doNothing',
+        function_owner = self,
+        label          = playerName,
+        position       = { x = 0, y = params.thickness + 0.01, z = -0.65 },
+        width          = 0,
+        height         = 0,
+        font_size      = 120,
+        font_color     = 'Yellow',
+    })
+    -- tile.createButton({
+    --     click_function = 'doNothing',
+    --     function_owner = self,
+    --     label          = 'FACTION',
+    --     position       = { x = -0.5, y = params.thickness + 0.01, z = 0.5 },
+    --     width          = 300*1.3,
+    --     height         = 200*1.3,
+    --     font_size      = 100,
+    --     font_color     = 'Black',
+    -- })
+    -- tile.createButton({
+    --     click_function = 'doNothing',
+    --     function_owner = self,
+    --     label          = 'SLICE',
+    --     position       = { x = 0.5, y = params.thickness + 0.01, z = 0.5 },
+    --     width          = 300*1.3,
+    --     height         = 200*1.3,
+    --     font_size      = 100,
+    --     font_color     = 'Black',
+    -- })
+end
+
+function _factionTokenAtPosition(position)
+    local hits = Physics.cast({
+        origin       = position,
+        direction    = { x = 0, y = -1, z = 0 },
+        type         = 3,  -- box
+        size         = { x = 0.1, y = 4, z = 0.1 },
+    })
+    for _, hit in ipairs(hits or {}) do
+        if hit.hit_object.tag == 'Card' and string.match(hit.hit_object.getName(), ' Faction Token$') then
+            return hit.hit_object
+        end
+    end
+end
+
+function _selectFaction(color, factionTokenName)
+    assert(type(color) == 'string' and type(factionTokenName) == 'string')
+
+    local factionSelector = false
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if name == 'Faction Selector' then
+            local zone = _zoneHelper.zoneFromPosition(object.getPosition())
+            if zone == color then
+                factionSelector = object
+                break
+            end
+        end
+    end
+    assert(factionSelector, 'missing faction selector for ' .. color)
+
+    -- The faction selector has its own faction ids, sigh.
+    local FACTION_ID_AND_TOKEN_NAMES = {
+        { id = 'Arborec', tokenName = 'Arborec' },
+        { id = 'Letnev', tokenName = 'Barony of Letnev' },
+        { id = 'Saar', tokenName = 'Clan of Saar' },
+        { id = 'Muaat', tokenName = 'Embers of Muaat' },
+        { id = 'Hacan', tokenName = 'Emirates of Hacan' },
+        { id = 'Sol', tokenName = 'Federation of Sol' },
+        { id = 'Creuss', tokenName = 'Ghosts of Creuss' },
+        { id = 'L1Z1X', tokenName = 'L1Z1X Mindnet' },
+        { id = 'Mentak', tokenName = 'Mentak Coalition' },
+        { id = 'Naalu', tokenName = 'Naalu Collective' },
+        { id = 'Nekro', tokenName = 'Nekro Virus' },
+        { id = 'Sardakk', tokenName = "Sardakk N'orr", },
+        { id = 'JolNar', tokenName = 'Universities of Jol-Nar' },
+        { id = 'Winnu', tokenName = 'Winnu' },
+        { id = 'Xxcha', tokenName = 'Xxcha Kingdom' },
+        { id = 'Yin', tokenName = 'Yin Brotherhood' },
+        { id = 'Yssaril', tokenName = 'Yssaril Tribes' },
+        { id = 'Argent', tokenName = 'Argent Flight', pok = true },
+        { id = 'Cabal', tokenName = "Vuil'raith Cabal", pok = true },
+        { id = 'Empyrean', tokenName = 'Empyrean', pok = true },
+        { id = 'Mahact', tokenName = 'Mahact Gene-Sorcerers', pok = true },
+        { id = 'Nomad', tokenName = 'Nomad', pok = true },
+        { id = 'NRA', tokenName = 'Naaz-Rokha Alliance', pok = true },
+        { id = 'Titans', tokenName = 'Titans of Ul', pok = true },
+    }
+    local id = false
+    local tokenName = string.match(factionTokenName, '^(.*) Faction Token$')
+    assert(tokenName, 'bad token name "' .. tokenName .. '"')
+    for _, entry in ipairs(FACTION_ID_AND_TOKEN_NAMES) do
+        if entry.tokenName == tokenName then
+            id = entry.id
+            break
+        end
+    end
+    assert(id, 'missing id for "' .. tokenName .. '"')
+
+    local clickFunction = 'selectFaction_' .. id
+    factionSelector.call(clickFunction)
+end
+
+-------------------------------------------------------------------------------
+
+function _addExtraGameDataCoroutine()
+    local function getFactionTokenPositions(rows)
+        local result = {}
+        for _, row in ipairs(rows) do
+            for col = 3, 8 do
+                local p = _snapPointsGrid[row][col].position
+                p = self.positionToWorld(p)
+                table.insert(result, p)
+            end
+        end
+        return result
+    end
+    local function getFactionNameFromPosition(position)
+        local card = _factionTokenAtPosition(position)
+        local name = card and card.getName()
+        return name and string.match(name, '^(.*) Faction Token$')
+    end
+    local function getFactionNamesWithYields(rows)
+        local result = {}
+        for _, position in ipairs(getFactionTokenPositions(rows)) do
+            local factionName = getFactionNameFromPosition(position)
+            if factionName then
+                table.insert(result, factionName)
+            end
+            coroutine.yield(0)
+        end
+        return result
+    end
+
+    local extraDataValue = {
+        pool = getFactionNamesWithYields({ 3, 4 }),
+        nominated = getFactionNamesWithYields({ 5 }),
+        limbo = getFactionNamesWithYields({ 6, 7 }),
+        banned = getFactionNamesWithYields({ 8 }),
+    }
+    -- for k, v in pairs(extraDataValue) do
+    --     print('xxx ' .. k .. ' ' .. table.concat(v, ', '))
+    -- end
+
+    -- "addExtraData" is a newer method, silently fail if not there.
+    local gdh = _findByName('TI4_GAME_DATA_HELPER', 'Block')
+    if gdh and gdh.getVar('addExtraData') then
+        _gameDataHelper.addExtraData({
+            name = 'SCPT_2021_Tournament_Draft',
+            value = extraDataValue
+        })
+    end
+
+    return 1
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

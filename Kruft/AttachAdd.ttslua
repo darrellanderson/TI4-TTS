@@ -1,0 +1,129 @@
+--- Attach a new planet to a system.
+-- @author Darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+
+local PLANET = { name = 'Phantasmagoria', resources = 1, influence = 2 }
+
+-------------------------------------------------------------------------------
+
+local function _copyTable(t)
+    if t and type(t) == 'table' then
+        local copy = {}
+        for k, v in pairs(t) do
+            copy[k] = type(v) == 'table' and _copyTable(v) or v
+        end
+        t = copy
+    end
+    return t
+end
+
+local function _attach(playerColor)
+    local system = _systemHelper.systemFromPosition(self.getPosition())
+    if system then
+        if system and system.planets and #system.planets > 0 then
+            if playerColor then
+                printToColor('Cannot attach ' .. self.getName() .. ' to a system with planets', playerColor, 'Yellow')
+            end
+            return
+        end
+        printToAll('Attaching ' .. self.getName() .. ' to ' .. system.string, 'Yellow')
+
+        -- Add planet to system.
+        system = _copyTable(system)
+        system.planets = system.planets or {}
+        table.insert(system.planets, PLANET)
+        _systemHelper.injectSystem(system)
+
+        -- Move to new planet position (might not be center if there's a wormhole).
+        -- Re-fetch the system table to get new planet position.
+        system = _systemHelper.systemFromGuid(system.guid)
+        local systemObject = getObjectFromGUID(system.guid)
+        local p = false
+        for i, planet in ipairs(system.planets or {}) do
+            if planet.name == PLANET.name then
+                p = systemObject.positionToWorld(planet.position)
+            end
+        end
+        p.y = p.y + 0.1
+        local collide = false
+        local fast = true
+        self.setPositionSmooth(p, collide, fast)
+
+        -- Lock.
+        local function delayedLock()
+            if not self.held_by_color then
+                local p2 = self.getPosition()
+                local dSq = (p2.x - p.x) ^ 2 + (p2.z - p.z) ^ 2
+                if dSq < 1 then
+                    self.setLock(true)
+                end
+            end
+        end
+        Wait.time(delayedLock, 2)
+    end
+end
+
+local function _detach(playerColor)
+    local system = _systemHelper.systemFromPosition(self.getPosition())
+    if system then
+        -- Remove planet from system.
+        local foundPlanet = false
+        for i, planet in ipairs(system.planets or {}) do
+            if planet.name == PLANET.name then
+                foundPlanet = true
+                system = _copyTable(system)
+                table.remove(system.planets, i)
+                if #system.planets == 0 then
+                    system.planets = nil
+                end
+                break
+            end
+        end
+        if foundPlanet then
+            printToAll('Detaching ' .. self.getName() .. ' from ' .. system.string, 'Yellow')
+            _systemHelper.injectSystem(system)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    -- Reattach when loading a saved game.
+    _attach()
+end
+
+function onDrop(playerColor)
+    _attach(playerColor)
+end
+
+function onPickUp(playerColor)
+    _detach(playerColor)
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

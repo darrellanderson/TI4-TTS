@@ -1,0 +1,6 @@
+v33:
+- Fix exploration drawing multiple copies of the gamma wormhole token.
+- Fix build area tool production values for infantry and fighters when Yin and Naalu commanders are active (and verify stacks correctly with "Regulated Conscription").
+- Fix "Tekklar Legion" to only apply to the correct player (and Sardakk, if they are participating in the fight).
+- Franken Box now looks inside "Faction Pack" bags on the table as well as main "Factions" bag (e.g. Blue Space).
+- Milty draft tool now includes the how-to-use image on the back (alt-shift view).

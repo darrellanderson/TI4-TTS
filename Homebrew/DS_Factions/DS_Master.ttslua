@@ -1,0 +1,1130 @@
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-- DS Master
+-- Faction attributes:
+-- - key : matches faction sheet name.
+-- - tokenName : "tokenName Owner Token", etc.
+-- - frankenName : "frankenName Starting Units" tile, etc.
+-- - home : home system tile number.
+-- - startingUnits : unit name to number (use underscore for Space_Dock, War_Sun).
+-- - startingTech : list of tech names.
+-- - flagship : flagship name.
+-- - flagshipDescription : added to tooltip.
+-- - abilities : list of faction ability names (must match franken tiles).
+-- - units : list of all unit overrides and upgrades associated with faction (excluding flagship).
+local FACTIONS = {
+    ['The Veldyr Sovereignty'] = {
+        tokenName = 'Veldyr Sovereignty',
+        frankenName = 'Veldyr',
+        home = 3201,
+        startingUnits = { Dreadnought = 1, Carrier = 1, Fighter = 2, Infantry = 4, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'Dark Energy Tap', 'AI Development Algorithm' },
+        flagship = 'Richtyrian',
+        flagshipDescription = 'When this ship makes a combat roll, it rolls 1 additional die for each round of combat that has been resolved this combat.',
+        abilities = { 'Corporate Entity', 'Targeted Acquisition' },
+        units = { 'Lancer Dreadnought I', 'Lancer Dreadnought II', 'Aurora Stormcaller' },
+        commander = 'Vera Khage',
+        hero = 'Auberon Elyrin',
+        commodities = 4,
+        promissoryNotes = { 'Branch Office - Tax Haven', 'Branch Office - Broadcast Hub', 'Branch Office - Reserve Bank', 'Branch Office - Orbital Shipyard' },
+    },
+    ['The Free Systems Compact'] = {
+        tokenName = 'Free Systems Compact',
+        frankenName = 'Free Systems',
+        home = 3202,
+        startingUnits = { Carrier = 1, Cruiser = 2, Fighter = 2, Infantry = 4, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'Psychoarchaeology' },
+        flagship = 'Vox',
+        flagshipDescription = 'When this unit makes a combat roll, it rolls 1 additional die for each planet in this system of any single trait.',
+        abilities = { 'Rally to the Cause', 'Diplomats', 'Free People' },
+        units = { 'Liberator' },
+        commander = 'President Cyhn',
+        hero = "Count Otto P'may",
+        commodities = 4,
+        promissoryNotes = { 'Broadcast Team' },
+    },
+    ['The Li-Zho Dynasty'] = {
+        tokenName = 'Li-Zho Dynasty',
+        frankenName = 'Li-Zho',
+        home = 3203,
+        startingUnits = { Carrier = 2, Destroyer = 1, Fighter = 3, Infantry = 4, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'Psychoarchaeology', 'Antimass Deflectors' },
+        flagship = 'Silence of Stars',
+        flagshipDescription = 'This unit can only be destroyed by an uncanceled hit being assigned to it.',
+        abilities = { 'Cunning', 'Subterfuge', 'Tacticians' },
+        units = { 'Heavy Bomber I', 'Heavy Bomber II', 'Oro-Zhin Elite' },
+        commander = 'Dume Tathu',
+        hero = 'Khaz-Rin Li-Zho',
+        commodities = 3,
+        promissoryNotes = { 'Trusted Counselor' },
+    },
+    ["The L'Tokk Khrask"] = {
+        tokenName = "L'Tokk Khrask",
+        frankenName = 'Khrask',
+        home = 3204,
+        startingUnits = { Cruiser = 3, Fighter = 1, Infantry = 3, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'Scanlink Drone Network', 'Plasma Scoring' },
+        flagship = 'Splintering Gale',
+        flagshipDescription = 'At the start of a space combat in this system, choose up to 2 non-fighter ships to gain SUSTAIN DAMAGE until the end of combat.',
+        abilities = { 'Lithoids', 'Garden Worlds', 'Meteor Slings' },
+        units = {'Shattered Sky I', 'Shattered Sky II', 'Megalith' },
+        commander = 'Hkot Tokal',
+        hero = 'Vehl Tikar',
+        commodities = 2,
+        promissoryNotes = { 'Stone Speakers' },
+    },
+    ['The Ghemina Raiders'] = {
+        tokenName = 'Ghemina Raiders',
+        frankenName = 'Ghemina',
+        home = 3205,
+        startingUnits = { Carrier = 2, Fighter = 4, Infantry = 4, Space_Dock = 2 },
+        startingTech = { 'Psychoarchaeology', 'Dark Energy Tap' },
+        flagship = 'The Lady & The Lord',
+        flagshipDescription = 'Please clarify which of the two flagship this is unit is here: ',
+        abilities = { 'The Lady & The Lord', 'Rule of Two' },
+        units = { 'Combat Transport I', 'Combat Transport II', 'Jotun' },
+        commander = 'Jarl Vel & Jarl Jotrun',
+        hero = { 'Kantrus, The Lord', 'Korela, The Lady'},
+        commodities = 2,
+        promissoryNotes = { 'Raid Leaders' },
+    },
+    ['The Vaden Banking Clans'] = {
+        tokenName = 'Vaden Banking Clans',
+        frankenName = 'Vaden',
+        home = 3206,
+        startingUnits = { Dreadnought = 1, Carrier = 1, Cruiser = 1, Fighter = 2, Infantry = 3, Space_Dock = 1 },
+        startingTech = { 'Neural Motivator', 'Antimass Deflectors', 'Sarween Tools' },
+        flagship = 'Aurum Vadra',
+        flagshipDescription = 'After this unit produces 1 or more hits during a BOMBARDMENT roll, gain 1 trade good.',
+        abilities = { 'Collateralized Loans', 'Binding Debts' },
+        units = { 'Collector' },
+        commander = 'Komdar Borodin',
+        hero = 'Putriv Sirvonsk',
+        commodities = 3,
+        promissoryNotes = { 'Vaden Handshake' },
+    },
+    ['The Glimmer of Mortheus'] = {
+        tokenName = 'Glimmer of Mortheus',
+        frankenName = 'Mortheus',
+        home = 3207,
+        startingUnits = { Dreadnought = 1, Carrier = 1, Destroyer = 1, Fighter = 2, Infantry = 3, Space_Dock = 1 },
+        startingTech = { 'Dark Energy Tap', 'Sarween Tools' },
+        flagship = 'Particle Sieve',
+        flagshipDescription = 'After another player’s non-fighter ship in this system is destroyed, place 1 of your owner tokens on that unit on your faction sheet.',
+        abilities = { 'Facsimile', 'Unit Assimilation', 'Illusory Presence' },
+        units = { 'Duuban' },
+        commander = 'Komat',
+        hero = 'Bayan',
+        commodities = 3,
+        promissoryNotes = { 'Secrets of the Weave' },
+    },
+    ['The Augurs of Ilyxum'] = {
+        tokenName = 'Augurs of Ilyxum',
+        frankenName = 'Ilyxum',
+        home = 3208,
+        startingUnits = { Dreadnought = 1, Carrier = 1, Destroyer = 1, Fighter = 2, Infantry = 3, Space_Dock = 1 },
+        startingTech = { 'Scanlink Drone Network', 'AI Development Algorithm' },
+        flagship = 'Nemsys',
+        flagshipDescription = 'When this unit makes a combat roll, it rolls 1 additional die for each secret objective you have scored.',
+        abilities = { 'Oracle AI', 'Limited Vision', 'Probability Algorithms' },
+        units = { 'Iledrith' },
+        commander = 'Lachis',
+        hero = 'Atropha',
+        commodities = 3,
+        promissoryNotes = { 'Read the Fates' },
+    },
+    ['The Shipwrights of Axis'] = {
+        tokenName = 'Shipwrights of Axis',
+        frankenName = 'Axis',
+        home = 3209,
+        startingUnits = { Dreadnought = 1, Carrier = 1, Destroyer = 1, Fighter = 2, Infantry = 3, Space_Dock = 1 },
+        startingTech = { 'Sarween Tools', 'AI Development Algorithm' },
+        flagship = 'Bearer of Heavens',
+        flagshipDescription = 'DEPLOY: After you activate a system, you may spend 5 resources to replace 1 of your non-fighter ships in that system with your flagship.',
+        abilities = { 'Military Industrial Complex', 'Arms Dealers' },
+        units = { 'Forgetender' },
+        commander = 'Designer TckVsk',
+        hero = 'Demi-Queen MdcKssK',
+        commodities = 5,
+        promissoryNotes = { 'Industry Secrets' },
+    },
+    ['The Olradin League'] = {
+        tokenName = 'Olradin League',
+        frankenName = 'Olradin',
+        home = 3210,
+        startingUnits = { Carrier = 2, Cruiser = 1, Fighter = 3, Infantry = 4, Space_Dock = 1 },
+        startingTech = { 'Psychoarchaeology', 'Scanlink Drone Network' },
+        flagship = 'Rallypoint',
+        flagshipDescription = 'When you move this ship, apply +1 to the move value of each of your other ships during this tactical action.',
+        abilities = { 'Policies' },
+        units = { 'Exemplar' },
+        commander = 'Knak Half-Ear',
+        hero = 'Pahn Silverfur',
+        commodities = 3,
+        promissoryNotes = { 'Incite Rebellion' },
+    },
+    ['The Myko-Mentori'] = {
+        tokenName = 'Myko-Mentori',
+        frankenName = 'Mori',
+        home = 3211,
+        startingUnits = { Carrier = 2, Cruiser = 1, Fighter = 1, Infantry = 6, Space_Dock = 1 },
+        startingTech = { 'Predictive Intelligence' },
+        flagship = 'Psyclobea Qarnyx',
+        flagshipDescription = 'Once per space combat, when a non-fighter ship in this system is destroyed, you may gain 1 commodity.',
+        abilities = { 'Prescient Memories', 'Necrophase' },
+        units = { 'Amandia Pholdis' },
+        commander = 'Amanita Muscaria',
+        hero = 'Coprinus Comatus',
+        commodities = 1,
+        promissoryNotes = { 'Gift of Insight' },
+    },
+    ['The Tnelis Syndicate'] = {
+        tokenName = 'Tnelis Syndicate',
+        frankenName = 'Tnelis',
+        home = 3212,
+        startingUnits = { Carrier = 1, Destroyer = 2, Fighter = 2, Infantry = 4, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'Neural Motivator', 'Antimass Deflectors', 'Plasma Scoring' },
+        flagship = 'Principia Aneris',
+        flagshipDescription = 'At the start of a round of combat, choose 1 ship in this system, during this combat round, that ship does not roll combat dice.',
+        abilities = { 'Plausible Deniability', 'Information Brokers' },
+        units = { 'Daedalon' },
+        commander = 'Fillipo Rois',
+        hero = 'Turra Sveyar',
+        commodities = 2,
+        promissoryNotes = { 'Plots Within Plots' },
+    },
+    ['The Savages of Cymiae'] = {
+        tokenName = 'Savages of Cymiae',
+        frankenName = 'Cymiae',
+        home = 3213,
+        startingUnits = { Carrier = 1, Cruiser = 2, Fighter = 2, Infantry = 3, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'Neural Motivator', 'AI Development Algorithm' },
+        flagship = 'Reprocessor Alpha',
+        flagshipDescription = 'Your infantry in this system gain SUSTAIN DAMAGE during ground combat.',
+        abilities = { 'Thermionic Confusion', 'Autonetic Memory', 'Cybernetic Madness' },
+        units = { 'Unholy Abomination I', 'Unholy Abomination II', 'Revenant' },
+        commander = 'Koryl Ferax',
+        hero = 'The Voice United',
+        commodities = 3,
+        promissoryNotes = { 'Algorithmic Replication' },
+    },
+    ["Roh'Dhna Mechatronics"] = {
+        tokenName = "Roh'Dhna Mechatronics",
+        frankenName = "Roh'Dhna",
+        home = 3214,
+        startingUnits = { Carrier = 1, Destroyer = 2, Fighter = 3, Infantry = 3, Space_Dock = 1 },
+        startingTech = { 'Psychoarchaeology', 'Sarween Tools' },
+        flagship = "Ky'vir",
+        flagshipDescription = 'After this ship produces 1 or more hits during a round of space combat, you may repair 1 ship you control in this system.',
+        abilities = { 'Industrious', 'Recycled Materials', 'Orbital Foundries' },
+        units = { 'Terrafactory I', 'Terrafactory II', 'Autofabricator' },
+        commander = "B-Unit 205643a",
+        hero = "Roh’Vhin Dhna MK4",
+        commodities = 4,
+        promissoryNotes = { 'Automatons' },
+    },
+    ['The Zelian Purifier'] = {
+        tokenName = 'Zelian Purifier',
+        frankenName = 'Zelian',
+        home = 3215,
+        startingUnits = { Dreadnought = 1, Carrier = 1, Destroyer = 1, Fighter = 1, Infantry = 5, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'Antimass Deflectors', 'AI Development Algorithm' },
+        flagship = 'World-Cracker',
+        flagshipDescription = 'Other players cannot exhaust planets in this system. You may exhaust planets in this system to spend their resources or influence.',
+        abilities = { 'Satellite Breaker', 'Biophobic', 'Paranoia' },
+        units = { 'Impactor I', 'Impactor II', 'Collider' },
+        commander = 'Zelian B',
+        hero = 'Zelian R',
+        commodities = 2,
+        promissoryNotes = { 'Hyperkinetic Ordinance' },
+    },
+    ['The Vaylerian Scourge'] = {
+        tokenName = 'Vaylerian Scourge',
+        frankenName = 'Vaylerian Scourge',
+        home = 3216,
+        startingUnits = { Carrier = 1, Cruiser = 1, Destroyer = 1, Fighter = 3, Infantry = 2, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'Neural Motivator', 'Dark Energy Tap' },
+        flagship = 'Lost Cause',
+        flagshipDescription = 'Other players cannot move ships through or out of this system unless they give you 2 trade goods or commodities.',
+        abilities = { 'Suprise Attack', 'Cargo Raiders', 'Scour' },
+        units = { 'Raider I', 'Raider II', 'Eclipse' },
+        commander = 'Pyndil Gonsuul',
+        hero = 'Dyln Harthuul',
+        commodities = 2,
+        promissoryNotes = { "Clan's Favor" },
+    },
+    ['The Florzen Profiteers'] = {
+        tokenName = 'Florzen Profiteers',
+        frankenName = 'Florzen',
+        home = 3217,
+        startingUnits = { Carrier = 2, Fighter = 4, Infantry = 4, Space_Dock = 1 },
+        startingTech = { 'Neural Motivator', 'Scanlink Drone Network' },
+        flagship = "Man O' War",
+        flagshipDescription = 'Other players cannot play action cards during a space combat in this system.',
+        abilities = { 'Mercenaries', 'Blackmarkets' },
+        units = { 'Corsair I', 'Corsair II', 'Privateer' },
+        commander = 'Quaxdol Junitas',
+        hero = 'Banua Gowen',
+        commodities = 4,
+        promissoryNotes = { 'Underground Market' },
+    },
+    ['The Dih-Mohn Flotilla'] = {
+        tokenName = 'Dih-Mohn Flotilla',
+        frankenName = 'Dih-Mohn',
+        home = 3218,
+        startingUnits = { Dreadnought = 1, Carrier = 1, Destroyer = 2, Fighter = 2, Mech = 1, Infantry = 1, Space_Dock = 1 },
+        startingTech = { 'Scanlink Drone Network', 'Plasma Scoring' },
+        flagship = 'Maximus',
+        flagshipDescription = 'This unit’s PRODUCTION value is equal to the number of different ship types in this system.',
+        abilities = { 'Capital Fleet', 'Flotilla' },
+        units = { 'Aegis I', 'Aegis II', 'Repairitor' },
+        commander = 'Clona Bathru',
+        hero = 'Verrisus Ypru',
+        commodities = 2,
+        promissoryNotes = { 'Combat Drills' },
+    },
+    ['The Celdauri Trade Confederation'] = {
+        tokenName = 'Celdauri Trade Confederation',
+        frankenName = 'Celdauri',
+        home = 3219,
+        startingUnits = { Carrier = 2, Destroyer = 1, Fighter = 4, Infantry = 2, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'Antimass Deflectors', 'Sarween Tools', 'Plasma Scoring' },
+        flagship = 'Supremacy',
+        flagshipDescription = 'You may use the PRODUCTION ability of other player’s spacedocks in this system to produce ships.',
+        abilities = { 'Trade Federation', 'Projection of Power' },
+        units = { 'Trade Port I', 'Trade Port II', 'Minuteman' },
+        commander = 'Henry Storcher',
+        hero = 'Titus Flavius',
+        commodities = 4,
+        promissoryNotes = { 'Trade Alliance' },
+    },
+    ['The Nivyn Star Kings'] = {
+        tokenName = 'Nivyn Star Kings',
+        frankenName = 'Nivyn',
+        home = 3220,
+        startingUnits = { Carrier = 2, Cruiser = 1, Fighter = 2, Infantry = 4, Space_Dock = 1 },
+        startingTech = { 'Dark Energy Tap', 'Plasma Scoring' },
+        flagship = 'Eradica',
+        flagshipDescription = 'When this system is the active system, each adjacent system is a gravity rift.',
+        abilities = { 'Celestial Guides', 'Singularity Point', 'Vehemence' },
+        units = { 'Voidflare Warden I', 'Voidflare Warden II' },
+        commander = 'Thussad Krath',
+        hero = 'Krill Drakkon',
+        commodities = 3,
+        promissoryNotes = { 'Nivyn Guidance' },
+    },
+    ['The Mirveda Protectorate'] = {
+        tokenName = 'Mirveda Protectorate',
+        frankenName = 'Mirveda',
+        home = 3221,
+        startingUnits = { Carrier = 2, Cruiser = 1, Fighter = 5, Infantry = 2, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'AI Development Algorithm' },
+        flagship = 'Locus',
+        flagshipDescription = 'After each round of space combat in this system, place 1 fighter from your reinforcements in this system.',
+        abilities = { 'Priviledged Citizenry', 'Combat Drones' },
+        units = { 'Gauss Cannon I', 'Gauss Cannon II', 'Javelin' },
+        commander = 'Logic Machina',
+        hero = 'Wrath Machina',
+        commodities = 3,
+        promissoryNotes = { 'Rapid Excavation' },
+    },
+    ['The Kortali Tribunal'] = {
+        tokenName = 'Kortali Tribunal',
+        frankenName = 'Kortali',
+        home = 3222,
+        startingUnits = { Carrier = 1, Cruiser = 1, Fighter = 2, Infantry = 4, Space_Dock = 1, PDS = 1 },
+        startingTech = { 'Psychoarchaeology', 'Plasma Scoring' },
+        flagship = 'Magistrate',
+        flagshipDescription = 'After you win a space combat in this system, you may exhaust each planet in this system.',
+        abilities = { 'Zealous', 'Ruthless' },
+        units = { 'Justicar' },
+        commander = 'Queen Lorena',
+        hero = 'Queen Nadalia',
+        commodities = 3,
+        promissoryNotes = { 'Blessing of the Queens' },
+    },
+    ['The Kollecc Society'] = {
+        tokenName = 'Kollecc Society',
+        frankenName = 'Kollecc',
+        home = 3223,
+        startingUnits = { Carrier = 2, Cruiser = 1, Fighter = 2, Infantry = 4, Space_Dock = 1 },
+        startingTech = { 'Scanlink Drone Network' },
+        flagship = 'Nightingale V',
+        flagshipDescription = 'When this unit retreats, you may capture each of your units that retreat.',
+        abilities = { 'Cloaked Fleet', 'Shroud of Lith', 'Treasure Hunters' },
+        units = { 'Nightshade Vanguard' },
+        commander = "Kado S'Mah-Qar",
+        hero = 'Dorrahn Griphyn',
+        commodities = 3,
+        promissoryNotes = { 'AI Survey' },
+    },
+    ['The Zealots of Rhodun'] = {
+        tokenName = 'Zealots of Rhodun',
+        frankenName = 'Rhodun',
+        home = 3224,
+        startingUnits = { Carrier = 1, Cruiser = 1, Destroyer = 1, Fighter = 3, Infantry = 4, Space_Dock = 1 },
+        startingTech = { 'Bio-Stims' },
+        flagship = 'Reckoning',
+        flagshipDescription = 'For each unit upgrade technology your opponent owns, apply -1 to the combat rolls of each of their units of that type in this system.',
+        abilities = { 'Conspirators', 'Ancient Knowledge', 'Reverence' },
+        units = { 'Templar' },
+        commander = 'Bishop Ulin',
+        hero = 'Saint Binal',
+        commodities = 3,
+        promissoryNotes = { 'Favor of Rhodun' },
+    },
+}
+
+-------------------------------------------------------------------------------
+
+-- System attributes:
+-- - key: guid.
+-- - tile: number (0 for homebrew).
+-- - home: boolean, true if a home system.
+-- - planets: list of planet tables.
+-- - wormholes: list of strings.
+-- - anomalies: list of strings.
+-- - rotate: override, degrees number.
+-- - localY: override tile height (ghosts home system).
+--
+-- Planet attributes:
+-- - name: string.
+-- - resources: number.
+-- - influence: number.
+-- - trait: string {cultural|industrial|hazardous}.
+-- - tech: string {red|green|yellow|blue}.
+-- - position: table with {xz}: override, local space.
+-- - radius: number: override, local space.
+-- - legendary: boolean.
+local HOME_SYSTEMS = {
+    ['3f260c'] = {
+        tile = 3201,
+        home = true,
+        planets = {
+            { name = 'Rhune', resources = 3, influence = 4 },
+        }
+    },
+    ['799325'] = {
+        tile = 3202,
+        home = true,
+        planets = {
+            { name = 'Idyn', resources = 1, influence = 0 },
+            { name = 'Kroll', resources = 1, influence = 1 },
+            { name = 'Cyrra', resources = 0, influence = 1 },
+        }
+    },
+    ['355e92'] = {
+        tile = 3203,
+        home = true,
+        planets = {
+            { name = 'Pax', resources = 1, influence = 2 },
+            { name = 'Vess', resources = 0, influence = 1 },
+            { name = 'Kyr', resources = 2, influence = 0 },
+        }
+    },
+    ['b924c9'] = {
+        tile = 3204,
+        home = true,
+        planets = {
+            { name = 'Bohl-Dhur', resources = 3, influence = 4 },
+        }
+    },
+    ['cc25a9'] = {
+        tile = 3205,
+        home = true,
+        planets = {
+            { name = 'Drah', resources = 1, influence = 2 },
+            { name = 'Trykk', resources = 2, influence = 1 },
+        }
+    },
+    ['05f9f1'] = {
+        tile = 3206,
+        home = true,
+        planets = {
+            { name = 'Vadarian', resources = 3, influence = 0 },
+            { name = 'Norvus', resources = 1, influence = 2 },
+        }
+    },
+    ['8935c1'] = {
+        tile = 3207,
+        home = true,
+        planets = {
+            { name = 'Blaheo', resources = 3, influence = 0 },
+            { name = 'Empero', resources = 0, influence = 3 },
+        },
+        anomalies = { 'nebula' },
+    },
+    ['0b684b'] = {
+        tile = 3208,
+        home = true,
+        planets = {
+            { name = 'Chrion', resources = 2, influence = 3 },
+            { name = 'Demis', resources = 1, influence = 2 },
+        }
+    },
+    ['eef7ce'] = {
+        tile = 3209,
+        home = true,
+        planets = {
+            { name = 'Axis', resources = 5, influence = 0 },
+        }
+    },
+    ['ae82ed'] = {
+        tile = 3210,
+        home = true,
+        planets = {
+            { name = 'Sanctuary', resources = 3, influence = 4 },
+        }
+    },
+    ['7d1401'] = {
+        tile = 3211,
+        home = true,
+        planets = {
+            { name = 'Shi-Halaum', resources = 4, influence = 0 },
+        }
+    },
+    ['119288'] = {
+        tile = 3212,
+        home = true,
+        planets = {
+            { name = 'Discordia', resources = 4, influence = 1 },
+        }
+    },
+    ['4021fb'] = {
+        tile = 3213,
+        home = true,
+        planets = {
+            { name = 'Cymiae', resources = 3, influence = 1 },
+        }
+    },
+    ['a6f0b2'] = {
+        tile = 3214,
+        home = true,
+        planets = {
+            { name = 'Prind', resources = 3, influence = 3 },
+        },
+    },
+    ['81e652'] = {
+        tile = 3215,
+        home = true,
+        planets = {
+            { name = 'Zelian', resources = 3, influence = 3 },
+            { name = 'Gen', resources = 2, influence = 0 },
+        },
+        anomalies = { 'asteroid field' },
+    },
+    ['2a8e1f'] = {
+        tile = 3216,
+        home = true,
+        planets = {
+            { name = 'Vaylar', resources = 3, influence = 2 },
+        }
+    },
+    ['92add7'] = {
+        tile = 3217,
+        home = true,
+        planets = {
+            { name = 'Delmor', resources = 2, influence = 1 },
+            { name = 'Kyd', resources = 1, influence = 2 },
+        }
+    },
+    ['4d42d0'] = {
+        tile = 3218,
+        home = true,
+        planets = {
+            { name = 'Abyssus', resources = 4, influence = 2 },
+        }
+    },
+    ['3fc5b5'] = {
+        tile = 3219,
+        home = true,
+        planets = {
+            { name = 'Louk', resources = 2, influence = 1 },
+            { name = 'Auldane', resources = 1, influence = 3 },
+        }
+    },
+    ['eec65f'] = {
+        tile = 3220,
+        home = true,
+        planets_faceUp = {
+            { name = 'Salle', resources = 2, influence = 2 },
+        },
+        planets_faceDown = {
+            { name = 'Ellas', resources = 5, influence = 5 },
+        },
+        anomalies_faceUp = { 'supernova' },
+        anomalies_faceDown = { 'gravity rift' },
+    },
+    ['b6ca8c'] = {
+        tile = 3221,
+        home = true,
+        planets = {
+            { name = 'Aldra', resources = 2, influence = 3 },
+            { name = 'Beata', resources = 2, influence = 1 },
+        }
+    },
+    ['cdfbc0'] = {
+        tile = 3204,
+        home = true,
+        planets = {
+            { name = 'Ogdun', resources = 2, influence = 0 },
+            { name = 'Brthkul', resources = 1, influence = 2 },
+        }
+    },
+    ['daa03f'] = {
+        tile = 3223,
+        home = true,
+        planets = {
+            { name = 'Susoros', resources = 4, influence = 4 },
+        }
+    },
+    ['cc0d0d'] = {
+        tile = 3224,
+        home = true,
+        planets = {
+            { name = 'Poh', resources = 2, influence = 0 },
+            { name = 'Orad', resources = 3, influence = 1 },
+        }
+    },
+    ['39efe4'] = {
+        tile = 3225,
+        anomalies = { 'asteroid field' },
+    },
+}
+
+-------------------------------------------------------------------------------
+
+-- Unit attributes:
+--
+-- - key : name.
+--
+-- - antiFighterBarrage {dice=#,hit=#} table.
+-- - bombardment {dice=#,hit=#,extraDice=#} table.
+-- - capacity number.
+-- - cost number : cost per unit.
+-- - disablePlanetaryShield boolean.
+-- - groundCombat {dice=#,hit=#,anyPlanet} table.
+-- - move number.
+-- - name string : unit name when base unit is replaced (faction or unit upgrade).
+-- - override string : base unit type if this is a faction override.
+-- - planetaryShield boolean.
+-- - spaceCannon {dice=#,hit=#,range=#,extraDice=#} table.
+-- - spaceCombat {dice=#,hit=#,extraHitsOn={count=#,value=#},diceAsCount=boolean}.
+-- - sustainDamage boolean.
+-- - unitLimit number : at most N units roll dice (Experimental Battlestation).
+-- - upgrade string : base unit type if this is a unit upgrade technology.
+--
+-- The groundCombat.anyPlanet means unit participates in ground combat for any
+-- planet in the system (e.g. Naalu fighters with the flagship).
+--
+-- The spaceCombat.extraHitsOn attribute is for expressing Jol-Nar's flagship,
+-- which gets 2 additional hits on a 9 or 10, extraHitsOn={count=2,value=9}.
+--
+-- spaceCombat.diceAsCount is an awkward way for Winnu flagship to signal the
+-- dice number is non-standard, and should override unit count for MultiRoller.
+--
+-- See TI4_UnitHelper.ttslua for defaults.
+local UNITS = {
+    ----- Flagships
+    ['Richtyrian'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 }
+    },
+    ['Vox'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 }
+    },
+    ['Silence of Stars'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 5 },
+        move = 2,
+    },
+    ['Splintering Gale'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 5 }
+    },
+    ['The Lady & The Lord'] = {
+        override = 'Flagship',
+        cost = 6,
+        spaceCombat = { dice = 2, hit = 7 },
+        bombardment = { dice = 4, hit = 5 },
+        capacity = 7
+    },
+    ['Aurum Vadra'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 },
+        bombardment = { dice = 2, hit = 5 },
+    },
+    ['Particle Sieve'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 }
+    },
+    ['Nemsys'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 1, hit = 5 }
+    },
+    ['Bearer of Heavens'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 5 },
+        capacity = 5,
+    },
+    ['Rallypoint'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 5 }
+    },
+    ['Psyclobea Qarnyx'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 }
+    },
+    ['Principia Aneris'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 4, hit = 9 },
+        move = 2,
+    },
+    ['Reprocessor Alpha'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 }
+    },
+    ["Ky'vir"] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 }
+    },
+    ['World-Cracker'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 },
+        bombardment = { dice = 2, hit = 5 },
+    },
+    ['Lost Cause'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 }
+    },
+    ["Man O' War"] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 },
+        capacity = 5,
+    },
+    ['Maximus'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 5 }
+    },
+    ['Supremacy'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 9 },
+        antiFighterBarrage = {dice = 2, hit = 6 },
+        capacity = 6
+    },
+    ['Eradicam'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 }
+    },
+    ['Nexus'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 9 },
+        capacity = 8,
+    },
+    ['Magistrate'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 5 }
+    },
+    ['Nightingale V'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 7 }
+    },
+    ['Reckoning'] = {
+        override = 'Flagship',
+        spaceCombat = { dice = 2, hit = 5 }
+    },
+    ----- Mechs
+    ['Aurora Stormcaller'] = {
+        override = 'Mech',
+    },
+    ['Liberator'] = {
+        override = 'Mech',
+    },
+    ['Oro-Zhin Elite'] = {
+        override = 'Mech',
+    },
+    ['Megalith'] = {
+        override = 'Mech',
+    },
+    ['Jotun'] = {
+        override = 'Mech',
+    },
+    ['Collector'] = {
+        override = 'Mech',
+    },
+    ['Duuban'] = {
+        override = 'Mech',
+    },
+    ['Iledrith'] = {
+        override = 'Mech',
+    },
+    ['Forgetender'] = {
+        override = 'Mech',
+    },
+    ['Exemplar'] = {
+        override = 'Mech',
+    },
+    ['Amandia Pholdis'] = {
+        override = 'Mech',
+    },
+    ['Daedalon'] = {
+        override = 'Mech',
+    },
+    ['Revenant'] = {
+        override = 'Mech',
+    },
+    ['Autofabricator'] = {
+        override = 'Mech',
+    },
+    ['Collider'] = {
+        override = 'Mech',
+    },
+    ['Eclipse'] = {
+        override = 'Mech',
+    },
+    ['Privateer'] = {
+        override = 'Mech',
+    },
+    ['Repairitor'] = {
+        override = 'Mech',
+    },
+    ['Minuteman'] = {
+        override = 'Mech',
+    },
+    ['Voidflare Warden I'] = {
+        override = 'Mech',
+    },
+    ['Voidflare Warden II'] = {
+        upgrade = 'Mech',
+        groundCombat = {dice = 1, hit = 4 },
+    },
+    ['Javelin'] = {
+        override = 'Mech',
+    },
+    ['Justicar'] = {
+        override = 'Mech',
+        groundCombat = {dice = 1, hit = 5 },
+    },
+    ['Nightshade Vanguard'] = {
+        override = 'Mech',
+    },
+    ['Templar'] = {
+        override = 'Mech',
+    },
+    ----- Units
+    ['Lancer Dreadnought I'] = {
+        override = 'Dreadnought',
+        spaceCannon = { dice = 1, hit = 8, range = 0 }
+    },
+    ['Lancer Dreadnought II'] = {
+        upgrade = 'Dreadnought',
+        spaceCannon = { dice = 1, hit = 6, range = 0 },
+        spaceCombat = { dice = 1, hit = 4 },
+        move = 2
+    },
+    ['Heavy Bomber I'] = {
+        upgrade = 'Fighter',
+        spaceCombat = { dice = 1, hit = 8 },
+        bombardment = { dice = 1, hit = 9},
+    },
+    ['Heavy Bomber II'] = {
+        upgrade = 'Fighter',
+        spaceCombat = { dice = 1, hit = 7 },
+        bombardment = { dice = 1, hit = 8},
+        move = 2
+    },
+    ['Shattered Sky I'] = {
+        override = 'Cruiser',
+        bombardment = { dice = 1, hit = 8 },
+    },
+    ['Shattered Sky II'] = {
+        upgrade = 'Cruiser',
+        spaceCombat = {dice = 1, hit = 6},
+        bombardment = {dice = 1, hit = 5},
+    },
+    ['Combat Transport I'] = {
+        override = 'Carrier',
+        spaceCombat = { dice = 1, hit = 8 },
+    },
+    ['Combat Transport II'] = {
+        upgrade = 'Carrier',
+        spaceCombat = { dice = 1, hit = 8},
+    },
+    ['Mycelium Ring I'] = {
+        override = 'Space Dock',
+        planetaryShield = true,
+    },
+    ['Mycelium Ring II'] = {
+        upgrade = 'Space Dock',
+        planetaryShield = true,
+    },
+    ['Blockade Runner I'] = {
+        override = 'Destroyer',
+        antiFighterBarrage = { dice = 3, hit = 9 }
+    },
+    ['Blockade Runner II'] = {
+        upgrade = 'Destroyer',
+        spaceCombat = { dice = 1, hit = 8},
+        antiFighterBarrage = {dice = 4, hit = 6}
+    },
+    ['Unholy Abomination I'] = {
+        override = 'Infantry',
+        groundCombat = { hit = 5 }
+    },
+    ['Unholy Abomination II'] = {
+        upgrade = 'Infantry',
+        groundCombat = { hit = 4 }
+    },
+    ['Terrafactory I'] = {
+        override = 'War Sun',
+        spaceCombat = { dice = 3, hit = 5},
+        capacity = 4,
+    },
+    ['Terrafactory II'] = {
+        upgrade = 'War Sun',
+        cost = 12,
+        spaceCombat = { dice = 3, hit = 3},
+        capacity = 6,
+    },
+    ['Impactor I'] = {
+        override = 'Infantry',
+        bombardment = { dice = 1, hit = 10 },
+    },
+    ['Impactor II'] = {
+        upgrade = 'Infantry',
+        bombardment = { dice = 1, hit = 9 },
+    },
+    ['Raider I'] = {
+        override = 'Cruiser',
+        capacity = 1,
+    },
+    ['Raider II'] = {
+        upgrade = 'Cruiser',
+        spaceCombat = { dice = 1, hit = 6 }
+    },
+    ['Corsair I'] = {
+        override = 'Fighter',
+        move = 1,
+        spaceCombat = { dice = 1, hit = 9},
+        antiFighterBarrage = { dice = 1, hit = 9 }
+    },
+    ['Corsair II'] = {
+        upgrade = 'Fighter',
+        move = 3,
+        spaceCombat = { dice = 1, hit = 8},
+        antiFighterBarrage = { dice = 1, hit = 8 }
+    },
+    ['Aegis I'] = {
+        override = 'Dreadnought',
+    },
+    ['Aegis II'] = {
+        upgrade = 'Dreadnought',
+        spaceCombat = { dice = 1, hit = 4 },
+    },
+    ['Trade Port I'] = {
+        override = 'Space Dock',
+        antiFighterBarrage = { dice = 2, hit = 6 }
+    },
+    ['Trade Port II'] = {
+        upgrade = 'Space Dock',
+        antiFighterBarrage = { dice = 2, hit = 6 }
+    },
+    ['Gauss Cannon I'] = {
+        override = 'PDS',
+        spaceCannon = { dice = 1, hit = 6, range = 0 },
+        bombardment = { dice = 1, hit = 6 },
+        move =  1
+    },
+    ['Gauss Cannon II'] = {
+        upgrade = 'PDS',
+        spaceCannon = { dice = 1, hit = 4, range = 0},
+        bombardment = { dice = 1, hit = 4 },
+        move =  1
+    },
+}
+
+-------------------------------------------------------------------------------
+
+local PLANET_MODIFIERS = {
+    { name = 'Branch Office - Tax Haven', resources = 0, influence = 1 },
+    { name = 'Branch Office - Broadcast Hub', resources = 0, influence = 1 },
+    { name = 'Branch Office - Reserve Bank', resources = 1, influence = 0 },
+    { name = 'Branch Office - Orbital Shipyard', resources = 1, influence = 0 },
+}
+
+-------------------------------------------------------------------------------
+
+local UNIT_MODIFIERS = {
+    {
+        name = 'Oro-Zhin Elite',  -- Li-Zho Mech
+        description = '+2 dice when alone',
+        owner = 'self',  -- applies to player zone it is inside
+        type = 'adjust',  -- adjusts existing units
+        isCombat = true,
+        applyFunctionName = 'applyMechPlusTwoDiceWhenAlone',
+        applyFunctionGuid = self.getGUID(),
+    },
+    {
+        name = 'Javelin',  -- Mirveda Mech
+        description = '+1 hit for every 2 unit upgrades',
+        owner = 'self',  -- applies to player zone it is inside
+        type = 'adjust',  -- adjusts existing units
+        isCombat = true,
+        applyFunctionName = 'applyMechPlusOneHitPerTwoUnitUpgrade',
+        applyFunctionGuid = self.getGUID(),
+    },
+    {
+        name = 'Rule of Two',
+        description = '+2 combat when in pairs',
+        owner = 'self',  -- applies to player zone it is inside
+        type = 'adjust',  -- adjusts existing units
+        isCombat = true,
+        applyFunctionName = 'applyCombatPlusTwoIfTwo',
+        applyFunctionGuid = self.getGUID(),
+    },
+}
+
+function applyMechPlusTwoDiceWhenAlone(unitAttrs)
+    local myUnitTypeToCount = unitAttrs._params.myUnitTypeToCount or {}
+    local alone = (myUnitTypeToCount['Mech'] or 0) > 0
+    for unitType, count in pairs(myUnitTypeToCount) do
+        if unitType ~= 'Mech' and count > 0 then
+            alone = false
+            break
+        end
+        if unitType == 'Mech' and count > 1 then
+            alone = false
+            break
+        end
+    end
+    if alone then
+        local attr = unitAttrs['Mech']
+        if attr.groundCombat then
+            attr.groundCombat.dice = (attr.groundCombat.dice or 0) + 2
+        end
+        if attr.spaceCombat then
+            attr.spaceCombat.dice = (attr.spaceCombat.dice or 0) + 2
+        end
+    end
+    return unitAttrs
+end
+
+function applyMechPlusOneHitPerTwoUnitUpgrade(unitAttrs)
+    local color = unitAttrs._params.myColor
+    local unitUpgradeNameSet = {}
+    for _, name in ipairs(_unitHelper.getUnitUpgradeNames()) do
+        unitUpgradeNameSet[name] = true
+    end
+
+    local inHandGuidSet = _zoneHelper.inHand()
+    local guidToPosition = {}
+    local guidToName = {}
+    for _, object in ipairs(getAllObjects()) do
+        local guid = object.getGUID()
+        local name = object.getName()
+        if object.tag == 'Card' and (not inHandGuidSet[guid]) and unitUpgradeNameSet[name] then
+            guidToPosition[guid] = object.getPosition()
+            guidToName[guid] = name
+        end
+    end
+    local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
+    local seen = {}
+    local count = 0
+    for guid, color in pairs(guidToColor) do
+        local name = guidToName[guid]
+        if not seen[name] then
+            count = count + 1
+            seen[name] = true
+        end
+    end
+
+    local bonus = math.floor(count / 2)
+    local attr = unitAttrs['Mech']
+    if attr.groundCombat then
+        attr.groundCombat.hit = math.max((attr.groundCombat.hit or 0) - bonus, 0)
+    end
+    if attr.spaceCombat then
+        attr.spaceCombat.hit = math.max((attr.spaceCombat.hit or 0) - bonus, 0)
+    end
+    return unitAttrs
+end
+
+function applyCombatPlusTwoIfTwo(unitAttrs)
+    local myUnitTypeToCount = unitAttrs._params.myUnitTypeToCount or {}
+    local foundPair = false
+    local totalCount = 0
+    for unitType, count in pairs(myUnitTypeToCount) do
+        if count > 0 then
+            if foundPair then
+                return unitAttrs  -- do nothing
+            end
+            if count ~= 2 then
+                return unitAttrs  -- do nothing
+            end
+            foundPair = unitType
+        end
+    end
+    if foundPair and foundPair ~= 'Fighter' then
+        local attrs = unitAttrs[foundPair]
+        if attrs.spaceCombat then
+            attrs.spaceCombat.hit = attrs.spaceCombat.hit - 2
+        end
+        if attrs.groundCombat then
+            attrs.groundCombat.hit = attrs.groundCombat.hit - 2
+        end
+    end
+    return unitAttrs
+end
+
+-------------------------------------------------------------------------------
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+_factionHelper = getHelperClient('TI4_FACTION_HELPER')
+_systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+_unitHelper = getHelperClient('TI4_UNIT_HELPER')
+_zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+function onLoad(saveState)
+    for name, faction in pairs(FACTIONS) do
+        faction.name = name
+        _factionHelper.injectFaction(faction)
+    end
+    for guid, system in pairs(HOME_SYSTEMS) do
+        system.guid = guid
+        _systemHelper.injectSystem(system)
+    end
+    for name, unit in pairs(UNITS) do
+        unit.name = name
+        _unitHelper.injectUnitOverride(unit)
+    end
+    for _, modifier in ipairs(UNIT_MODIFIERS) do
+        _unitHelper.injectUnitModifier(modifier)
+    end
+    for _, modifier in ipairs(PLANET_MODIFIERS) do
+        _systemHelper.injectResourceInfluenceModifier(modifier)
+    end
+end
+
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

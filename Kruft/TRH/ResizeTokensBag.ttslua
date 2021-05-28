@@ -1,0 +1,46 @@
+--- Drop a token in this bag to resize its image(s).
+-- Requires a resizing proxy.
+
+local _rewriteOnDropSet = {}
+
+local SIZE = 512
+
+function resizeTileImage(object)
+    assert(object.tag == 'Tile')
+    print('resize tile image ' .. object.getName())
+
+    local rewriteKeys = {
+        'image',
+        'image_bottom',
+        'image_secondary',
+    }
+
+    local custom = object.getCustomObject()
+    for _, rewriteKey in ipairs(rewriteKeys) do
+        local url = custom[rewriteKey]
+        if url then
+            custom[rewriteKey] = 'http://localhost:8080/resize?w=' .. SIZE .. '&h=' .. SIZE .. '&img=' .. url
+        end
+    end
+    object.setCustomObject(custom)
+    object.reload()
+end
+
+function onObjectLeaveContainer(container, object)
+    if container == self then
+        if object.tag == 'Tile' then
+            local guid = object.getGUID()
+            _rewriteOnDropSet[guid] = true
+        else
+            print(object.getName() .. ' is not a tile')
+        end
+    end
+end
+
+function onObjectDrop(playerColor, object)
+    local guid = object.getGUID()
+    if _rewriteOnDropSet[guid] then
+        _rewriteOnDropSet[guid] = nil
+        resizeTileImage(object)
+    end
+end

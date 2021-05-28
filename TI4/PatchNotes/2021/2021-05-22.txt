@@ -1,0 +1,9 @@
+v37:
+- When using the "FACTION Alliance" cards with active/idle, ignore other ways of linking that commander when idle.
+- Add teams to anonymized game data (2v2v2 alliance).
+- Fixed "Learn to Play [3p base]" maps bag tile to expected orientation, as well as one tile (thanks 610 for the catch).
+- New "verify cards" in tools bag to sanity check cards, per a bug report that some duplicate cards showed up.
+- Workaround for card stealing bug now shrinks the outgoing card in case that is broken.  If you get dealt a half-size card in game please contact tts-mod-support.
+- Game data includes more attachments in map summary.
+- Fix game data not resuming after loading a split game (again).
+- Delay "Minister of Policy" card drawing to the "end of status phase" button as it is a separate timing window from drawing action cards.

@@ -1,0 +1,1009 @@
+-- @author Darrell for UI generation scripting
+-- @author Milty for game setup
+-- #include <~/CrLua/Objects/TI4_GameSetupOptions>
+
+local _config = false
+
+local DEFAULT_CONFIG = {
+    playerCount = 6,
+    extraRings = 0,
+    usePoK = false,
+    useCodex1 = false,
+    useCodex2 = false,
+    is14ptGame = false,
+    isRightClick = false,
+    playerTools = false,
+    gamedataOptIn = false,
+}
+
+local CONTRIBUTORS = {
+    '3tamatulg',
+    'Alister',
+    'Billy',
+    'Blarknob',
+    'Brandondash',
+    'Cruix',
+    'Cyrusa',
+    'Darrell',
+    'Darth Batman',
+    'Doot',
+    'Garnet Bear',
+    'Goatboy',  -- TI4 model for rotating space dock
+    'Hooliganj',
+    'Jabberwocky',  -- PoK wormholes, scripting
+    'Jatta Pake',
+    'Jefferson',
+    'Jirach08',  -- automated strategy card actions
+    'Legoman',  -- Decal concept, demo for attach tokens
+    'Lily',
+    'Loving Teammate',
+    'Mage',
+    'Mantis',
+    'Max Philippa',
+    'Milty',
+    'Nicest_guy_22',
+    'Plat251',  -- crisper fonts on multiRoller
+    'Positive',
+    'Psicoma',
+    'Raptor1210',
+    'Rodney',
+    'Saunick',  -- TI4 ship models on thingiverse
+    'SCPT Hunter',
+    'SCPT Matt',
+    'Snorecerer',
+    'Steve "Vorpal Dice Press"',  -- TI4/TTS instructions PDF
+    'Tactic Blue',
+    'ThatRobHuman',
+    'Toppopia',
+    'Volverbot',  -- Numpad hot keys
+    'Wekker',
+    'West',  -- updated extra strat cards
+    'x3n d0g',
+}
+
+local BACK_MESSAGE = [[
+This mod is made of contributions from many people.
+-
+Thanks to $CONTRIBUTORS, and the entire TI4 community for their contributions.
+-
+A massive shout out to Fantasy Flight Games for creating an awesome game. If you have the opportunity please support them. The board game industry wouldn't be the same without them and if you enjoy their work please, please support them and your local game stores.
+]]
+
+-------------------------------------------------------------------------------
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _setupHelper = getHelperClient('TI4_SETUP_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local _getByNameCache = {}
+local _setupInProgress = false
+
+-------------------------------------------------------------------------------
+
+function onLoad()
+    _config = DEFAULT_CONFIG
+    Wait.frames(_createUI, 2)
+    Wait.frames(updateUiFromConfig, 4)
+end
+
+function onPlayerConnect(playerId)
+    -- UI does not seem to appear for new players, recreating it fixes.
+    Wait.frames(_createUI, 2)
+    Wait.frames(updateUiFromConfig, 4)
+end
+
+function _createUI()
+    local scale = self.getScale()
+    local uiScale = (4 / scale.x) .. ' ' .. (4 / scale.z) .. ' ' .. (1 / scale.y)
+
+    local function text(class, text)
+        return {
+            tag = 'Text',
+            attributes = {
+                class = class
+            },
+            value = text
+        }
+    end
+
+    local function toggle(id, text, isOn)
+        return {
+            tag = 'Toggle',
+            attributes = {
+                id = id,
+                isOn = isOn or nil
+            },
+            value = text
+        }
+    end
+
+    local function toggleGroup(idPrefix, values)
+        local height = math.ceil(#values / 4) * 50
+        local toggles = {}
+        for _, value in ipairs(values) do
+            table.insert(toggles, {
+                tag = 'ToggleButton',
+                attributes = {
+                    id = idPrefix .. string.gsub(tostring(value), ' ', '_'),
+                },
+                value = value
+            })
+        end
+        return {
+            tag = 'ToggleGroup',
+            attributes = {
+                preferredHeight = height,
+            },
+            children = {
+                {
+                    tag = 'GridLayout',
+                    children = toggles
+                }
+            }
+        }
+    end
+
+    local defaultColorBlock = '#FFFFFF|#1F45FC|#38ACEC|rgba(0.78,0.78,0.78,0.5)'
+    local defaults = {
+        tag = 'Defaults',
+        children = {
+            {
+                tag = 'VerticalLayout',
+                attributes = {
+                    spacing = 10,
+                    childForceExpandHeight = false,
+                }
+            },
+            {
+                tag = 'HorizontalLayout',
+                attributes = {
+                    spacing = 10,
+                }
+            },
+            {
+                tag = 'GridLayout',
+                attributes = {
+                    spacing = '10 10',
+                    cellSize = '62 40', -- 86 40 for three columns
+                },
+            },
+            {
+                tag = 'ToggleGroup',
+                attributes = {
+                    toggleBackgroundColor = '#FF0000',
+                    toggleSelectedColor = '#38ACEC',
+                }
+            },
+            {
+                tag = 'Toggle',
+                attributes = {
+                    fontSize = 16,
+                    textColor = 'White',
+                    onValueChanged = 'onToggleValueChanged',
+                }
+            },
+            {
+                tag = 'ToggleButton',
+                attributes = {
+                    fontSize = 16,
+                    onValueChanged = 'onToggleValueChanged',
+                    colors = defaultColorBlock
+                }
+                -- ToggleGroup.toggleSelectedColor does not seem to apply to ToggleButton?
+            },
+            {
+                tag = 'Button',
+                attributes = {
+                    onClick = 'onButtonClick'
+                }
+            },
+            {
+                tag = 'Text',
+                attributes = {
+                    class = 'title',
+                    fontSize = 20,
+                    fontStyle = 'Bold',
+                    color = 'White',
+                    alignment = 'MiddleCenter',
+                }
+            },
+            {
+                tag = 'Text',
+                attributes = {
+                    class = 'heading',
+                    fontSize = 14,
+                    color = 'White',
+                    alignment = 'MiddleCenter'
+                }
+            },
+        }
+    }
+    local top = {
+        tag = 'Panel',
+        attributes = {
+            position = '0 0 2',
+            rotation = '0 180 0',
+            width = 300,
+            height = 500,
+            scale = uiScale,
+        },
+        children = {
+            {
+                tag = 'VerticalLayout',
+                attributes = {
+                    padding = '10 10 5 70',
+                },
+                children = {
+                    text('title', 'TI4 Game Setup Options'),
+
+                    text('heading', 'Player count'),
+                    toggleGroup('playerCount', { 2, 3, 4, 5, 6, 7, 8 }),
+
+                    text('heading', 'Extra map rings'),
+                    toggleGroup('extraRings', { 0, 1, 2, 3 }),
+
+                    toggle('usePoK', 'Prophecy of Kings expansion'),
+                    toggle('useCodex1', 'Codex 1 action cards'),
+                    toggle('useCodex2', 'Codex 2 relic cards'),
+                    toggle('14ptGame', '14 point game'),
+                    toggle('playerTools', 'Player tools (boards, build area)'),
+                    toggle('gamedataOptIn', 'Share anonymized game stats'),
+                }
+            },
+            {
+                tag = 'Panel',
+                attributes = {
+                    height = 70,
+                    padding = '10 10 10 10',
+                    rectAlignment = 'LowerCenter',
+                },
+                children = {
+                    {
+                        tag = 'Button',
+                        attributes = {
+                            id = 'setup',
+                            fontSize = 24,
+                        },
+                        value = 'Setup'
+                    },
+                }
+            }
+        }
+    }
+    local bottom = {
+        tag = 'Panel',
+        attributes = {
+            position = '0 0 -22',
+            rotation = '0 0 0',
+            width = 300,
+            height = 500,
+            padding = '20 20 20 20',
+            scale = uiScale,
+            color = '#000000e0'
+        },
+        children = {
+            {
+                tag = 'Text',
+                attributes = {
+                    fontSize = 14,
+                    color = 'White',
+                    alignment = 'MiddleCenter',
+                },
+                value = BACK_MESSAGE:gsub('$CONTRIBUTORS', table.concat(CONTRIBUTORS, ', '))
+            }
+        }
+    }
+
+    self.UI.setXmlTable({ defaults, top, bottom })
+end
+
+function updateUiFromConfig()
+    self.UI.setAttribute('usePoK', 'isOn', _config.usePoK)
+    self.UI.setAttribute('useCodex1', 'isOn', _config.useCodex1)
+    self.UI.setAttribute('useCodex2', 'isOn', _config.useCodex2)
+    self.UI.setAttribute('14ptGame', 'isOn', _config.is14ptGame)
+    self.UI.setAttribute('playerTools', 'isOn', _config.playerTools)
+    self.UI.setAttribute('gamedataOptIn', 'isOn', _config.gamedataOptIn)
+    for i = 3, 8 do
+        self.UI.setAttribute('playerCount' .. i, 'isOn', _config.playerCount == i)
+    end
+    for i = 0, 2 do
+        self.UI.setAttribute('extraRings' .. i, 'isOn', _config.extraRings == i)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+local RIGHT_CLICK = '-2'
+
+function onButtonClick(player, inputType, id)
+    local isRightClick = inputType == RIGHT_CLICK and true or false
+    if id == 'setup' then
+        self.setLock(false)
+        setupGame(isRightClick)
+    else
+        error('onButtonClick: unknown button "' .. id .. '"')
+    end
+end
+
+function onToggleValueChanged(player, value, id)
+    local valueAsBool = string.lower(value) == 'true' and true or false
+    assert(type(valueAsBool) == 'boolean')
+
+    local playerCount = string.match(id, '^playerCount(.*)$')
+    local extraRings = string.match(id, '^extraRings(.*)$')
+
+    if playerCount then
+        if valueAsBool then
+            _config.playerCount = tonumber(playerCount)
+        end
+    elseif extraRings then
+        if valueAsBool then
+            _config.extraRings = tonumber(extraRings)
+        end
+    elseif id == 'usePoK' then
+        _config.usePoK = valueAsBool
+    elseif id == 'useCodex1' then
+        _config.useCodex1 = valueAsBool
+    elseif id == 'useCodex2' then
+        _config.useCodex2 = valueAsBool
+    elseif id == '14ptGame' then
+        _config.is14ptGame = valueAsBool
+    elseif id == 'playerTools' then
+        _config.playerTools = valueAsBool
+    elseif id == 'gamedataOptIn' then
+        _config.gamedataOptIn = valueAsBool
+    else
+        error('onToggleValueChanged: unknown toggle "' .. id .. '"')
+    end
+
+    if _config.playerCount > 6 then
+        _config.extraRings = math.max(_config.extraRings, 1)
+    end
+    Wait.frames(updateUiFromConfig, 2)
+end
+
+-------------------------------------------------------------------------------
+
+function setupGame(isRightClick)
+    if _setupInProgress then
+        error('setupGame: setup in progress, ignoring second click')
+        return
+    end
+    _setupInProgress = true
+
+    -- Visual feedback while setup is in progress.
+    if not isRightClick then
+        _animateSelfDuringSetup()
+    end
+
+    _config.isRightClick = isRightClick
+    startLuaCoroutine(self, 'setupGameCoroutine')
+end
+
+function setupGameCoroutine()
+    assert(type(_config.playerCount) == 'number')
+    assert(type(_config.extraRings) == 'number')
+    assert(type(_config.usePoK) == 'boolean')
+    assert(type(_config.useCodex1) == 'boolean')
+    assert(type(_config.useCodex2) == 'boolean')
+    assert(type(_config.is14ptGame) == 'boolean')
+    assert(type(_config.isRightClick) == 'boolean')
+    assert(type(_config.playerTools) == 'boolean')
+    assert(type(_config.gamedataOptIn) == 'boolean')
+
+    print('Setting up for ' .. _config.playerCount .. ' players with ' .. _config.extraRings .. ' extra map rings')
+
+    setupPoK(_config.usePoK)
+    coroutine.yield(0)
+
+    setupCodex1(_config.useCodex1)
+    coroutine.yield(0)
+
+    setupCodex2(_config.useCodex2)
+    coroutine.yield(0)
+
+    setup14ptGame(_config.is14ptGame)
+    coroutine.yield(0)
+
+    _setupHelper.setup({
+        playerCount = _config.playerCount,
+        extraRings = _config.extraRings,
+        isRightClick = _config.isRightClick,
+        includePoK = _config.usePoK,
+        playerTools = _config.playerTools and not _config.isRightClick,
+        gamedataOptIn = _config.gamedataOptIn,
+    })
+    coroutine.yield(0)
+
+    return 1
+end
+
+function setupCodex1(useCodex1)
+    if useCodex1 then
+        _addCards('Variant Pieces (Searching Recommended)', 'Actions', 'Codex 1')
+    else
+        _removeCards('Variant Pieces (Searching Recommended)', 'Actions', 'Codex 1')
+    end
+end
+
+function setupCodex2(useCodex2)
+    if useCodex2 then
+        _addCards('Variant Pieces (Searching Recommended)', 'Relics', 'Codex 2')
+    else
+        _removeCards('Variant Pieces (Searching Recommended)', 'Relics', 'Codex 2')
+    end
+end
+
+function setup14ptGame(is14ptGame)
+    local scoreboard = _getByName('Scoreboard')
+    local expect = is14ptGame and true or false
+    if scoreboard and scoreboard.is_face_down ~= expect then
+        scoreboard.setLock(false)
+        scoreboard.flip()
+        Wait.time(function() scoreboard.setLock(true) end, 5)
+    end
+end
+
+function setupPoK(usePoK)
+    local container = _getByName('Prophecy of Kings')
+    if not container then
+        error('setupPoK: missing box')
+    end
+    coroutine.yield(0)
+
+    local redSystemTiles = assert(_getByName('Red Anomaly Tiles'))
+    local blueSystemTiles = assert(_getByName('Blue Planet Tiles'))
+    local pokRedSystemTilesGuidSet = {}
+    local pokBlueSystemTilesGuidSet = {}
+    for _, system in pairs(_systemHelper.systems()) do
+        if system.tile >= 52 and system.tile <= 82 then
+            assert(system.guid)
+            if system.anomalies and #system.anomalies > 0 then
+                pokRedSystemTilesGuidSet[system.guid] = true
+            elseif system.planets and #system.planets > 0 then
+                pokBlueSystemTilesGuidSet[system.guid] = true
+            else
+                pokRedSystemTilesGuidSet[system.guid] = true
+            end
+        end
+    end
+    coroutine.yield(0)
+
+    local factionsBag = assert(_getByName('Factions'))
+    local pickFactionBag = assert(_getByName('Pick a Faction to Play'))
+    local pokFactionBoxNameSet = {}
+    local pokFactionTokenNameSet = {}
+    for _, faction in pairs(_factionHelper.allFactions(true)) do
+        if faction.home and faction.home >= 52 and faction.home <= 82 then
+            pokFactionBoxNameSet[faction.tokenName .. ' Box'] = true
+            pokFactionTokenNameSet[faction.tokenName .. ' Faction Token'] = true
+        end
+    end
+    coroutine.yield(0)
+
+    if usePoK then
+
+        -- Add cards.
+        local deckNames = _deckHelper.getDecksWithSource('PoK')
+        for _, deckName in ipairs(deckNames) do
+            _addCards(container.getName(), deckName, 'PoK')
+            coroutine.yield(0)
+        end
+
+        -- Add system tiles.
+        local pos = container.getPosition()
+        pos.y = pos.y + 5
+        for _, entry in ipairs(container.getObjects()) do
+            if pokBlueSystemTilesGuidSet[entry.guid] then
+                container.takeObject({
+                    position          = pos,
+                    callback_function = function(object) blueSystemTiles.putObject(object) end,
+                    smooth            = false,
+                    guid              = entry.guid
+                })
+                pos.y = pos.y + 0.5
+                coroutine.yield(0)
+            elseif pokRedSystemTilesGuidSet[entry.guid] then
+                container.takeObject({
+                    position          = pos,
+                    callback_function = function(object) redSystemTiles.putObject(object) end,
+                    smooth            = false,
+                    guid              = entry.guid
+                })
+                pos.y = pos.y + 0.5
+                coroutine.yield(0)
+            end
+        end
+        coroutine.yield(0)
+
+        -- Add faction boxes.
+        for _, entry in ipairs(container.getObjects()) do
+            if pokFactionBoxNameSet[entry.name] then
+                container.takeObject({
+                    position          = pos,
+                    callback_function = function(object) factionsBag.putObject(object) end,
+                    smooth            = false,
+                    guid              = entry.guid
+                })
+                pos.y = pos.y + 3
+                coroutine.yield(0)
+            end
+        end
+        coroutine.yield(0)
+
+        -- Add faction tokens (pick a faction to play).
+        for _, entry in ipairs(container.getObjects()) do
+            if pokFactionTokenNameSet[entry.name] then
+                container.takeObject({
+                    position          = pos,
+                    callback_function = function(object) pickFactionBag.putObject(object) end,
+                    smooth            = false,
+                    guid              = entry.guid
+                })
+                pos.y = pos.y + 0.5
+                coroutine.yield(0)
+            end
+        end
+        coroutine.yield(0)
+        pickFactionBag.shuffle()
+
+    else
+
+        -- Remove cards.
+        local deckNames = _deckHelper.getDecksWithSource('PoK')
+        for _, deckName in ipairs(deckNames) do
+            _removeCards(container.getName(), deckName, 'PoK')
+            coroutine.yield(0)
+        end
+
+        -- Remove other objects.  Only do this for the "final" setup.
+        if not _config.isRightClick then
+            local removeNameSet = {
+                ['Exploration Mat'] = true,
+                ['Exploration Bag'] = true,
+                ['Frontier Tokens Bag'] = true,
+                ['Mallice Tile'] = true,
+                ['Cultural Relic Fragments Bag'] = true,
+                ['Hazardous Relic Fragments Bag'] = true,
+                ['Industrial Relic Fragments Bag'] = true,
+                ['Unknown Relic Fragments Bag'] = true,
+            }
+            for _, object in ipairs(getAllObjects()) do
+                local name = object.getName()
+                if removeNameSet[name] then
+                    object.setLock(false)
+                    container.putObject(object)
+                    coroutine.yield(0)
+                end
+            end
+            coroutine.yield(0)
+        end
+
+        -- Remove system tiles.
+        local pos = redSystemTiles.getPosition()
+        pos.y = pos.y + 5
+        for _, entry in ipairs(redSystemTiles.getObjects()) do
+            if pokRedSystemTilesGuidSet[entry.guid] then
+                redSystemTiles.takeObject({
+                    position          = pos,
+                    callback_function = function(object) container.putObject(object) end,
+                    smooth            = false,
+                    guid              = entry.guid
+                })
+                pos.y = pos.y + 0.5
+                coroutine.yield(0)
+            end
+        end
+        local pos = blueSystemTiles.getPosition()
+        pos.y = pos.y + 5
+        for _, entry in ipairs(blueSystemTiles.getObjects()) do
+            if pokBlueSystemTilesGuidSet[entry.guid] then
+                blueSystemTiles.takeObject({
+                    position          = pos,
+                    callback_function = function(object) container.putObject(object) end,
+                    smooth            = false,
+                    guid              = entry.guid
+                })
+                pos.y = pos.y + 0.5
+                coroutine.yield(0)
+            end
+        end
+
+        -- Remove faction boxes.
+        local pos = factionsBag.getPosition()
+        pos.y = pos.y + 5
+        for _, entry in ipairs(factionsBag.getObjects()) do
+            if pokFactionBoxNameSet[entry.name] then
+                factionsBag.takeObject({
+                    position          = pos,
+                    callback_function = function(object) container.putObject(object) end,
+                    smooth            = false,
+                    guid              = entry.guid
+                })
+                pos.y = pos.y + 3
+                coroutine.yield(0)
+            end
+        end
+        coroutine.yield(0)
+
+        -- Remove faction tokens (pick a faction to play).
+        local pos = pickFactionBag.getPosition()
+        pos.y = pos.y + 5
+        for _, entry in ipairs(pickFactionBag.getObjects()) do
+            if pokFactionTokenNameSet[entry.name] then
+                pickFactionBag.takeObject({
+                    position          = pos,
+                    callback_function = function(object) container.putObject(object) end,
+                    smooth            = false,
+                    guid              = entry.guid
+                })
+                pos.y = pos.y + 3
+                coroutine.yield(0)
+            end
+        end
+        coroutine.yield(0)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function onSetupHelperSetupFinished()
+    printToAll('Initial setup finished, waiting a few seconds before final setup steps', 'Yellow')
+    -- Wait a moment for main setup to finish moving things.
+    Wait.time(function() startLuaCoroutine(self, 'postSetupCoroutine') end, 5)
+end
+
+function postSetupCoroutine()
+    if _config.isRightClick then
+        print('Skipping final setup for right-click action.  Finished.')
+        _setupInProgress = false
+        return 1
+    end
+
+    print('Doing final setup')
+
+    postSetupPoK()
+    coroutine.yield(0)
+
+    -- Do not pack into a bag too early, otherwise cannot find object for callback.
+    packSelfIntoSetupBag()
+    coroutine.yield(0)
+
+    _setupInProgress = false
+    print('Doing final setup: finished')
+    return 1
+end
+
+--- Some setup needs to wait for the table to be done adjusting, making sure
+-- things like leader sheets and promissory notes are in order.
+function postSetupPoK()
+    local container = assert(_getByName('Prophecy of Kings'))
+    local removeCardsGuidAndDeck = {}
+
+    if _config.usePoK then
+        -- Remove other cards, per PoK setup.
+        local removeCards = {
+            'Core Mining',
+            'Demilitarized Zone',
+            'Holy Planet of Ixth',
+            'Representative Government',
+            'Research Team: Biotic',
+            'Research Team: Cybernetic',
+            'Research Team: Propulsion',
+            'Research Team: Warfare',
+            'Senate Sanctuary',
+            'Shard of the Throne',
+            'Terraforming Initiative',
+            'The Crown of Emphidia',
+            'The Crown of Thalnos',
+        }
+        for _, cardName in ipairs(removeCards) do
+            local deckName = assert(_deckHelper.getDeckName(cardName), 'getDeckName')
+            local deckGuid = assert(_deckHelper.getDeck(deckName), 'getCardName')
+            local deck = assert(getObjectFromGUID(deckGuid))
+            for _, entry in ipairs(deck.getObjects()) do
+                if entry.name == cardName then
+                    table.insert(removeCardsGuidAndDeck, {
+                        guid = entry.guid,
+                        deck = deck
+                    })
+                end
+            end
+            coroutine.yield(0)
+        end
+        coroutine.yield(0)
+
+        -- Shuffle tile bags.
+        local bag = assert(_getByName('Blue Planet Tiles'))
+        bag.shuffle()
+        local bag = assert(_getByName('Red Anomaly Tiles'))
+        bag.shuffle()
+
+    else
+        local removeNameSet = {}
+        for _, color in ipairs(Player.getColors()) do
+            removeNameSet['Leader Sheet (' .. color .. ')'] = true
+            removeNameSet[color .. ' Mech'] = true
+        end
+        for _, object in ipairs(getAllObjects()) do
+            local name = object.getName()
+            if removeNameSet[name] then
+                object.setLock(false)
+                object.jointTo()
+                container.putObject(object)
+                coroutine.yield(0)
+            end
+        end
+        coroutine.yield(0)
+
+        -- Remove techs and alliance promissory notes.
+        local removeCardSet = {
+            ['Sling Relay'] = true,
+            ['Psychoarchaeology'] = true,
+            ['Predictive Intelligence'] = true,
+            ['AI Development Algorithm'] = true,
+            ['Bio-Stims'] = true,
+            ['Scanlink Drone Network'] = true,
+            ['Self Assembly Routines'] = true,
+            ['Dark Energy Tap'] = true,
+        }
+        for _, color in ipairs(Player.getColors()) do
+            removeCardSet['Alliance (' .. color .. ')'] = true
+        end
+        for _, object in ipairs(getAllObjects()) do
+            if object.tag == 'Deck' then
+                for _, entry in ipairs(object.getObjects()) do
+                    if removeCardSet[entry.name] then
+                        table.insert(removeCardsGuidAndDeck, {
+                            guid = entry.guid,
+                            deck = object,
+                            smooth = false,
+                        })
+                    end
+                end
+            end
+        end
+        coroutine.yield(0)
+
+        -- Remove PoK maps.
+        local mapsBag = _getByName('Maps with Strings')
+        local pos = mapsBag.getPosition()
+        pos.y = pos.y + 5
+        for _, entry in ipairs((mapsBag and mapsBag.getObjects()) or {}) do
+            if string.find(entry.name, 'PoK') then
+                mapsBag.takeObject({
+                    position          = pos,
+                    callback_function = function(object) container.putObject(object) end,
+                    smooth            = false,
+                    guid              = entry.guid
+                })
+                pos.y = pos.y + 1
+            end
+        end
+    end
+
+    -- Do any requested card removals.  (Start y=HIGHER to avoid potential collision with incoming cards.)
+    local deckToExtraY = {}
+    for _, guidAndDeck in pairs(removeCardsGuidAndDeck) do
+        local guid = guidAndDeck.guid
+        local deck = guidAndDeck.deck
+        assert(deck.tag == 'Deck')
+        local pos = deck.getPosition()
+        local extraY = deckToExtraY[deck.getGUID()] or 0
+        deckToExtraY[deck.getGUID()] = extraY + 0.2
+        deck.takeObject({
+            guid              = guid,
+            position          = { x = pos.x, y = pos.y + 10 + extraY, z = pos.z },
+            callback_function = function(card) container.putObject(card) end,
+            smooth            = false
+        })
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+end
+
+-------------------------------------------------------------------------------
+
+function packSelfIntoSetupBag()
+    local setupBag = _getByName('Setup Bag')
+    local tutorial = _getByName('TI4 TTS Tutorial Series')
+    if tutorial then
+        setupBag.putObject(tutorial)
+    end
+    self.setLock(false)
+    setupBag.putObject(self)
+end
+
+function _copy(t)
+    if t and type(t) == 'table' then
+        local copy = {}
+        for k, v in pairs(t) do
+            copy[k] = type(v) == 'table' and _copy(v) or v
+        end
+        t = copy
+    end
+    return t
+end
+
+function _getByName(name)
+    local guid = _getByNameCache[name]
+    local object = guid and getObjectFromGUID(guid)
+    if object then
+        return object
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == name then
+            _getByNameCache[name] = object.getGUID()
+            return object
+        end
+    end
+end
+
+--- Move a deck of cards named "sourceName deckName" from container to deck.
+-- E.g. "Codex 1 Actions" for Codex action cards.
+function _addCards(containerName, deckName, sourceName)
+    assert(type(containerName) == 'string' and type(deckName) == 'string' and type(sourceName) == 'string')
+
+    local container = _getByName(containerName)
+    if not container then
+        error('_addCards: missing container "' .. containerName .. '"')
+    end
+
+    local name = sourceName .. ' ' .. deckName
+    local guid = false
+    for _, entry in ipairs(container.getObjects()) do
+        if entry.name == name or entry.name == deckName then
+            if guid then
+                error('_addCards: multiple "' .. name .. '" candidates')
+            end
+            guid = entry.guid
+        end
+    end
+    if not guid then
+        printToAll('_addCards: missing "' .. containerName .. '/' .. name .. '"', 'Yellow')
+        return -- this happens if the deck is already on the table
+    end
+
+    local transform = _deckHelper.getDeckTransform(deckName)
+    if not transform then
+        error('_addCards: missing location for "' .. deckName .. '"')
+    end
+
+    container.takeObject({
+        guid = guid,
+        position = {
+            x = transform.position.x,
+            y = transform.position.y + 5,
+            z = transform.position.z,
+        },
+        rotation = _copy(transform.rotation),
+        smooth = true
+    })
+
+    local function delayedShuffle()
+        local deck = getObjectFromGUID(_deckHelper.getDeck(deckName))
+        if deck then
+            deck.shuffle()
+        end
+    end
+    Wait.time(delayedShuffle, 5 + math.random())
+end
+
+--- Move cards from the given source/deck to the container.  Will move a subset
+-- if the deck has other cards, or the whole deck otherwise.
+function _removeCards(containerName, deckName, sourceName)
+    assert(type(containerName) == 'string' and type(deckName) == 'string' and type(sourceName) == 'string')
+
+    local container = _getByName(containerName)
+    if not container then
+        error('_removeCards: missing container "' .. containerName .. '"')
+    end
+
+    local deck = getObjectFromGUID(_deckHelper.getDeck(deckName))
+    if not deck then
+        --error('_removeCards: missing deck "' .. deckName .. '"')
+        return -- this happens if the deck is already put away
+    end
+    if deck.tag ~= 'Deck' then
+        error('"' .. deckName .. '" is not a deck')
+    end
+
+    local nameList = _deckHelper.getCardsWithSource({ deckName = deckName, source = sourceName })
+    if not nameList then
+        error('_removeCards: missing source "' .. sourceName .. '"')
+    end
+    local nameSet = {}
+    for _, name in ipairs(nameList) do
+        nameSet[name] = true
+    end
+
+    local removeGuids = {}
+    for _, entry in ipairs(deck.getObjects()) do
+        if nameSet[entry.name] then
+            table.insert(removeGuids, entry.guid)
+        end
+    end
+
+    if deck.getQuantity() == #removeGuids then
+        -- Move the whole deck.
+        container.putObject(deck)
+    else
+        -- Move the subset of cards.
+        local position = deck.getPosition()
+        position.y = position.y + 5
+        local createDeck = false
+        for _, guid in ipairs(removeGuids) do
+            local card = deck.takeObject({
+                guid              = guid,
+                position          = position,
+                smooth            = false,
+            })
+            position.y = position.y + 0.2
+            if createDeck then
+                local needYield = createDeck.tag == 'Card'
+                createDeck.setLock(false)
+                createDeck = createDeck.putObject(card)
+                while createDeck.spawning do
+                    coroutine.yield(0)
+                end
+                coroutine.yield(0)
+                createDeck.setLock(true)
+                if needYield then
+                    -- give deck a little extra time to form
+                    for _ = 1, 20 do
+                        coroutine.yield(0)
+                    end
+                end
+            else
+                createDeck = card
+                createDeck.setLock(true)
+            end
+            coroutine.yield(0)
+        end
+        if createDeck then
+            createDeck.setLock(false)
+            if createDeck.tag == 'Deck' then
+                createDeck.setName(sourceName .. ' ' .. deckName)
+            end
+            container.putObject(createDeck)
+        end
+    end
+end
+
+function _animateSelfDuringSetup()
+    local delay = 0.1
+    local function doUpdate()
+        self.rotate({ x = 0, y = 3, z = 0 })
+        Wait.time(doUpdate, delay)
+    end
+    Wait.time(doUpdate, delay)
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

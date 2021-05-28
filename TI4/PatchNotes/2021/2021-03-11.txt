@@ -1,0 +1,5 @@
+- Fix Strategy Card Automator closing popups when closing nested popups (for faction tech, etc).
+- 'Political Censure' agenda now has right-click score option.
+- Game data now tracks 'Political Censure' points.
+- Game data tracks when public objectives are not on the scoring mat (Incentive Program agenda).
+- Game data ignores agendas on the agenda phase mat (voting in progress).

@@ -1,0 +1,223 @@
+--- Reset command and owner tokens to use ThatRobHuman's new mesh / UV map.
+-- @author darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+
+local _deletedItems = false
+local _deletePendingSet = {}
+
+local FACTION_TO_IMAGE = {
+    ['Arborec'] = 'arborec',
+    ['Barony of Letnev'] = 'barony',
+    ['Clan of Saar'] = 'saar',
+    ['Embers of Muaat'] = 'muaat',
+    ['Emirates of Hacan'] = 'hacan',
+    ['Federation of Sol'] = 'sol',
+    ['Ghosts of Creuss'] = 'ghosts',
+    ['L1Z1X Mindnet'] = 'l1z1x',
+    ['Mentak Coalition'] = 'mentak',
+    ['Naalu Collective'] = 'naalu',
+    ['Nekro Virus'] = 'nekro',
+    ["Sardakk N'orr"] = 'sardakk',
+    ['Universities of Jol-Nar'] = 'jolnar',
+    ['Winnu'] = 'winnu',
+    ['Xxcha Kingdom'] = 'xxcha',
+    ['Yin Brotherhood'] = 'yin',
+    ['Yssaril Tribes'] = 'yssaril',
+}
+
+local function factionSheetImageUrl(factionSheetName)
+    local factionName = string.match(factionSheetName, '^(.*) Sheet$')
+    for name, faction in pairs(_factionHelper.allFactions(true)) do
+        if name == factionName then
+            local image = FACTION_TO_IMAGE[faction.tokenName]
+            if image then
+                local file = '/tmp/x3n/' .. image .. '.jpg'
+                return 'http://localhost:8080/proxy?file=' .. file
+            end
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    _deletedItems = getObjectByName('Bag', 'TI4 Deleted Items')
+    self.addContextMenuItem('Mutate', mutate)
+end
+
+function onObjectDestroy(dyingObject)
+    _deletePendingSet[dyingObject.getGUID()] = nil
+end
+
+function getObjectByName(tag, name)
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == tag and object.getName() == name then
+            return object
+        end
+    end
+    error('getObjectByName: missing "' .. name .. '"')
+end
+
+-------------------------------------------------------------------------------
+
+function mutate()
+    startLuaCoroutine(self, 'mutateCoroutine')
+end
+
+local function mutateJson(json, factionSheetName)
+    assert(type(json) == 'string')
+    json = JSON.decode(json)
+
+    local top = assert(factionSheetImageUrl(factionSheetName))
+    json.CustomImage.ImageURL = top
+
+    return JSON.encode_pretty(json)
+end
+
+local function mutateObject(object)
+    assert(type(object) == 'userdata')
+    print('mutating ' .. object.getName())
+
+    local guid = object.getGUID()
+    local json = object.getJSON()
+    local originalLock = object.getLock() or false
+
+    json = mutateJson(json, object.getName())
+    local spawnParams = {
+        json              = json,
+        position          = object.getPosition(),
+        rotation          = object.getRotation(),
+        scale             = object.getScale(),
+        callback_function = nil,
+        sound             = false,
+        params            = nil,
+        snap_to_grid      = object.use_grid
+    }
+
+    -- Delete object, wait for delete to actually happen before reusing guid!
+    if _deletedItems then
+        _deletedItems.call('ignoreGuid', guid)
+    end
+    _deletePendingSet[guid] = true
+    destroyObject(object)
+    object = nil
+    while _deletePendingSet[guid] do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    local object = spawnObjectJSON(spawnParams)
+    assert(object.getGUID() == guid)
+
+    -- Wait for spawn, plus extra time for texture to load.
+    object.setLock(true)
+    while object.spawning do
+        coroutine.yield(0)
+    end
+    local waitUntil = Time.time + 5
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+
+    object.setLock(originalLock)
+
+    return object
+end
+
+function mutateCoroutine()
+    local outerBagNameSet = {
+        ['Factions'] = true,
+        ['Faction Sheets/Tokens'] = true,
+        ['Blue Space Faction Pack'] = true
+    }
+    local outerBags = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' and outerBagNameSet[object.getName()] then
+            print('found outer bag: ' .. object.getName())
+            table.insert(outerBags, object)
+        end
+    end
+
+    local function takeSheet(bag)
+        local p = bag.getPosition()
+        for _, entry in ipairs(bag.getObjects()) do
+            if string.match(entry.name, ' Sheet$') then
+                return bag.takeObject({
+                    guid = entry.guid,
+                    position = { x = p.x, y = p.y + 5, z = p.z },
+                    smooth = false
+                })
+            end
+        end
+        error('missing ' .. bag.getName() .. '/' .. name)
+    end
+
+    for _, outerBag in ipairs(outerBags) do
+        for _, entry in ipairs(outerBag.getObjects()) do
+            local tokenName = string.match(entry.name, '^(.*) Box$')
+            if tokenName and FACTION_TO_IMAGE[tokenName] then
+
+                local p = outerBag.getPosition()
+                local box = outerBag.takeObject({
+                    guid = entry.guid,
+                    position = { x = p.x, y = p.y + 5, z = p.z },
+                    smooth = false
+                })
+                box.setLock(true)
+                while box.spawning do coroutine.yield(0) end
+                coroutine.yield(0)
+                coroutine.yield(0)
+
+                local sheet = takeSheet(box)
+                sheet.setLock(true)
+                while sheet.spawning do coroutine.yield(0) end
+                coroutine.yield(0)
+                coroutine.yield(0)
+
+                sheet = mutateObject(sheet)
+
+                sheet.setLock(false)
+                box.putObject(sheet)
+                coroutine.yield(0)
+                coroutine.yield(0)
+
+                box.setLock(false)
+                outerBag.putObject(box)
+                coroutine.yield(0)
+                coroutine.yield(0)
+
+            end
+        end
+    end
+
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

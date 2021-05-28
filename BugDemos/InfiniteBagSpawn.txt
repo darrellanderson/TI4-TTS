@@ -1,0 +1,19 @@
+TTS BUG REPORT
+
+Spawning populated infinite bags sometimes positions the floating contained item in the wrong place.
+Note: this bug appears to be per-player, as host as I have not seen it but in-game players have (and submitted screenshots).
+
+This has happened in three cases:
+
+(1) Using unrelatedBag.takeObject with smooth=true to take an infinite bag.  The contained object appeared near where the take originated instead of the final position.
+
+(2) Using infiniteBag.getJSON followed by spawnObjectJSON.  The contained object appeared where it was for the saved JSON, not at the new spawn position.
+
+(3) Using infiniteBag.clone.  The contained object appeared above the expected position.
+
+To reiterate this does not always happen.  I have been able to reliably reproduce it with a remote second player, both host and second player have high-end systems.
+
+Screenshots:
+
+- Cloned bag, token above expected position.
+- getJson/spawnObjectJson token is at the saved bag location, bag "appears" empty but is functional.

@@ -1,0 +1,205 @@
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+local _strategyCardHelper = getHelperClient('TI4_STRATEGY_CARD_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local CARD_SCALE_XZ = 2
+
+local _scriptingZone = false
+
+function onLoad(save_state)
+    local x = 1.44
+    local y = self.getBoundsNormalized().size.y + 0.01
+    local z = 5.9
+
+    local width = 600
+    local height = 400
+    local fontSize = 150
+
+    self.createButton({
+        click_function = 'resetAgendaTokens',
+        function_owner = self,
+        label          = 'Reset',
+        position       = { x = -x, y = y, z = z },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = self.getScale(),
+        width          = width,
+        height         = height,
+        font_size      = fontSize,
+        tooltip        = 'Reset When/After Tokens, vote counters, agenda speaker token',
+    })
+
+    self.createButton({
+        click_function = 'resetVotes',
+        function_owner = self,
+        label          = 'Update\nVotes',
+        position       = { x = 0, y = y, z = z },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = self.getScale(),
+        width          = width,
+        height         = height,
+        font_size      = fontSize,
+        tooltip        = 'Recompute available votes from non-exhausted planet cards',
+    })
+
+    self.createButton({
+        click_function = 'resetPlanets',
+        function_owner = self,
+        label          = 'Ready\nPlanets',
+        position       = { x = x, y = y, z = z },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = self.getScale(),
+        width          = width,
+        height         = height,
+        font_size      = fontSize,
+        tooltip        = 'At the end of the Agenda Phase, ready player planet cards to be face-up',
+    })
+
+    self.setSnapPoints({
+        {
+            position      = { x = 0, y = 0, z = 0 },
+            rotation      = { x = 0, y = 0, z = 0 },
+            rotation_snap = true
+        }
+    })
+
+    createScriptingZone()
+    resetScriptingZone()
+end
+
+function onDrop(playerColor)
+    Wait.time(resetScriptingZone, 3)
+end
+
+-------------------------------------------------------------------------------
+
+function isRelevantCard(enterObject)
+    assert(type(enterObject) == 'userdata')
+    return enterObject.tag == 'Card' and _deckHelper.isAgendaCard(enterObject.getName())
+end
+
+function onObjectEnterScriptingZone(zone, enterObject)
+    if not enterObject then
+        return
+    end
+    if zone == _scriptingZone and isRelevantCard(enterObject) then
+        enterObject.setScale({
+            x = CARD_SCALE_XZ,
+            y = 1,
+            z = CARD_SCALE_XZ,
+        })
+    end
+
+    local size = enterObject.getBoundsNormalized().size
+end
+
+function onObjectLeaveScriptingZone(zone, leaveObject)
+    if not leaveObject then
+        return
+    end
+    if zone == _scriptingZone and isRelevantCard(leaveObject) then
+        leaveObject.setScale({
+            x = 1,
+            y = 1,
+            z = 1,
+        })
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function createScriptingZone()
+    assert(not _scriptingZone)
+
+    local zoneName = self.getGUID() .. ' SCRIPTING ZONE'
+
+    local function getScriptingZone()
+        for _, object in ipairs(getAllObjects()) do
+            if object.tag == 'Scripting' and object.getName() == zoneName then
+                return object
+            end
+        end
+    end
+
+    _scriptingZone = getScriptingZone() or spawnObject({
+        type              = 'ScriptingTrigger',
+        position          = self.getPosition(),
+        rotation          = self.getRotation(),
+        sound             = false,
+        snap_to_grid      = false
+    })
+    _scriptingZone.setName(zoneName)
+end
+
+-- Attaching via joint prevents mat from being movable (???).
+-- Just reposition zone when mat moves.
+function resetScriptingZone()
+    _scriptingZone.setPosition({
+        x = self.getPosition().x,
+        y = self.getPosition().y + 2,
+        z = self.getPosition().z,
+    })
+    _scriptingZone.setRotation(self.getRotation())
+
+    local size = self.getBoundsNormalized().size
+    _scriptingZone.setScale({
+        x = 2,
+        y = 4,  -- 4 is enough, could make larger to be safe
+        z = 3,
+    })
+end
+
+-------------------------------------------------------------------------------
+
+function resetAgendaTokens()
+    _strategyCardHelper.resetAgendaTokens()
+    _strategyCardHelper.moveSpeakerAgendaToken()
+end
+
+function resetVotes()
+    _strategyCardHelper.recomputeInfluence(false)
+end
+
+function resetPlanets()
+    local lowercaseNameToPlanet = _systemHelper.planets()
+    local guidToPosition = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Card' and object.is_face_down and lowercaseNameToPlanet[string.lower(object.getName())] then
+            guidToPosition[object.getGUID()] = object.getPosition()
+        end
+    end
+
+    local guidToZoneColor = _zoneHelper.zonesFromPositions(guidToPosition)
+    for guid, zoneColor in pairs(guidToZoneColor) do
+        if zoneColor then
+            local card = getObjectFromGUID(guid)
+            card.flip()
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

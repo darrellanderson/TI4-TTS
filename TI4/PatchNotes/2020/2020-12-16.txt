@@ -1,0 +1,7 @@
+v15.1:
+- Fix attachments not working for 4 planets (name collision with "hybrid franken systems"; removed the hybrid tiles from variants bag).
+- "Place cards" now places legendary planet cards as well.
+- Exploration cards now have a "purge card" right click menu option (attached tokens express the effect).
+- New unit stand (thanks @3tamatulg (UK) ).
+- Added ids for strategy card buttons for interested listeners.
+- Make the Titan attach token images circles to look better on planet cards.

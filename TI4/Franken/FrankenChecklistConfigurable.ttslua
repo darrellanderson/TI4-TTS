@@ -1,0 +1,220 @@
+--- Configurable Franken checklist, edit description then right click update.
+-- @author Darrell
+
+local BUTTON_X0_LEFT = -1.6
+local BUTTON_X0_RIGHT = 1.2
+local BUTTON_DX = 0.2
+local BUTTON_Y = 0.2
+local BUTTON_Z = {-0.84, -0.56, -0.28, 0, 0.28, 0.56, 0.84}
+
+local LABELS = {
+    "PROMISSORY NOTES           RED TILES",
+    "STARTING FLEETS              BLUE TILES",
+    "STARTING TECH         HOME SYSTEMS",
+    "COMMODITIES             FACTION TECH",
+    "FLAGSHIPS            FACTION ABILITIES",
+    "MECHANIZED INFANTRY         AGENT",
+    "COMMANDER                            HERO",
+}
+
+local VALUES = {
+    {
+        name = 'Promissory Notes',
+        light = 1,
+        dark = 1,
+        x0 = BUTTON_X0_LEFT,
+        z0 = BUTTON_Z[1],
+    },
+    {
+        name = 'Starting Fleet',
+        light = 1,
+        dark = 1,
+        x0 = BUTTON_X0_LEFT,
+        z0 = BUTTON_Z[2],
+    },
+    {
+        name = 'Staring Tech',
+        light = 1,
+        dark = 1,
+        x0 = BUTTON_X0_LEFT,
+        z0 = BUTTON_Z[3],
+    },
+    {
+        name = 'Commodities',
+        light = 1,
+        dark = 1,
+        x0 = BUTTON_X0_LEFT,
+        z0 = BUTTON_Z[4],
+    },
+    {
+        name = 'Flagships',
+        light = 1,
+        dark = 1,
+        x0 = BUTTON_X0_LEFT,
+        z0 = BUTTON_Z[5],
+    },
+    {
+        name = 'Mech',
+        light = 1,
+        dark = 1,
+        x0 = BUTTON_X0_LEFT,
+        z0 = BUTTON_Z[6],
+    },
+    {
+        name = 'Commander',
+        light = 1,
+        dark = 1,
+        x0 = BUTTON_X0_LEFT,
+        z0 = BUTTON_Z[7],
+    },
+    {
+        name = 'Red Tiles',
+        light = 2,
+        dark = 0,
+        x0 = BUTTON_X0_RIGHT,
+        z0 = BUTTON_Z[1],
+    },
+    {
+        name = 'Blue Tiles',
+        light = 3,
+        dark = 0,
+        x0 = BUTTON_X0_RIGHT,
+        z0 = BUTTON_Z[2],
+    },
+    {
+        name = 'Home Systems',
+        light = 1,
+        dark = 1,
+        x0 = BUTTON_X0_RIGHT,
+        z0 = BUTTON_Z[3],
+    },
+    {
+        name = 'Faction Tech',
+        light = 2,
+        dark = 1,
+        x0 = BUTTON_X0_RIGHT,
+        z0 = BUTTON_Z[4],
+    },
+    {
+        name = 'Faction Abilities',
+        light = 3,
+        dark = 1,
+        x0 = BUTTON_X0_RIGHT,
+        z0 = BUTTON_Z[5],
+    },
+    {
+        name = 'Agent',
+        light = 1,
+        dark = 1,
+        x0 = BUTTON_X0_RIGHT,
+        z0 = BUTTON_Z[6],
+    },
+    {
+        name = 'Hero',
+        light = 1,
+        dark = 1,
+        x0 = BUTTON_X0_RIGHT,
+        z0 = BUTTON_Z[7],
+    },
+}
+
+function onLoad()
+    self.addContextMenuItem('Update buttons', updateButtons)
+    self.addContextMenuItem('Reset to defaults', resetToDefaults)
+    updateButtons()
+end
+
+function resetToDefaults()
+    -- Reset description.
+    local description = {}
+    for _, value in ipairs(VALUES) do
+        table.insert(description, value.name .. ': ' .. value.light .. '/' .. value.dark)
+    end
+    self.setDescription(table.concat(description, '\n'))
+
+    -- Add buttons.
+    updateButtons()
+end
+
+function updateButtons()
+    self.clearButtons()
+    createLabels()
+
+    local description = self.getDescription()
+    for _, value in ipairs(VALUES) do
+        local pattern = value.name .. ': (%d)/(%d)'
+        local light, dark = string.match(description, pattern)
+        if light and dark then
+            local p0 = {
+                x = value.x0,
+                y = BUTTON_Y,
+                z = value.z0
+            }
+            local dx = BUTTON_DX * (value.x0 < 1 and -1 or 1)
+            local rotation = { x = 0, y = 0, z = 0 }
+            local count = light + dark
+            createButtons(p0, dx, rotation, count, dark)
+        end
+    end
+end
+
+function createButtons(p0, dx, rotation, count, darkenCount)
+    for i = 0, count - 1 do
+        local buttonIndex = #(self.getButtons() or {}) + 1
+        local pressFunc = function() buttonPress(buttonIndex) end
+        self.setVar('press' .. buttonIndex, pressFunc)
+        self.createButton({
+            click_function = 'press' .. buttonIndex,
+            function_owner = self,
+            label          = '',
+            position       = {
+                x = p0.x + i * dx,
+                y = p0.y,
+                z = p0.z
+            },
+            rotation       = rotation,
+            width          = 100,
+            height         = 100,
+            color          = i < (count - darkenCount) and 'White' or 'Grey'
+        })
+    end
+end
+
+function createLabels()
+    local y = BUTTON_Y
+    local rotation = { x = 0, y = 0, z = 0 }
+
+    for i, label in ipairs(LABELS) do
+        local labelX = -0.2
+        local z = BUTTON_Z[i]
+
+        self.createButton({
+            click_function = 'none',
+            function_owner = self,
+            label          = label,
+            position       = { x = labelX, y = y, z = z },
+            rotation       = rotation,
+            width          = 0,
+            height         = 0,
+            font_size      = 80,
+        })
+    end
+end
+
+function buttonPress(index)
+    local buttons = self.getButtons()
+    local button = buttons[index]
+    button.label = button.label == '' and 'X' or ''
+    self.editButton(button)
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

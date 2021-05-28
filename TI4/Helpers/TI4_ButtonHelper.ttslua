@@ -1,0 +1,154 @@
+--- Button utility
+-- @author Darrell
+-- #include <~/CrLua/Objects/TI4_Helpers/TI4_ButtonHelper>
+
+-- Users should copy this getHelperClient function, and use via:
+--
+-- local deckHelper = getHelperClient('TI4_BUTTON_HELPER')
+--
+-- Where one can call any main function in this file via the helper.
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local function _copyTable(t)
+    if t and type(t) == 'table' then
+        local copy = {}
+        for k, v in pairs(t) do
+            copy[k] = type(v) == 'table' and _copyTable(v) or v
+        end
+        t = copy
+    end
+    return t
+end
+
+local CONFIRM_TIMEOUT_SECONDS = 5
+local CONFIRM_COLOR = 'Red'
+
+local _buttonIdToWaitId = {}
+
+--- Make a button have a "confirm" step requiring a second click.
+-- Button index must be stable!
+function addConfirmStep(params)
+    assert(type(params) == 'table')
+    assert(type(params.guid) == 'string')
+    assert(type(params.buttonIndex) == 'number')
+    assert(type(params.confirm) == 'table')
+    assert(type(params.confirm.label) == 'string')
+    assert((not params.confirm.font_size) or type(params.confirm.font_size) == 'number')
+    assert((not params.confirm.color) or type(params.confirm.color) == 'string')
+
+    params = _copyTable(params)
+    local id = '_onClick_' .. params.guid .. '_' .. params.buttonIndex .. '_'
+    local firstClickName = id .. 'first'
+    local secondClickName = id .. 'second'
+
+    local function getButton()
+        local object = getObjectFromGUID(params.guid)
+        assert(object, 'missing object')
+        local buttons = object.getButtons()
+        for _, button in ipairs(object.getButtons()) do
+            if button.index == params.buttonIndex then
+                return button
+            end
+        end
+        error('buttonHelper.addConfirmStep: invalid button index ' .. params.buttonIndex)
+    end
+
+    local function updateButton(overrides)
+        assert(type(overrides) == 'table')
+        local object = getObjectFromGUID(params.guid)
+        assert(object, 'missing object')
+        local button = getButton()
+        for k, v in pairs(overrides) do
+            button[k] = v
+        end
+        object.editButton(button)
+    end
+    -- Generate first/second click button overrides.
+    local button = getButton()
+    assert(button, 'index=' .. params.buttonIndex)
+    local originalClickFunction = button.click_function
+    local firstClickButtonOverrides = {
+        label = button.label,
+        font_size = button.font_size,
+        color = button.color,
+        function_owner = self,
+        click_function = firstClickName
+    }
+    local secondClickButtonOverrides = {
+        label = params.confirm.label,
+        font_size = params.confirm.font_size or button.font_size,
+        color = params.confirm.color or CONFIRM_COLOR,
+        function_owner = self,
+        click_function = secondClickName
+    }
+
+    local function firstClickHandler(object, clickerColor, altClick)
+        local function reset()
+            _buttonIdToWaitId[id] = nil
+            updateButton(firstClickButtonOverrides)
+        end
+        _buttonIdToWaitId[id] = Wait.time(reset, CONFIRM_TIMEOUT_SECONDS)
+        updateButton(secondClickButtonOverrides)
+    end
+    self.setVar(firstClickName, firstClickHandler)
+
+    local function secondClickHandler(object, clickerColor, altClick)
+        local waitId = _buttonIdToWaitId[id]
+        if waitId then
+            _buttonIdToWaitId[id] = nil
+            Wait.stop(waitId)
+        end
+        updateButton(firstClickButtonOverrides)
+        local object = getObjectFromGUID(params.guid)
+        assert(object, 'missing object')
+        -- Cannot preserve 3 arguments, but send them in a single argument table.
+        object.call(originalClickFunction, { object = object, color = clickerColor, alt = altClick })
+    end
+    self.setVar(secondClickName, secondClickHandler)
+
+    -- Reroute button here for confirm handling.
+    updateButton(firstClickButtonOverrides)
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    self.setColorTint({ r = 0.25, g = 0.25, b = 0.25 })
+    self.setScale({ x = 2, y = 0.01, z = 2 })
+    self.setName('TI4_BUTTON_HELPER')
+    self.setDescription('Shared helper functions used by other objects, PLEASE LEAVE ON TABLE! This object is only visible to the black (GM) player.')
+
+    -- Only the GM/black player can see this object.  Others can still interact!
+    local invisibleTo = {}
+    for _, color in ipairs(Player.getColors()) do
+        if color ~= 'Black' then
+            table.insert(invisibleTo, color)
+        end
+    end
+    self.setInvisibleTo(invisibleTo)
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

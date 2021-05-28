@@ -1,0 +1,18 @@
+- New "How to play: Twilight Imperium on Tabletop Simulator" PDF, on the table so new players can find it easily (thanks vorpaldicepress for making this look amazing).
+- Strategy card automator in tools bag (thanks Jirach08).  [Darrell: this is cool, check it out.]
+- Map tool: hyperlane map string entries now encode rotation as 0 for normal, +1 per clockwise rotation.
+- Map tool: right click option to rotate map 180 degrees.
+- Reset 3, 5, 7 player setup to match game board layout in the rules reference (e.g. for 3 players, 1 on "south" side of the table, 2 "north").  This also matches what most map generators produce for those player counts.
+- Update map strings for 3p and 5p maps for the new orientation, added hyperlanes to map strings.
+- Build tool AI Dev Algorithm now only includes each unit upgrade once (if copied).
+- Mech unit bags now reject non-mechs.
+- Update "Produce en Masse" to have "PRODUCTION" instead of "Production".
+- Mirage now attaches further from center for less overlap with center wormholes.
+- Updated PoK Franken bag home system tiles (thanks Jefferson).
+- Setup tile now rotates slowly during setup to signal setup is still in progress.
+- Combat roller now restricts unit modifier messages to combat related modifiers.
+- Update in-game notebook, some small tweaks and new PoK section.
+- Added mouseover text to Naaz-Rokha mech with ground/space combat handling.
+- Faction unpack now unpacks techs to tech board, if present.
+- Update when/after tooltip lists for PoK.
+- New explore menu options for Titan Note Token (select trait to explore).

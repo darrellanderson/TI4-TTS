@@ -1,0 +1,44 @@
+--- Spawn a tablet and open a URL.
+
+_config = {
+    buttonLabel = 'Take me to the survey',
+    buttonTooltip = 'Tabletop Simulator TI4 Mod Survey',
+    url = 'https://forms.gle/MpWNxikU3Mh9uxDr6'
+}
+
+function onLoad(save_state)
+    local scale = { x = 6, y = 0.1, z = 2 }
+    local invScale = { x = 1 / scale.x, y = 1 / scale.y, z = 1 / scale.z }
+    self.setScale(scale)
+    self.createButton({
+        click_function = 'openUrl',
+        function_owner = self,
+        label          = string.upper(_config.buttonLabel),
+        position       = { x = 0, y = 1, z = 0 },
+        rotation       = nil, -- Vector,
+        scale          = invScale, -- Vector,
+        width          = 2800, -- int,
+        height         = 700, -- int,
+        font_size      = 250, -- int,
+        color          = nil, -- Color,
+        font_color     = nil, -- Color,
+        tooltip        = _config.buttonTooltip
+    })
+    self.setName(_config.buttonLabel)
+    self.setDescription(_config.url)
+end
+
+function openUrl()
+    local p = self.getPosition()
+    local tablet = spawnObject({
+        type              = 'Tablet',
+        position          = { x = p.x, y = p.y + 3, z = p.z },
+        rotation          = self.getRotation(),
+        scale             = { x = 1, y = 1, z = 2 },
+        callback_fucntion = nil,
+        sound             = false,
+        params            = nil,
+        snap_to_grid      = false
+    })
+    tablet.setValue(_config.url)
+end

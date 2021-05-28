@@ -1,0 +1,270 @@
+--- Hightlight units
+-- Suggested by Visioness
+-- @author Darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+
+local UNITS = {
+    'Infantry',
+    'Fighter',
+    'Destroyer',
+    'Cruiser',
+    'Carrier',
+    'Dreadnought',
+    'War Sun',
+    'Space Dock',
+    'PDS',
+    'Flagship',
+    'Mech'
+}
+
+local _toggles = {}
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    Wait.frames(updateUi, 3)
+end
+
+function onPlayerConnect(player_id)
+    Wait.frames(updateUi, 3)
+end
+
+function onPlayerChangeColor(player_color)
+    Wait.frames(updateUi, 3)
+end
+
+-------------------------------------------------------------------------------
+
+function updateUi()
+    local defaults = {
+        tag = 'Defaults',
+        children = {
+            {
+                tag = 'Toggle',
+                attributes = {
+                    fontSize = 10,
+                    onValueChanged = 'onToggleValueChanged',
+                }
+            },
+            {
+                tag = 'Button',
+                attributes = {
+                    fontSize = 10,
+                    onClick = 'onButtonClick'
+                }
+            },
+            {
+                tag = 'Button',
+                attributes = {
+                    class = 'grid',
+                    fontSize = 10,
+                    onClick = 'onButtonClick'
+                }
+            }
+        }
+    }
+
+    local function allNoneButtons(prefix)
+        return {
+            {
+                tag = 'Button',
+                attributes = {
+                    class = 'grid',
+                    id = prefix .. 'all',
+                },
+                value = 'ALL'
+            },
+            {
+                tag = 'Button',
+                attributes = {
+                    class = 'grid',
+                    id = prefix .. 'none',
+                },
+                value = 'NONE'
+            }
+        }
+    end
+
+    local function colorToggles()
+        local result = {}
+        for _, color in ipairs(Player.getAvailableColors()) do
+            table.insert(result, {
+                tag = 'Toggle',
+                attributes = {
+                    id = color,
+                    textColor = color == 'White' and 'Black' or color
+                },
+                value = color
+            })
+        end
+        return result
+    end
+
+    local function unitToggles()
+        local result = {}
+        for _, unit in ipairs(UNITS) do
+            table.insert(result, {
+                tag = 'Toggle',
+                attributes = {
+                    id = unit,
+                },
+                value = string.gsub(unit, ' ' , '')
+            })
+        end
+        return result
+    end
+
+    local top = {
+        tag = 'VerticalLayout',
+        attributes = {
+            position = '0 0 2',  -- 0.05
+            rotation = '0 180 90',
+            width = 200,
+            height = 280,
+            padding = '10 10 10 10',
+            spacing = 10,
+        },
+        children = {
+            {
+                tag = 'GridLayout',
+                attributes = {
+                    cellSize = '90 20'
+                },
+                children = allNoneButtons('units:')
+            },
+            {
+                tag = 'GridLayout',
+                attributes = {
+                    cellSize = '60 20'
+                },
+                children = unitToggles()
+            },
+
+
+            {
+                tag = 'GridLayout',
+                attributes = {
+                    cellSize = '90 20'
+                },
+                children = allNoneButtons('colors:')
+            },
+            {
+                tag = 'GridLayout',
+                attributes = {
+                    cellSize = '60 20'
+                },
+                children = colorToggles()
+            },
+            {
+                tag = 'Button',
+                attributes = {
+                    id = 'showUnits',
+                    height = 40,
+                    preferredHeight = 40,
+                },
+                value = 'SHOW UNITS'
+            }
+        }
+    }
+
+    self.UI.setXmlTable({ defaults, top })
+end
+
+-------------------------------------------------------------------------------
+
+function onToggleValueChanged(player, value, id)
+    local valueAsBool = string.lower(value) == 'true' and true or false
+    _toggles[id] = valueAsBool
+end
+
+function onButtonClick(player, input, id)
+
+    local function setAll(ids, value)
+        assert(type(value) == 'boolean')
+        for _, id in ipairs(ids) do
+            self.UI.setAttribute(id, 'isOn', value)
+            _toggles[id] = value
+        end
+    end
+
+    if id == 'units:all' then
+        setAll(UNITS, true)
+    elseif id == 'units:none' then
+        setAll(UNITS, false)
+    elseif id == 'colors:all' then
+        setAll(Player.getAvailableColors(), true)
+    elseif id == 'colors:none' then
+        setAll(Player.getAvailableColors(), false)
+    elseif id == 'showUnits' then
+        showUnits(player)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function showUnits(player)
+    local colorSet = {}
+    for _, color in ipairs(Player.getAvailableColors()) do
+        if _toggles[color] then
+            colorSet[color] = true
+        end
+    end
+
+    local unitSet = {}
+    for _, unit in ipairs(UNITS) do
+        if _toggles[unit] then
+            unitSet[unit] = true
+        end
+    end
+
+    local objectNameToColor = {}
+    for color, _ in pairs(colorSet) do
+        for unit, _ in pairs(unitSet) do
+            objectNameToColor[color .. ' ' .. unit] = color
+        end
+        if unitSet['Flagship'] then
+            local faction = _factionHelper.fromColor(color)
+            if faction and faction.flagship then
+                objectNameToColor[faction.flagship] = color
+            end
+        end
+    end
+
+    -- Highlight with white for visibility.
+    local highlightColor = {r=1,g=1,b=1}
+    for _, object in ipairs(getAllObjects()) do
+        local color = objectNameToColor[object.getName()]
+        if object.tag ~= 'Bag' and color then
+            object.highlightOn(highlightColor, 20)
+            player.pingTable(object.getPosition())
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

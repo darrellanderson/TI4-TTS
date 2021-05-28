@@ -1,0 +1,17 @@
+- Relic fragment bags now have "#/#" display to show purge count over total.
+- Fix TI Stats (right click the table to show) to include attachments in res/inf.
+- Fix TI Stats to count other players' command tokens in a fleet pool.
+- Fix map tool support for placing a different center tile.
+- Fix map tool not placing the third legendary planet card.
+- Fix map tool counting Mallice, other non-system tiles toward slice values.
+- Apply "purge card" option to all hero cards.
+- Fix pink, orange, and brown leader/command sheet sizes.
+- Fix l2p 7p map string.
+- Fix typo in Mahact base info.
+- Fix command sheet typo.
+- Maybe fix stowing removed agenda cards during PoK setup.
+- Spreadsheet update now PoK ready (though still requires 6 base colors, and some secrets use the full names instead of an abbreviation).
+- Added setup message asking Mahact to purge their Alliance promissory note.
+- Fix flagship modifier application when vs color is relevant (Mahact).
+- Minor helper tweaks to let tools read more game state.
+- Graveyard now returns explore tokens.

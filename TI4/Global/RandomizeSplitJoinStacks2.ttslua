@@ -1,0 +1,278 @@
+-- Swap hovered/selected tokens, platic, and/or groups.
+-- @author original by GarnetBear October 18, 2019
+-- @author updated by Darrell May 2020 to merge groups, revisited January 2021 to simplify.
+local SwapSplitJoin = {
+    -- Map from replaceable object name to bag name.
+    OBJECTNAME_TO_BAGNAME = {
+        ['x1 Fighter Token'] = 'x1 Fighter Tokens Bag',
+        ['x3 Fighter Token'] = 'x3 Fighter Tokens Bag',
+        ['x1 Infantry Token'] = 'x1 Infantry Tokens Bag',
+        ['x3 Infantry Token'] = 'x3 Infantry Tokens Bag',
+        ['x1 Commodities/Tradegoods'] = 'x1 Commodities/Tradegoods Bag',
+        ['x3 Commodities/Tradegoods'] = 'x3 Commodities/Tradegoods Bag',
+        ['$COLOR Fighter'] = '$COLOR Fighter',
+        ['$COLOR Infantry'] = '$COLOR Infantry'
+    },
+
+    -- Replace consumed items with produced items.  Repeatable entries happen as
+    -- much as possible from the input, and ONLY IF no repeatable do the first
+    -- non-repeatable (eagerly group, cautiously break apart).  Plastic color is
+    -- mandated by the player doing the 'r' randomizing for safety/simplicity.
+    REPLACE_RULES = {
+        {
+            repeatable = true,
+            consume = { count = 3, items = { 'x1 Fighter Token', '$COLOR Fighter' }},
+            produce = { item = 'x3 Fighter Token' },
+        },
+        {
+            repeatable = true,
+            consume = { count = 3, items = { 'x1 Infantry Token', '$COLOR Infantry' }},
+            produce = { item = 'x3 Infantry Token' },
+        },
+        {
+            repeatable = true,
+            requireFaceUp = true,
+            consume = { count = 3, item = 'x1 Commodities/Tradegoods' },
+            produce = { item = 'x3 Commodities/Tradegoods' },
+        },
+        {
+            repeatable = true,
+            requireFaceDown = true,
+            consume = { count = 3, item = 'x1 Commodities/Tradegoods' },
+            produce = { item = 'x3 Commodities/Tradegoods' },
+        },
+        {
+            consume = { item = 'x3 Fighter Token' },
+            produce = { count = 3, item = 'x1 Fighter Token' },
+        },
+        {
+            consume = { item = 'x3 Infantry Token' },
+            produce = { count = 3, item = 'x1 Infantry Token' },
+        },
+        {
+            requireFaceUp = true,
+            consume = { item = 'x3 Commodities/Tradegoods' },
+            produce = { count = 3, item = 'x1 Commodities/Tradegoods' },
+        },
+        {
+            requireFaceDown = true,
+            consume = { item = 'x3 Commodities/Tradegoods' },
+            produce = { count = 3, item = 'x1 Commodities/Tradegoods' },
+        },
+        {
+            consume = { item = 'x1 Fighter Token' },
+            produce = { item = '$COLOR Fighter' },
+        },
+        {
+            consume = { item = 'x1 Infantry Token' },
+            produce = { item = '$COLOR Infantry' },
+        },
+        {
+            consume = { item = '$COLOR Fighter' },
+            produce = { item = 'x1 Fighter Token' },
+        },
+        {
+            consume = { item = '$COLOR Infantry' },
+            produce = { item = 'x1 Infantry Token' },
+        },
+    },
+
+    WAIT_FRAMES = 3,
+
+    _playerColorToNamesAndGuids = {},
+    _playerColorToWaitId = {},
+}
+
+--- Add an object to the player's pending set, schedule swap.
+function SwapSplitJoin.add(object, playerColor)
+    assert(type(object) == 'userdata' and type(playerColor) == 'string')
+
+    -- Reject bags and decks (unit bags in particular).
+    if object.tag == 'Bag' or object.tag == 'Deck' then
+        return false
+    end
+
+    -- Get the anonymized object name, reject if none.
+    local name = object.getName()
+    name = string.gsub(name, playerColor, '$COLOR')
+    if not SwapSplitJoin.OBJECTNAME_TO_BAGNAME[name] then
+        return false
+    end
+
+    -- Add to the per-color list.  Reject if already there.
+    local namesAndGuids = SwapSplitJoin._playerColorToNamesAndGuids[playerColor]
+    if not namesAndGuids then
+        namesAndGuids = {}
+        SwapSplitJoin._playerColorToNamesAndGuids[playerColor] = namesAndGuids
+    end
+    local guid = object.getGUID()
+    for _, nameAndGuid in ipairs(namesAndGuids) do
+        if guid == nameAndGuid.guid then
+            return false
+        end
+    end
+    table.insert(namesAndGuids, {
+        name = name,
+        guid = guid
+    })
+
+    -- Wait a beat for other objects to get added to the set.
+    local waitId = SwapSplitJoin._playerColorToWaitId[playerColor]
+    if waitId then
+        Wait.stop(waitId)
+        waitId = nil
+    end
+    waitId = Wait.frames(function() SwapSplitJoin._consume(playerColor) end, SwapSplitJoin.WAIT_FRAMES)
+    SwapSplitJoin._playerColorToWaitId[playerColor] = waitId
+    return true
+end
+
+-- Get consumable items from entries (does not remove them from entries).
+-- @param rule: REPLACE_RULES value.
+-- @param namesAndGuids: list of {name, guid} tables.
+-- @return consumable: list of {name, guid} tables for consumable items.
+function SwapSplitJoin._getConsumable(rule, namesAndGuids)
+    assert(type(rule) == 'table' and rule.consume and type(namesAndGuids) == 'table')
+
+    -- Collect objects following rule.
+    local consumable = {}
+    local function maybeAdd(rule, consumeName, nameAndGuid)
+        assert(type(rule) == 'table' and type(consumeName) == 'string' and type(nameAndGuid) == 'table')
+        local object = getObjectFromGUID(nameAndGuid.guid)
+        if not object then
+            return false
+        elseif consumeName ~= nameAndGuid.name then
+            return false
+        elseif rule.requireFaceUp and object.is_face_down then
+            return false
+        elseif rule.requireFaceDown and not object.is_face_down then
+            return false
+        end
+        table.insert(consumable, nameAndGuid)
+    end
+
+    -- For multi-item rules add in item list order (prefer token to plastic when grouping).
+    for _, consumeName in ipairs(rule.consume.items or { rule.consume.item }) do
+        for _, nameAndGuid in ipairs(namesAndGuids) do
+            maybeAdd(rule, consumeName, nameAndGuid)
+        end
+    end
+    return consumable
+end
+
+-- Apply swap/split/join rule ONCE, remove items from namesAndGuids list.
+-- @param rule: REPLACE_RULES value.
+-- @param namesAndGuids: list of {name, guid} tables, modified to remove consumed items.
+-- @param playerColor: color string.
+-- @return boolean: true if a swap/split/join happened.
+function SwapSplitJoin._applyRule(rule, namesAndGuids, playerColor)
+    assert(type(rule) == 'table' and rule.consume and type(namesAndGuids) == 'table' and type(playerColor) == 'string')
+
+    -- Get consumable items, fail if not enough.
+    local consumable = SwapSplitJoin._getConsumable(rule, namesAndGuids)
+    if #consumable < (rule.consume.count or 1) then
+        return false
+    end
+
+    -- Fail if produce bag does not have sufficient quantity.
+    local produceBagName = assert(SwapSplitJoin.OBJECTNAME_TO_BAGNAME[rule.produce.item])
+    produceBagName = string.gsub(produceBagName, '$COLOR', playerColor)
+    local produceBag = assert(_getBag(produceBagName))
+    if produceBag.tag == 'Bag' and produceBag.getQuantity() < (rule.produce.count or 1) then
+        return false
+    end
+
+    -- Consume the proper number of items.
+    local pos = false
+    for _ = 1, (rule.consume.count or 1) do
+        local nameAndGuid = assert(table.remove(consumable, 1))
+        -- Remove from candidate items.
+        for i, candidate in ipairs(namesAndGuids) do
+            if candidate.guid == nameAndGuid.guid then
+                table.remove(namesAndGuids, i)
+            end
+        end
+        -- Consume object.
+        local object = assert(getObjectFromGUID(nameAndGuid.guid))
+        local bagName = assert(SwapSplitJoin.OBJECTNAME_TO_BAGNAME[nameAndGuid.name])
+        bagName = string.gsub(bagName, '$COLOR', playerColor)
+        local bag = assert(_getBag(bagName))
+        if not pos then
+            pos = object.getPosition()
+        end
+        bag.putObject(object)
+    end
+
+    -- Produce.
+    local name = assert(rule.produce.item)
+    local bagName = assert(SwapSplitJoin.OBJECTNAME_TO_BAGNAME[name])
+    for _ = 1, (rule.produce.count or 1) do
+        local rot = { x = 0, y = 0, z = (rule.requireFaceDown and 180 or 0) }
+        assert(produceBag.takeObject({
+            position = pos,
+            rotation = rot,
+            smooth = true,
+        }))
+        pos.z = pos.z + 0.5 * (pos.z > 0 and 1 or -1)
+        pos.y = pos.y + 0.5
+    end
+
+    return true
+end
+
+function SwapSplitJoin._consume(playerColor)
+    assert(type(playerColor) == 'string')
+
+    -- Get selected items.
+    local namesAndGuids = SwapSplitJoin._playerColorToNamesAndGuids[playerColor]
+    if not namesAndGuids then
+        return false
+    end
+    SwapSplitJoin._playerColorToNamesAndGuids[playerColor] = nil
+
+    -- Apply rules in order.  Once any rule is applied only repeatable rules can chain.
+    local didConsume = false
+    for _, rule in ipairs(SwapSplitJoin.REPLACE_RULES) do
+        if rule.repeatable then
+            -- Do all repeatable rules as many times as possible.
+            while SwapSplitJoin._applyRule(rule, namesAndGuids, playerColor) do
+                didConsume = true
+            end
+        elseif not didConsume then
+            -- If singleton and nothing consumed yet, consume ONLY FIRST APPLICABLE.
+            didConsume = SwapSplitJoin._applyRule(rule, namesAndGuids, playerColor)
+        end
+    end
+end
+
+-- Get absolute bag name from $COLOR-allowed item name.
+local _bagGuidCache = {}
+function _getBag(bagName)
+   assert(type(bagName) == 'string')
+   local bagGuid = _bagGuidCache[bagName]
+   local bag = bagGuid and getObjectFromGUID(bagGuid)
+   if not bag then
+       for _, object in ipairs(getAllObjects()) do
+           if (object.tag == 'Bag' or object.tag == 'Infinite') and object.getName() == bagName then
+               _bagGuidCache[bagName] = object.getGUID()
+               bag = object
+               break
+           end
+       end
+   end
+   if not bag then
+       error('Global._getBag: missing bag "' .. bagName .. '"')
+   end
+   return bag
+end
+
+local originalOnObjectRandomize = onObjectRandomize
+function onObjectRandomize(object, playerColor)
+    assert(type(object) == 'userdata' and type(playerColor) == 'string')
+
+    if originalOnObjectRandomize then
+        originalOnObjectRandomize(object, playerColor)
+    end
+
+    SwapSplitJoin.add(object, playerColor)
+end

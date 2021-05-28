@@ -1,0 +1,13 @@
+v36
+- Fix "Actions" overlay window to show production step.
+- Fix issue with detecting homebrew injected flagships.
+- Fix (harmless) error message when starting the streamer overlay before any players have joined.
+- Fix anonymized game data when resuming a split game.
+- Fix trade goods falling below strategy cards when resuming a split game.
+- Add "[PoK]" to PoK tech tooltips in tech strategy card window.
+- New button helper to make it easier/safer to add confirm steps, update strategy card mat and Milty draft tool to use it.
+- Add confirm step to destructive map tool buttons.
+- Add some table state to anonymized game data.
+- Faction borders tool now supports TTS teams for alliance variant (thanks Goatboy!).
+- Franken box right-click toggle to create an extra draft bag.
+- Milty draft now tries to separate same-type wormholes into different slices.

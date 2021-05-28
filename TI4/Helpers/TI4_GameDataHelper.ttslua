@@ -1,0 +1,2446 @@
+--- Gather game data (score, tech, etc).
+-- Alec/Root's Twitch overlay: https://ti4-tts-gamedata-display-tool.herokuapp.com/
+-- @author Darrell
+-- #include <~/CrLua/Objects/TI4_Helpers/TI4_GameDataHelper>
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local function copyTable(t)
+    if t and type(t) == 'table' then
+        local copy = {}
+        for k, v in pairs(t) do
+            copy[k] = type(v) == 'table' and copyTable(v) or v
+        end
+        t = copy
+    end
+    return t
+end
+
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _technologyHelper = getHelperClient('TI4_TECHNOLOGY_HELPER')
+local _setupHelper = getHelperClient('TI4_SETUP_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local GAME_DATA_HOST = 'http://ti4-game-data.appspot.com'
+local GAME_DATA_LOCALHOST = 'http://localhost:8080'
+local GAME_DATA_LOCALHOST_KEY = 'localhost'
+
+local MIN_PERIODIC_SECONDS = 20
+local MAX_PERIODIC_SECONDS = 3600
+local DEFAULT_KEY_PERIODIC_SECONDS = 30
+local DEFAULT_ANON_PERIODIC_SECONDS = 600
+
+-- Remember opt-in across save/reload.
+local DEFAULT_STATE = {
+    _gamedataOptIn = false,
+}
+
+-- !gamedata registration for streamer overlay needs to be redone manually.
+_gameDataKey = false
+_timerPeriodicSeconds = false
+
+local _state = DEFAULT_STATE
+local _timerId = false  -- for regular gamedata updates
+local _analyticsTimerId = false
+
+-- Time based throttle for external pokes.
+local _triggerUploadGameDataWaitId = false
+
+-- Disable update when nothing changes.
+local _lastCrc = false
+
+-------------------------------------------------------------------------------
+
+function addExtraData(params)
+    assert(type(params.name) == 'string')
+    assert((not params.callbackGuid) or type(params.callbackGuid) == 'string')
+    assert((not params.callbackFunction) or type(params.callbackFunction) == 'string')
+
+    if params.value then
+        assert((not params.callbackGuid) and (not params.callbackFunction))
+    else
+        assert(params.callbackGuid and params.callbackFunction)
+        local object = getObjectFromGUID(params.callbackGuid)
+        assert(object.getVar(params.callbackFunction))
+    end
+
+    _state.extraData = _state.extraData or {}
+    _state.extraData[params.name] = params
+end
+
+--- Expose method so outsiders can trigger an update.
+function triggerUploadGameData()
+    if _triggerUploadGameDataWaitId then
+        Wait.stop(_triggerUploadGameDataWaitId)
+    end
+    local function wrappedUploadGameData()
+        _triggerUploadGameDataWaitId = false
+        _uploadGameData()
+        _uploadAnalytics()
+    end
+    _triggerUploadGameDataWaitId = Wait.time(wrappedUploadGameData, 10)
+end
+
+--- Expose the setup timestamp.
+function getGameDataTimestamp()
+    return _state.setupTimestamp
+end
+
+-------------------------------------------------------------------------------
+
+local _asyncGatherDataQueue = {}
+
+function asyncGatherData(params)
+    assert(type(params) == 'table')
+    assert(type(params.guid) == 'string')
+    assert(type(params.callbackFunctionName) == 'string')
+    table.insert(_asyncGatherDataQueue, params)
+    startLuaCoroutine(self, 'asyncGatherDataCoroutine')
+end
+
+function asyncGatherDataCoroutine()
+    local params = table.remove(_asyncGatherDataQueue)
+    if not params then
+        return
+    end
+
+    local result = {
+        setupTimestamp = _state.setupTimestamp,
+        timestamp = math.floor(os.time()),
+        laws = getLaws(),
+        turn = Turns.turn_color or '',
+        isPoK = _setupHelper.getPoK() and true or false,
+        isFranken = _factionHelper.isFrankenEnabled() and true or false,
+        scoreboard = Score.getScoreboardPoints(),
+        players = {},
+        periodicSeconds = _timerPeriodicSeconds,
+    }
+    local colorToPlayerResult = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local playerResult = {
+            color = color,
+        }
+        colorToPlayerResult[color] = playerResult
+        table.insert(result.players, playerResult)
+    end
+
+    -- Global items.
+
+    result.round = getRound()
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    result.objectives = getObjectives()
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    result.speaker = getSpeakerColor() or ''
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    result.mapString = Map.getMapString() or ''
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    local naaluToken = Objects.getByName('Zero Strategy Token')
+    local tokenZone = naaluToken and _zoneHelper.zoneFromPosition(naaluToken.getPosition())
+    result.naaluToken = tokenZone or nil
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    result.hexSummary = getHexSummaryWithYields()
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    -- Per-player items.
+
+    -- Only gather names when using game data (for the streamer overlay).
+    if params.includeSteamNames then
+        for color, steamName in pairs(colorToSteamName()) do
+            colorToPlayerResult[color].steamName = steamName
+        end
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, factionName in pairs(colorToFactionName()) do
+        colorToPlayerResult[color].factionName = factionName
+    end
+    for color, factionShort in pairs(colorToFactionAbbrv()) do
+        colorToPlayerResult[color].factionShort = factionShort
+    end
+    for color, teamName in pairs(colorToTeamName()) do
+        colorToPlayerResult[color].teamName = teamName
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, score in pairs(colorToScore()) do
+        colorToPlayerResult[color].score = score
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, active in pairs(colorToActive()) do
+        colorToPlayerResult[color].active = active
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, planetTotals in pairs(colorToPlanetTotals()) do
+        colorToPlayerResult[color].planetTotals = planetTotals
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, commandTokens in pairs(colorToCommandTokens()) do
+        colorToPlayerResult[color].commandTokens = commandTokens
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, tradeGoodsCommodities in pairs(colorToTradeGoodsCommodities()) do
+        for k, v in pairs(tradeGoodsCommodities) do
+            colorToPlayerResult[color][k] = v
+        end
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    local all, faceDown = colorToStrategyCards()
+    for color, strategyCards in pairs(all) do
+        colorToPlayerResult[color].strategyCards = strategyCards
+    end
+    for color, strategyCards in pairs(faceDown) do
+        colorToPlayerResult[color].strategyCardsFaceDown = strategyCards
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, objectives in pairs(colorToObjectives()) do
+        colorToPlayerResult[color].objectives = objectives
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, custodiansPoints in pairs(colorToCustodiansPoints()) do
+        colorToPlayerResult[color].custodiansPoints = custodiansPoints
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, leaderUnlocks in pairs(colorToLeaderUnlocks()) do
+        colorToPlayerResult[color].leaders = leaderUnlocks
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, alliances in pairs(colorToAlliances()) do
+        colorToPlayerResult[color].alliances = alliances
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, laws in pairs(colorToLaws()) do
+        colorToPlayerResult[color].laws = laws
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, technologies in pairs(colorToTechnologies()) do
+        colorToPlayerResult[color].technologies = technologies
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    for color, handSummary in pairs(colorToHandSummary()) do
+        colorToPlayerResult[color].handSummary = handSummary
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    -- Get the round.
+    local round = result.round or 0
+    -- Reject if turns are not enabled (disabled when all have passed).
+    -- Otherwise reject if any players are missing a strategy card.
+    -- (Objective flipped but not yet started new round).
+    if not Turns.enable then
+        round = false
+    else
+        local requiredStrategyCardCount = (#result.players) < 5 and 2 or 1
+        for color, playerResult in pairs(colorToPlayerResult) do
+            local strategyCards = playerResult.strategyCards or {}
+            if (#strategyCards) < requiredStrategyCardCount then
+                round = false
+                break
+            end
+        end
+    end
+    local prevRound = 0
+    if _state.gameDataHistory and (#_state.gameDataHistory) > 0 then
+        prevRound = _state.gameDataHistory[#_state.gameDataHistory].round
+    end
+    if round and prevRound and (round > prevRound) then
+        _state.gameDataHistory = _state.gameDataHistory or {}
+        -- Add the "pure" start-of-round data, before attaching the history entry.
+        local historyEntry = copyTable(result)
+        -- Remove some fields from the history.
+        historyEntry.isFranken = nil
+        historyEntry.isPoK = nil
+        historyEntry.mapString = nil
+        historyEntry.objectives = nil
+        historyEntry.setup = nil
+        historyEntry.scoreboard = nil
+        historyEntry.turn = nil
+        for _, playerResult in ipairs(historyEntry.players) do
+            playerResult.steamName = nil
+            playerResult.factionName = nil
+            playerResult.factionShort = nil
+            playerResult.team = nil
+            playerResult.active = nil
+            playerResult.strategyCardsFaceDown = nil
+            playerResult.technologies = #playerResult.technologies  -- same order as main list
+            playerResult.crc = nil
+        end
+        table.insert(_state.gameDataHistory, historyEntry)
+    end
+    result.history = _state.gameDataHistory or {}
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    -- Let objects add additional top-level (not in history) data.
+    for name, params in pairs(_state.extraData or {}) do
+        local value = params.value
+        if not value then
+            local object = getObjectFromGUID(params.callbackGuid)
+            if object and object.getVar(params.callbackFunction) then
+                value = object.call(params.callbackFunction)
+                coroutine.yield(0)
+            end
+        end
+        if value then
+            result.extra = result.extra or {}
+            result.extra[name] = value
+        end
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    -- Finally add a root CRC for everything EXCEPT TIMESTAMP!
+    local saveTimestamp = result.timestamp
+    result.timestamp = nil
+    result.crc = CRC32.hash(JSON.encode(result))
+    result.timestamp = saveTimestamp
+
+    local callbackObject = getObjectFromGUID(params.guid)
+    if callbackObject then
+        callbackObject.call(params.callbackFunctionName, result)
+    end
+    return 1
+end
+
+-------------------------------------------------------------------------------
+-- Public methods are in this section.  These should be short methods returning
+-- maps from color to simple values.
+
+function colorToSteamName()
+    local result = {}
+    local colorToName = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        colorToName[player.color] = player.steam_name
+    end
+    for _, color in ipairs(_zoneHelper.zones()) do
+        result[color] = colorToName[color] or ''
+    end
+    return result
+end
+
+function colorToFactionName()
+    local result = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local faction = _factionHelper.fromColor(color)
+        result[color] = faction and faction.tokenName
+    end
+    return result
+end
+
+function colorToFactionAbbrv()
+    local result = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local faction = _factionHelper.fromColor(color)
+        result[color] = faction and faction.frankenName
+    end
+    return result
+end
+
+function colorToTeamName()
+    local result = {}
+    local colorToTeamName = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        colorToTeamName[player.color] = player.team
+    end
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local teamName = colorToTeamName[color]
+        result[color] = (teamName and teamName ~= 'None') and teamName or nil
+    end
+    return result
+end
+
+function colorToScore()
+    local tokens = Tokens.getTokens('Owner')
+    local result = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local colorTokens = Tokens.filterTokens(tokens, color)
+        result[color] = Score.getScore(colorTokens)
+    end
+    return result
+end
+
+function getSpeakerColor()
+    local token = Players.getSpeakerToken()
+    return token and _zoneHelper.zoneFromPosition(token.getPosition())
+end
+
+function colorToActive()
+    local tokens = Players.getActivePassedTokens()
+    local result = {}
+    for _, token in ipairs(tokens) do
+        local color = string.match(token.getName(), '^Active/Passed %((.*)%)')
+        result[color] = not token.is_face_down
+    end
+    return result
+end
+
+function colorToPlanetTotals()
+    local cards = Cards.getCards()
+    local colorToCards = Objects.groupByZone(cards)
+    local result = {}
+    for color, cards in pairs(colorToCards) do
+        result[color] = Cards.sumAttrs(cards)
+    end
+    return result
+end
+
+function colorToResourcesInfluence()
+    local cards = Cards.getCards()
+    local colorToCards = Objects.groupByZone(cards)
+    local result = {}
+    for color, cards in pairs(colorToCards) do
+        result[color] = Cards.sumAttrs(cards)
+    end
+    return result
+end
+
+function colorToCommandTokens()
+    local tokens = Tokens.getTokens('Command')
+    local colorToTokens = Objects.groupByZone(tokens) -- do not filter, allow mix of factions
+    local result = {}
+    for color, tokens in pairs(colorToTokens) do
+        local numTactics, numFleet, numStrategy = Tokens.sumTacticFleetStrategy(tokens, color)
+        result[color] = {
+            tactics = numTactics,
+            fleet = numFleet,
+            strategy = numStrategy,
+        }
+    end
+    return result
+end
+
+function colorToTradeGoodsCommodities()
+    local tokens = Tokens.getTradeGoodsCommodities()
+    local colorToTokens = Objects.groupByZone(tokens)
+    local result = {}
+    for color, tokens in pairs(colorToTokens) do
+        local faceUp, faceDown = Objects.groupByFaceUpDown(tokens)
+        result[color] = {
+            tradeGoods = Tokens.sumTradeGoodsCommodities(faceDown),
+            commodities = Tokens.sumTradeGoodsCommodities(faceUp),
+        }
+    end
+    return result
+end
+
+function colorToStrategyCards()
+    local strategyCards = StrategyCards.getStrategyCards()
+    local colorToStrategyCards = Objects.groupByZone(strategyCards)
+    local result, resultFaceDown = {}, {}
+    for color, strategyCards in pairs(colorToStrategyCards) do
+        local names = {}
+        local faceDown = {}
+        for _, strategyCard in ipairs(strategyCards) do
+            if not strategyCard.held_by_color then
+                local name = StrategyCards.value(strategyCard)
+                table.insert(names, name)
+                if strategyCard.is_face_down then
+                    table.insert(faceDown, name)
+                end
+            end
+        end
+        table.sort(names)
+        result[color] = names
+        table.sort(faceDown)
+        resultFaceDown[color] = faceDown
+    end
+    return result, resultFaceDown
+end
+
+function getRound()
+    return Objectives.getRound()
+end
+
+function getObjectives()
+    local objectives = Objectives.getCards()  -- discovery order
+    local deckNameToObjectives = Objectives.groupByDeckName(objectives)
+    local result = {}
+
+    for deckName, objectives in pairs(deckNameToObjectives) do
+        local entry = {}
+        for _, objective in ipairs(objectives) do
+            local name = objective.getName()
+            name = string.match(name, '^(.*) %(PoK%)$') or name
+            table.insert(entry, name)
+        end
+        -- Do NOT sort, objectives are in discovery order (newly flipped at end).
+        result[deckName] = entry
+    end
+
+    -- Track public objects off board.
+    result.offBoardPublicObjectives = {}
+    for deckName, objectives in pairs(deckNameToObjectives) do
+        local isPublic = string.match(deckName, '^Public') and true or false
+        if isPublic then
+            for _, objective in ipairs(objectives) do
+                if not Objectives.isOnPublicObjectivesMat(objective) then
+                    local name = objective.getName()
+                    name = string.match(name, '^(.*) %(PoK%)$') or name
+                    table.insert(result.offBoardPublicObjectives, name)
+                end
+            end
+        end
+    end
+
+    -- Make sure each is unique.
+    for k, v in pairs(result) do
+        local seen = {}
+        local unique = {}
+        for _, name in ipairs(v) do
+            if not seen[name] then
+                seen[name] = true
+                table.insert(unique, name)
+            end
+        end
+        result[k] = unique
+    end
+
+    return result
+end
+
+function colorToObjectives()
+    local result = {}
+    local function addResult(color, name)
+        name = string.match(name, '^(.*) %(PoK%)$') or name
+        local entry = result[color]
+        if not entry then
+            entry = {}
+            result[color] = entry
+        end
+        for _, entryValue in ipairs(entry) do
+            if entryValue == name then
+                return
+            end
+        end
+        table.insert(entry, name)
+    end
+
+    local objectives = Objectives.getCards()
+    local tokens = Tokens.getTokens('Owner')
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local colorTokens = Tokens.filterTokens(tokens, color)
+        local objectiveToOverlappingTokens = Objects.overlap(colorTokens, objectives)
+        for objective, overlappingTokens in pairs(objectiveToOverlappingTokens) do
+            if #overlappingTokens > 0 then
+                addResult(color, objective.getName())
+            end
+        end
+    end
+
+    -- Also add objectives in color's "Secrets Mat" column.
+    local secretsMat = Objects.getByName('Secrets Mat')
+    if secretsMat then
+        local bounds = secretsMat.getBounds()
+        local bb = _getBoundingBox(secretsMat)
+        local colors = _zoneHelper.zones()
+        for _, objective in ipairs(objectives) do
+            local p = objective.getPosition()
+            if _insideBox(objective, bb) then
+                p = secretsMat.positionToLocal(p)
+                -- Row centers: -8.75, -6.25, ..., 8.75.  Col width: 2.5
+                local col = math.floor((p.x + 8.75 + 0.5) / 2.5) + 1
+                local color = colors[col]
+                if color then
+                    addResult(color, objective.getName())
+                end
+            end
+        end
+    end
+
+    return result
+end
+
+function colorToCustodiansPoints()
+    local tokens = Tokens.getTokens('Owner')
+    local custodiansToken = Objectives.getCustodiansToken()
+    local overlappingTokens = {}
+    if custodiansToken then
+        local objectToOverlappingTokens = Objects.overlap(tokens, { custodiansToken })
+        overlappingTokens = objectToOverlappingTokens[custodiansToken] or {}
+    end
+    local result = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local colorTokens = Tokens.filterTokens(overlappingTokens, color)
+        result[color] = #colorTokens
+    end
+    return result
+end
+
+function colorToLeaderUnlocks()
+    local cards = Factions.getLeaderCards()
+    local colorToCards = Objects.groupByZone(cards)
+    local result = {}
+    for color, cards in pairs(colorToCards) do
+        result[color] = {}
+        local faction = _factionHelper.fromColor(color)
+        if faction then
+            local cardNameToCard = {}
+            for _, card in ipairs(cards) do
+                cardNameToCard[card.getName()] = card
+            end
+            local function leaderStatus(name)
+                local card = cardNameToCard[name]
+                if card then
+                    if card.is_face_down then
+                        return 'locked'
+                    else
+                        return 'unlocked'
+                    end
+                end
+                return 'purged'
+            end
+            if faction.commander then
+                result[color].commander = leaderStatus(faction.commander)
+            end
+            if faction.hero then
+                result[color].hero = leaderStatus(faction.hero)
+            end
+        end
+    end
+    return result
+end
+
+function colorToAlliances()
+    local cards = Factions.getAllianceCards()
+    local colorToCards = Objects.groupByZone(cards)
+    local result = {}
+    for color, cards in pairs(colorToCards) do
+        result[color] = {}
+        local seen = {}
+        for _, card in ipairs(cards) do
+            local alliance = string.match(card.getName(), '^Alliance %((.*)%)$')
+            local shortName = string.match(card.getName(), '^(.*) Alliance$')
+            if shortName then
+                local faction = _factionHelper.fromTokenName(shortName)
+                alliance = faction and faction.color
+            end
+            if alliance and (alliance ~= color) and (not seen[alliance]) then
+                seen[alliance] = true
+                table.insert(result[color], alliance)
+            end
+        end
+        table.sort(result[color])
+    end
+    return result
+end
+
+function colorToTechnologies()
+    local technologies = Technologies.getCards()
+    local colorToTechnologies = Objects.groupByZone(technologies)
+    local result = {}
+    for color, technologies in pairs(colorToTechnologies) do
+        local list = {}
+        local seen = {}
+        for _, technology in ipairs(technologies) do
+            local name = technology.getName()
+            name = string.match(name, '^(.*) Ω') or name
+            if not seen[name] then
+                seen[name] = true
+                table.insert(list, name)
+            end
+        end
+        -- Preserve acquisition order.
+        _state.colorToTechnologies = _state.colorToTechnologies or {}
+        local oldList = _state.colorToTechnologies[color] or {}
+        list = Technologies.pruneAndAppendMissing(oldList, list)
+        _state.colorToTechnologies[color] = list
+        result[color] = list
+    end
+    return result
+end
+
+function getLaws()
+    local cards = Laws.getLawCards()
+    local result = {}
+    for _, card in ipairs(cards) do
+        local name = card.getName()
+        table.insert(result, name)
+    end
+    return result
+end
+
+function colorToLaws()
+    local cards = Laws.getLawCards()
+    local ownerTokens = Tokens.getTokens('Owner')
+    local lawToOwners = Laws.getOwners(cards, ownerTokens)
+    local result = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        result[color] = {}
+    end
+    for law, owners in pairs(lawToOwners) do
+        local name = law.getName()
+        for _, owner in ipairs(owners) do
+            table.insert(result[owner], name)
+        end
+    end
+    return result
+end
+
+function colorToHandSummary()
+    local result = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        result[color] = {}
+    end
+    for _, player in ipairs(Player.getPlayers()) do
+        if result[player.color] then
+            local cards = {}
+            for i = 1, player.getHandCount() do
+                for _, object in ipairs(player.getHandObjects(i)) do
+                    if object.tag == 'Card' then
+                        table.insert(cards, object)
+                    end
+                end
+            end
+            result[player.color] = Cards.summarize(cards)
+        end
+    end
+    return result
+end
+
+HexSummary = {
+    -- Upper case signals color.  No-color entries always first.
+    colorToCode = {
+        ['White'] = 'W',
+        ['Blue'] = 'B',
+        ['Purple'] = 'P',
+        ['Yellow'] = 'Y',
+        ['Red'] = 'R',
+        ['Green'] = 'G',
+        ['Orange'] = 'E', -- 'O' vs '0' bad
+        ['Pink'] = 'K',
+        ['Brown'] = 'N',
+        [''] = '',
+    },
+    -- Lower case unit codes.
+    unitToCode = {
+        ['Carrier'] = 'c',
+        ['Cruiser'] = 'r',
+        ['Destroyer'] = 'y',
+        ['Dreadnought'] = 'd',
+        ['Fighter'] = 'f',
+        ['Flagship'] = 'h',
+        ['Infantry'] = 'i',
+        ['Mech'] = 'm',
+        ['PDS'] = 'p',
+        ['Space Dock'] = 's',
+        ['War Sun'] = 'w',
+
+        -- These appear in the unit portion, leverage color coding.
+        ['ownerToken'] = 'o',
+        ['commandToken'] = 't',
+    },
+    -- Preserve former mixed unit/token codes where applicable, otherwise may conflict.
+    -- Attachment tokens toggle case when flipped.
+    attachmentToCode = {
+        space = {
+            ['Alpha Wormhole Token'] = 'a',
+            ['Beta Wormhole Token'] = 'b',
+            ['Frontier Token'] = 'e',
+            ['Gamma Wormhole Token'] = 'g',
+            ['Ion Storm Token'] = 'n',
+            ['Tear Token (Cabal)'] = 'h',
+            ['Tear Token (Nekro)'] = 'h',
+        },
+        planetStatic = {
+            ['DMZ Token'] = 'z',
+            ['Dyson Sphere Token'] = 'd',
+            ['Lazax Survivors Token'] = 'x',
+            ['Mining World Token'] = 'm',
+            ['Mirage Token'] = 'k',
+            ['Nano-Forge Token'] = 'f',
+            ['Paradise World Token'] = 'p',
+            ['Rich World Token'] = 'r',
+            ['Stellar Converter Token'] = 'l',
+            ['Titan Note Token'] = 't',
+            ['Titan Ultimate Token'] = 'u',
+            ['Tomb of Emphidia Token'] = 'j',
+        },
+        planetFlippable = { -- face down is tech skip side
+            ['Biotic Research Facility Token'] = 'i',
+            ['Cybernetic Research Facility Token'] = 'c',
+            ['Propulsion Research Facility Token'] = 'o',
+            ['Warfare Research Facility Token'] = 'w',
+        }
+    },
+    -- Top: system1,system2,...
+    -- System: <tile><X><Y>space;planet1;planet2;...
+    -- Region: <color[A-Z]><count[0-9]*><unit[a-z]>*<attachments>
+    -- Within a system color is sticky (seed empty for tokens)
+    -- Within a region count is sticky (seed 1), reset to 1 for attachments
+    delimiter = {
+        system = ',',
+        planet = ';',
+        attachments = '*',
+    }
+}
+
+function HexSummary._getPlanetIndex(system, position, exact)
+    local planet = _systemHelper.planetFromPosition({
+        systemGuid = system.guid,
+        position = position,
+        exact = exact,
+    })
+    if planet then
+        local planetName = planet.name
+        for i, planet in ipairs(system.planets or {}) do
+            if planet.name == planetName then
+                return i
+            end
+        end
+    end
+    return 0
+end
+
+-- Get existing system tiles, index by hex (if stacked only one wins).
+function HexSummary.getHexToSystem()
+    local guidToSystem = _systemHelper.systems()
+    local hexToSystem = {}
+    for _, object in ipairs(getAllObjects()) do
+        local system = guidToSystem[object.getGUID()]
+        if system then
+            local hex = _systemHelper.hexFromPosition(object.getPosition())
+            hexToSystem[hex] = system
+        end
+    end
+    return hexToSystem
+end
+
+-- Get {tile, planetIndex, color, count, code} list.
+function HexSummary.getUnitSummaries(hexToSystem, results)
+    local units = _unitHelper.getUnits()
+    coroutine.yield(0)
+    units = _unitHelper.fillUnitColors(units)
+    coroutine.yield(0)
+
+    -- Split into hexes.
+    local hexToUnits = {}
+    for _, unit in ipairs(units) do
+        local hex = assert(unit.hex)
+        if hexToSystem[hex] then
+            local unitList = hexToUnits[unit.hex]
+            if not unitList then
+                unitList = {}
+                hexToUnits[unit.hex] = unitList
+            end
+            table.insert(unitList, unit)
+        end
+    end
+    units = nil
+    coroutine.yield(0)
+
+    local unitTypeToAttrs = _unitHelper.getUnitAttributes({})
+    for hex, units in pairs(hexToUnits) do
+        -- Split into planets.
+        local system = assert(hexToSystem[hex])
+        local planetNameToIndex = {}
+        local planetIndexToUnits = { [0] = {} }  -- zero is space
+        for i, planet in ipairs(system.planets or {}) do
+            planetNameToIndex[planet.name] = i
+            planetIndexToUnits[i] = {}
+        end
+        for _, unit in ipairs(units) do
+            local unitAttrs = unitTypeToAttrs[unit.unitType]
+            local planetIndex = 0
+            if not unitAttrs.ship then
+                local exact = not unitAttrs.structure
+                planetIndex = HexSummary._getPlanetIndex(system, unit.position, exact) or 0
+            end
+            local entry = assert(planetIndexToUnits[planetIndex])
+            table.insert(entry, unit)
+        end
+
+        -- Create summaries.
+        for planetIndex, units in pairs(planetIndexToUnits) do
+            local colorToUnits = _unitHelper.getColorToUnits(units)
+            for color, units in pairs(colorToUnits) do
+                local unitTypeToCount = _unitHelper.getUnitTypeToCount(units)
+                for unitType, count in pairs(unitTypeToCount) do
+                    table.insert(results, {
+                        tile = assert(system.tile),
+                        planetIndex = planetIndex,
+                        color = color,
+                        count = count,
+                        code = assert(HexSummary.unitToCode[unitType]),
+                        --unitType = unitType,
+                    })
+                end
+            end
+        end
+    end
+    return results
+end
+
+-- Get {tile, planetIndex, color, code} list.
+function HexSummary.getCommandAndOwnerTokens(hexToSystem, results)
+    local ownerTokenNameToColor = {}
+    local commandTokenNameToColor = {}
+    for color, faction in pairs(_factionHelper.allFactions()) do
+        ownerTokenNameToColor[faction.tokenName .. ' Owner Token'] = faction.color
+        commandTokenNameToColor[faction.tokenName .. ' Command Token'] = faction.color
+    end
+
+    -- Grab all tokens in a single scan (get planet index seperately).
+    local tokenNameSet = {}
+    for name, _ in pairs(ownerTokenNameToColor) do
+        tokenNameSet[name] = true
+    end
+    for name, _ in pairs(commandTokenNameToColor) do
+        tokenNameSet[name] = true
+    end
+    local hexToTokenDatas = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if tokenNameSet[name] and (not object.held_by_color) then
+            local position = object.getPosition()
+            local hex = _systemHelper.hexFromPosition(position)
+            local system = hexToSystem[hex]
+            if system then
+                local entry = hexToTokenDatas[hex]
+                if not entry then
+                    entry = {}
+                    hexToTokenDatas[hex] = entry
+                end
+                table.insert(entry, {
+                    name = name,
+                    position = position
+                })
+            end
+        end
+    end
+    coroutine.yield(0)
+
+    -- Assign planet index.
+    for hex, tokenDatas in pairs(hexToTokenDatas) do
+        local system = hexToSystem[hex]
+        for _, tokenData in ipairs(tokenDatas) do
+            local ownerColor = ownerTokenNameToColor[tokenData.name]
+            local commandColor = commandTokenNameToColor[tokenData.name]
+            local code = ownerColor and HexSummary.unitToCode.ownerToken or HexSummary.unitToCode.commandToken
+            local planetIndex = 0
+            if ownerColor then
+                planetIndex = HexSummary._getPlanetIndex(system, tokenData.position, false) or 0
+            end
+            table.insert(results, {
+                tile = assert(system.tile),
+                planetIndex = planetIndex,
+                color = ownerColor or commandColor,
+                code = code,
+                token = true
+            })
+        end
+    end
+    return results
+end
+
+-- Get {tile, planetIndex, color='', code(upper for flipped)} list.
+function HexSummary.getAttachments(hexToSystem, results)
+    -- Find all attachments in one pass, calculate planets seperately.
+    local hexToAttachmentDatas = {}
+    local attachmentNameSet = {}
+    for _, nameToCode in pairs(HexSummary.attachmentToCode) do
+        for name, _ in pairs(nameToCode) do
+            attachmentNameSet[name] = true
+        end
+    end
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if attachmentNameSet[name] and (not object.held_by_color) then
+            local position = object.getPosition()
+            local hex = _systemHelper.hexFromPosition(position)
+            local system = hexToSystem[hex]
+            if system then
+                local entry = hexToAttachmentDatas[hex]
+                if not entry then
+                    entry = {}
+                    hexToAttachmentDatas[hex] = entry
+                end
+                table.insert(entry, {
+                    name = name,
+                    position = position,
+                    isFaceDown = object.is_face_down
+                })
+            end
+        end
+    end
+    coroutine.yield(0)
+
+    -- Assign planet index, uppercase flipped tokens.
+    for hex, attachmentDatas in pairs(hexToAttachmentDatas) do
+        local system = hexToSystem[hex]
+        for _, attachmentData in ipairs(attachmentDatas) do
+            local name = attachmentData.name
+            local planetIndex = false
+            local code = false
+
+            if HexSummary.attachmentToCode.space[name] then
+                code = HexSummary.attachmentToCode.space[name]
+                planetIndex = 0
+            elseif HexSummary.attachmentToCode.planetStatic[name] then
+                code = HexSummary.attachmentToCode.planetStatic[name]
+                planetIndex = HexSummary._getPlanetIndex(system, attachmentData.position, false) or 0
+            elseif HexSummary.attachmentToCode.planetFlippable[name] then
+                code = HexSummary.attachmentToCode.planetFlippable[name]
+                if attachmentData.isFaceDown then
+                    code = string.upper(code)
+                end
+                planetIndex = HexSummary._getPlanetIndex(system, attachmentData.position, false) or 0
+            else
+                error('bad ' .. name)
+            end
+
+            table.insert(results, {
+                tile = assert(system.tile),
+                planetIndex = planetIndex,
+                code = code,
+                attachment = true
+            })
+        end
+    end
+    return results
+end
+
+function HexSummary.sortResults(results)
+    local function soryBy(a, b)
+        if a.tile < b.tile then return true end
+        if a.tile > b.tile then return false end
+
+        if a.planetIndex < b.planetIndex then return true end
+        if a.planetIndex > b.planetIndex then return false end
+
+        if a.token and (not b.token) then return true end
+        if (not a.token) and b.token then return false end
+
+        if a.attachment and (not b.attachment) then return false end
+        if (not a.attachment) and b.attachment then return true end
+
+        if (a.color or '') < (b.color or '') then return true end
+        if (a.color or '') > (b.color or '') then return false end
+
+        if (a.count or 1) < (b.count or 1) then return true end
+        if (a.count or 1) > (b.count or 1) then return false end
+
+        -- Arbitrary but consistent final tie breaker.
+        return a.code < b.code
+    end
+    table.sort(results, soryBy)
+    return results
+end
+
+function HexSummary.encode(hexToSystem, results)
+    local tileToEncoded = {}
+    for hex, system in pairs(hexToSystem) do
+        local p = _systemHelper.hexToPosition(hex)
+        local sx = 5.25
+        local sy = 3.03
+        local x = math.floor((p.x / sx) + 0.5)
+        local y = math.floor((p.z / sy) + 0.5)
+        x = '' .. (x >= 0 and ('+' .. x) or x)
+        y = '' .. (y >= 0 and ('+' .. y) or y)
+        local tile = system.tile
+        if system.hyperlane then
+            local systemObject = getObjectFromGUID(system.guid)
+            local rotation = systemObject.getRotation().y or 0
+            rotation = rotation - 180  -- 180 is "normal", make 0 based for value
+            rotation = (rotation + 360) % 360
+            rotation = rotation + 15  -- in case not exact, gets closest
+            tile = tile .. (systemObject.is_face_down and 'B' or 'A')
+            tile = tile .. math.floor(rotation / 60)
+        end
+        tileToEncoded[system.tile] = tile .. x .. y
+    end
+
+    local encoded = {}
+
+    local stickyTile = false
+    local stickyPlanetIndex = 0
+    local stickyColor = ''
+    local stickyCount = 1
+    local stickyAttachment = false
+
+    -- Top: system1,system2,...
+    -- System: <tile><X><Y>space;planet1;planet2;...
+    -- Region: <color[A-Z]><count[0-9]*><unit[a-z]>*<attachments>
+    -- Within a system color is sticky (seed empty for tokens)
+    -- Within a region count is sticky (seed 1), reset to 1 for attachments
+    for _, result in ipairs(results) do
+
+        -- Tile change?
+        if result.tile ~= stickyTile then
+            if stickyTile then
+                table.insert(encoded, HexSummary.delimiter.system)
+            end
+            table.insert(encoded, assert(tileToEncoded[result.tile]))
+            stickyTile = result.tile
+            stickyPlanetIndex = 0
+            stickyColor = ''
+            stickyCount = 1
+            stickyAttachment = false
+        end
+
+        -- Planet change?  (Keep tile, color)
+        if result.planetIndex ~= stickyPlanetIndex then
+            table.insert(encoded, HexSummary.delimiter.planet)
+            stickyPlanetIndex = result.planetIndex
+            stickyCount = 1
+            stickyAttachment = false
+        end
+
+        -- Attachment change?
+        result.attachment = result.attachment or false
+        if result.attachment ~= stickyAttachment then
+            assert(result.attachment) -- should only ever toggle to true
+            table.insert(encoded, HexSummary.delimiter.attachments)
+            stickyColor = ''
+            stickyCount = 1
+            stickyAttachment = result.attachment
+        end
+
+        -- Color change?
+        result.color = result.color or ''
+        if result.color ~= stickyColor then
+            table.insert(encoded, HexSummary.colorToCode[result.color])
+            stickyColor = result.color
+            stickyCount = 1
+        end
+
+        -- Count change?
+        result.count = result.count or 1
+        if result.count ~= stickyCount then
+            table.insert(encoded, result.count)
+            stickyCount = result.count
+        end
+
+        table.insert(encoded, result.code)
+
+    end
+    return table.concat(encoded, '')
+end
+
+function getHexSummaryWithYields()
+    -- Get existing system tiles, index by hex (if stacked only one wins).
+    local hexToSystem = HexSummary.getHexToSystem()
+    coroutine.yield(0)
+
+    -- Seed results with an empty entry per tile, in case nothing else there.
+    -- (Needed to encode such empty tiles.)
+    local results = {}
+    for _, system in pairs(hexToSystem) do
+        local numPlanets = system.planets and #system.planets or 0
+        local numWormholes = system.wormholes and #system.wormholes or 0
+        for i = 0, numPlanets + numWormholes do
+            table.insert(results, {
+                tile = system.tile,
+                planetIndex = i
+            })
+        end
+    end
+
+    results = HexSummary.getUnitSummaries(hexToSystem, results)
+    coroutine.yield(0)
+    results = HexSummary.getCommandAndOwnerTokens(hexToSystem, results)
+    coroutine.yield(0)
+    results = HexSummary.getAttachments(hexToSystem, results)
+    coroutine.yield(0)
+    results = HexSummary.sortResults(results)
+    coroutine.yield(0)
+    local encoded = HexSummary.encode(hexToSystem, results)
+    coroutine.yield(0)
+    return encoded
+end
+
+-------------------------------------------------------------------------------
+
+Objects = {
+    _nameToGuid = {}
+}
+
+function Objects.getByName(name, tag)
+    local guid = Objects._nameToGuid[name]
+    local object = guid and getObjectFromGUID(guid)
+    if object then
+        return object
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == name and ((not tag) or (object.tag == tag)) then
+            Objects._nameToGuid[name] = object.getGUID()
+            return object
+        end
+    end
+end
+
+--- Group objects by player zone they are in, if any.
+-- @param objects : list of objects.
+-- @return table : map from color to in-color-zone objects.
+function Objects.groupByZone(objects)
+    assert(type(objects) == 'table')
+    local guidToPosition = {}
+    for _, object in ipairs(objects) do
+        guidToPosition[object.getGUID()] = object.getPosition()
+    end
+    local guidToZoneColor = _zoneHelper.zonesFromPositions(guidToPosition)
+    local colorToObjects = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        colorToObjects[color] = {}
+    end
+    for _, object in ipairs(objects) do
+        local color = guidToZoneColor[object.getGUID()]
+        local entry = color and colorToObjects[color]
+        if entry then
+            table.insert(entry, object)
+        end
+    end
+    return colorToObjects
+end
+
+--- Split into face up / face down lists.
+-- @param objects table : list of objects.
+-- @return table, table : list of face up, list of face down.
+function Objects.groupByFaceUpDown(objects)
+    assert(type(objects) == 'table')
+    local faceUp = {}
+    local faceDown = {}
+    for _, object in ipairs(objects) do
+        if object.is_face_down then
+            table.insert(faceDown, object)
+        else
+            table.insert(faceUp, object)
+        end
+    end
+    return faceUp, faceDown
+end
+
+--- Build lists of "src" objects overlapping "dst" objects.
+-- @param srcs table : list of objects.
+-- @param dsts table : list of objects.
+-- @return table : map from dst object to overlapping src objects.
+function Objects.overlap(srcs, dsts)
+    assert(type(srcs) == 'table' and type(dsts) == 'table')
+
+    -- Cheap but potentially wrong inside check.  It will never have a false
+    -- positive so use this first to eliminate quickly, then move on to the
+    -- more expensive check to be sure.
+    local function maybeInside(bb, p)
+        return p.x >= bb.min.x and p.x <= bb.max.x and p.z >= bb.min.z and p.z <= bb.max.z
+    end
+
+    -- This is a more expensive but more thorough "inside" test.
+    local function definitelyInside(src, dst)
+        -- Fill this is later if needed, the bb check is correct assuming
+        -- objects are at 90 degree rotations about Y.
+        return true
+    end
+
+    local dstToSrcs = {}
+    for _, dst in ipairs(dsts) do
+        -- Compute a bounding box to fast-fail things outside it.
+        local bounds = dst.getBounds()
+        local bb = {
+            min = {
+                x = bounds.center.x - bounds.size.x / 2,
+                z = bounds.center.z - bounds.size.z / 2,
+            },
+            max = {
+                x = bounds.center.x + bounds.size.x / 2,
+                z = bounds.center.z + bounds.size.z / 2,
+            }
+        }
+        local overlaps = {}
+        for _, src in ipairs(srcs) do
+            if src ~= dst and maybeInside(bb, src.getPosition()) then
+                if definitelyInside(src, dst) then
+                    table.insert(overlaps, src)
+                end
+            end
+        end
+        dstToSrcs[dst] = overlaps
+    end
+    return dstToSrcs
+end
+
+-------------------------------------------------------------------------------
+
+Tokens = {}
+
+--- Get all tokens on the table.
+-- @param tokenType string : either "Command" or "Owner".
+-- @return table : list of command token objects.
+function Tokens.getTokens(tokenType)
+    assert(type(tokenType) == 'string')
+    assert(tokenType == 'Command' or tokenType == 'Owner')
+    local tokens = {}
+    local tokenPattern = ' ' .. tokenType .. ' Token$'
+    for _, object in ipairs(getAllObjects()) do
+        if string.match(object.getName(), tokenPattern) then
+            table.insert(tokens, object)
+        end
+    end
+    return tokens
+end
+
+--- Restrict to tokens for the color's faction.
+-- @param playerColor string : color.
+-- @param tokens table : list of command or owner token objects.
+-- @return table : list of token objects belonging to color's faction.
+function Tokens.filterTokens(tokens, playerColor)
+    assert(type(tokens) == 'table' and type(playerColor) == 'string')
+    local filtered = {}
+    local faction = color and _factionHelper.fromColor(playerColor)
+    if faction then
+        local tokenPattern = '^' .. faction.tokenName:gsub('-', '%%-')
+        for _, token in ipairs(tokens) do
+            if string.match(token.getName(), tokenPattern) then
+                table.insert(filtered, token)
+            end
+        end
+    end
+    return filtered
+end
+
+--- Count tokens in tactics, fleet, strategy areas.
+-- @param playerColor string : color.
+-- @param tokens table : list of command token objects.
+-- @return number, number, number: tactics, fleet, strategy token counts.
+function Tokens.sumTacticFleetStrategy(tokens, playerColor)
+    assert(type(tokens) == 'table' and type(playerColor) == 'string')
+    local faction = color and _factionHelper.fromColor(playerColor)
+    local commandSheet = faction and getObjectFromGUID(faction.commandSheetGuid)
+    local numTactics = 0
+    local numFleet = 0
+    local numStrategy = 0
+    if commandSheet then
+        for _, token in ipairs(tokens) do
+            local p = commandSheet.positionToLocal(token.getPosition())
+            local dSq = p.x * p.x + p.z * p.z
+            local degrees = (math.deg(math.atan2(p.z, p.x)) + 360) % 360
+            if dSq < 16 then  -- exact + gutter is 15
+                if 330 > degrees and degrees > 240 then
+                    numTactics = numTactics + 1  -- exact is 240-300
+                elseif 240 > degrees and degrees > 180 then
+                    numFleet = numFleet + 1  -- exact is 180-240
+                elseif 180 > degrees and degrees > 90 then
+                    numStrategy = numStrategy + 1  -- exact is 120-180
+                end
+            end
+        end
+    end
+    return numTactics, numFleet, numStrategy
+end
+
+--- Get commodities and trade good tokens.
+-- @return table : list of token objects.
+function Tokens.getTradeGoodsCommodities()
+    local tokens = {}
+    for _, object in ipairs(getAllObjects()) do
+        if string.match(object.getName(), '^x([13]) Commodities/Tradegoods$') then
+            table.insert(tokens, object)
+        end
+    end
+    return tokens
+end
+
+--- Sum the x1 and x3 values for tokens.
+-- @param tokens table : list of token objects.
+-- @return number : sum of x1 and x3 values.
+function Tokens.sumTradeGoodsCommodities(tokens)
+    assert(type(tokens) == 'table')
+    local result = 0
+    for _, object in ipairs(tokens) do
+        local value = string.match(object.getName(), '^x([13]) Commodities/Tradegoods$')
+        result = result + tonumber(value or 0)
+    end
+    return result
+end
+
+-------------------------------------------------------------------------------
+
+Cards = {
+    CACHE_TIMEOUT_SECONDS = 10,
+    _attrCacheTimestamp = false,
+    _lowerNameToAttrs = false,
+    _promissoryNoteSet = false,
+}
+
+--- Get all cards on the table (face down ok, but NOT in hands).
+-- @return table : list of card objects.
+function Cards.getCards()
+    local cards = {}
+    local inHandGuidSet = _zoneHelper.inHand()
+    local function isCandidate(object)
+        if object.tag ~= 'Card' then
+            return false
+        end
+        if inHandGuidSet[object.getGUID()] or object.held_by_color then
+            return false
+        end
+        return true
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if isCandidate(object) then
+            table.insert(cards, object)
+        end
+    end
+    return cards
+end
+
+function Cards.sumAttrs(cards)
+    assert(type(cards) == 'table')
+    local sum = {
+        resources = { avail = 0, total = 0 },
+        influence = { avail = 0, total = 0 },
+        legendary = 0,
+        traits = {
+            cultural = 0,
+            industrial = 0,
+            hazardous = 0,
+        },
+        techs = {
+            blue = 0,
+            green = 0,
+            red = 0,
+            yellow = 0,
+        },
+    }
+    local lowerNameToAttrs = Cards._getLowerNameToAttrs()
+    for _, card in ipairs(cards) do
+        local lowerName = string.lower(card.getName())
+        local attrs = lowerNameToAttrs[lowerName]
+        if attrs then
+            sum.resources.total = sum.resources.total + (attrs.resources or 0)
+            sum.influence.total = sum.influence.total + (attrs.influence or 0)
+            if not card.is_face_down then
+                sum.resources.avail = sum.resources.avail + (attrs.resources or 0)
+                sum.influence.avail = sum.influence.avail + (attrs.influence or 0)
+            end
+            if attrs.legendary then
+                sum.legendary = sum.legendary + 1
+            end
+            if attrs.trait then
+                sum.traits[attrs.trait] = sum.traits[attrs.trait] + 1
+            end
+            if attrs.tech then
+                sum.techs[attrs.tech] = sum.techs[attrs.tech] + 1
+            end
+        end
+    end
+    return sum
+end
+
+function Cards._getLowerNameToAttrs()
+    if Cards._lowerNameToAttrs and Cards._attrCacheTimestamp then
+        local age = Time.time - Cards._attrCacheTimestamp
+        if age > Cards.CACHE_TIMEOUT_SECONDS then
+            Cards._lowerNameToAttrs = false
+        end
+    end
+    if not Cards._lowerNameToAttrs then
+        Cards._attrCacheTimestamp = Time.time
+        Cards._lowerNameToAttrs = {}
+        for lowerName, planet in pairs(_systemHelper.planets()) do
+            Cards._lowerNameToAttrs[lowerName] = planet
+        end
+        for lowerName, attributes in pairs(_systemHelper.nonPlanetResourceInfluenceCards()) do
+            Cards._lowerNameToAttrs[lowerName] = attributes
+        end
+    end
+    return Cards._lowerNameToAttrs
+end
+
+function Cards.summarize(cards)
+    if not Cards._promissoryNoteSet then
+        Cards._promissoryNoteSet = {}
+        for _, faction in pairs(_factionHelper.allFactions(true)) do
+            for _, name in ipairs(faction.promissoryNotes or {}) do
+                Cards._promissoryNoteSet[name] = true
+            end
+            Cards._promissoryNoteSet[(faction.shortName or faction.frankenName or '-') .. ' Alliance'] = true
+        end
+        for _, color in ipairs(Player.getColors()) do
+            Cards._promissoryNoteSet['Alliance (' .. color .. ')'] = true
+            Cards._promissoryNoteSet['Trade Agreement (' .. color .. ')'] = true
+            Cards._promissoryNoteSet['Ceasefire (' .. color .. ')'] = true
+            Cards._promissoryNoteSet['Support for the Throne (' .. color .. ')'] = true
+            Cards._promissoryNoteSet['Political Secret (' .. color .. ')'] = true
+        end
+    end
+    local result = {}
+    for _, card in ipairs(cards) do
+        local name = card.getName()
+        local deckName = _deckHelper.getDeckName(name)
+        if not deckName and Cards._promissoryNoteSet[name] then
+            deckName = 'Promissory'
+        end
+        if deckName then
+            result[deckName] = (result[deckName] or 0) + 1
+        end
+    end
+    return result
+end
+
+-------------------------------------------------------------------------------
+
+Score = {}
+
+--- Given a list of owner tokens, get the score from the best overlapping scoreboard.
+-- @params ownerTokens table : list of owner token objects.
+-- @return number : score, if found.
+function Score.getScore(ownerTokens)
+    assert(type(ownerTokens) == 'table')
+    local scoreboard = Score.getScoreboard()
+    local score = 0
+    if scoreboard then
+        for _, ownerToken in ipairs(ownerTokens) do
+            local candidate = Score._getScoreFromToken(scoreboard, ownerToken)
+            score = math.max(score, candidate or 0)
+        end
+    end
+    return score
+end
+
+function Score.getScoreboard()
+    return Objects.getByName('Scoreboard')
+end
+
+function Score.getScoreboardPoints()
+    local scoreboard = Score.getScoreboard()
+    if scoreboard then
+        return scoreboard.is_face_down and 14 or 10
+    end
+end
+
+function Score._getScoreFromToken(scoreboard, ownerToken)
+    assert(type(scoreboard) == 'userdata' and type(ownerToken) == 'userdata')
+    local p = scoreboard.positionToLocal(ownerToken.getPosition())
+    if math.abs(p.z) > 0.5 then
+        return false
+    elseif math.abs(p.x) > 3.3 then
+        return false
+    end
+    local u = -(p.x - 3.25) / 6.5
+    local limit = 11
+    if scoreboard.is_face_down then
+        u = 1 - u
+        limit = 15
+    end
+    return math.floor(u * limit)
+end
+
+-------------------------------------------------------------------------------
+
+Map = {}
+
+function Map.getMapString()
+    local mapTool = Objects.getByName('TI4 Map Tool')
+    local mapString = mapTool and mapTool.call('getMapString')
+
+    -- This is the string in the tool, not a table scan to compute it.
+    -- Prevent non-map strings from getting recorded.
+    if string.len(mapString) > 1024 then
+        return false
+    end
+    local buildList = mapTool.call('parseMapString', mapString)
+    if #buildList > 0 and buildList[1].tile == 18 then
+        table.remove(buildList, 1)
+    end
+    local result = {}
+    for i, entry in ipairs(buildList) do
+        table.insert(result, entry.tile .. (entry.ab or '') .. (entry.rotation or ''))
+    end
+    while #result > 90 do
+        table.remove(result)
+    end
+    mapString = table.concat(result, ' ')
+    mapString = string.upper(mapString)
+
+    return mapString
+end
+
+function Map.saveMapString()
+    local mapTool = Objects.getByName('TI4 Map Tool')
+    local mapString = mapTool and mapTool.call('onButtonSave')
+end
+
+-------------------------------------------------------------------------------
+
+StrategyCards = {
+    OBJECT_NAME_TO_VALUE = {
+        ['Leadership'] = 'Leadership',
+        ['Diplomacy'] = 'Diplomacy',
+        ['Diplomacy (Revised)'] = 'Diplomacy',
+        ['Politics'] = 'Politics',
+        ['Construction'] = 'Construction',
+        ['Industry'] = 'Industry',
+        ['Trade'] = 'Trade',
+        ['Warfare'] = 'Warfare',
+        ['Trade (6)'] = 'Trade',
+        ['Technology'] = 'Technology',
+        ['Warfare (7)'] = 'Warfare',
+        ['Imperial'] = 'Imperial',
+        ['Logistics'] = 'Logistics',
+        ['Technology (9)'] = 'Technology',
+        ['Imperial (10)'] = 'Imperial',
+    }
+}
+
+--- Get strategy card objects.
+-- @return table : list of strategy card objects.
+function StrategyCards.getStrategyCards()
+    local result = {}
+    for _, object in ipairs(getAllObjects()) do
+        if StrategyCards.OBJECT_NAME_TO_VALUE[object.getName()] then
+            table.insert(result, object)
+        end
+    end
+    return result
+end
+
+--- Get canonical string name of a strategy card (accounting for variants).
+-- @param strategyCard : object.
+-- @return string : canonical string name, e.g. "Leadership".
+function StrategyCards.value(strategyCard)
+    assert(type(strategyCard) == 'userdata')
+    return StrategyCards.OBJECT_NAME_TO_VALUE[strategyCard.getName()]
+end
+
+-------------------------------------------------------------------------------
+
+Objectives = {
+    CACHE_TIMEOUT_SECONDS = 60,
+    _objectiveToDeckName = false,
+    _objectiveToDeckNameTimestamp = false,
+}
+
+--- Get the custodians token.
+-- @return object : custodians token game object.
+function Objectives.getCustodiansToken()
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Tile' and object.getName() == 'Custodians' then
+            return object
+        end
+    end
+end
+
+--- Get face-up objective card objects (ignoring held cards).
+-- Preserves discovery order.
+-- @return table : list of objective card objects.
+function Objectives.getCards()
+    local inHandGuidSet = _zoneHelper.inHand()
+    local function isCandidate(object)
+        if object.tag ~= 'Card' then
+            return false
+        end
+        if inHandGuidSet[object.getGUID()] or object.held_by_color then
+            return false
+        end
+        if object.is_face_down then
+            return false
+        end
+        return true
+    end
+    local objectiveToDeckName = Objectives._getObjectiveToDeckName()
+    local cardNames = {}
+    local nameToCards = {}
+    for _, object in ipairs(getAllObjects()) do
+        if isCandidate(object) then
+            local name = object.getName()
+            if objectiveToDeckName[name] then
+                if not nameToCards[name] then
+                    table.insert(cardNames, name)
+                    nameToCards[name] = {}
+                end
+                table.insert(nameToCards[name], object)
+            end
+        end
+    end
+    -- Preserve discovery order.
+    local oldList = _state.objectives or {}
+    cardNames = Technologies.pruneAndAppendMissing(oldList, cardNames)
+    _state.objectives = cardNames
+    -- Generate object list.
+    local cards = {}
+    for _, cardName in ipairs(cardNames) do
+        for _, card in ipairs(nameToCards[cardName]) do
+            table.insert(cards, card)
+        end
+    end
+    return cards
+end
+
+--- Group objective cards by the deck(s) they come from.
+-- @param objectives table : list of objective cards.
+-- @return table : map from deck name to list of objective cards.
+function Objectives.groupByDeckName(objectiveCards)
+    assert(type(objectiveCards) == 'table')
+    local deckNameToFoundObjectives = {}
+    local objectiveToDeckName = Objectives._getObjectiveToDeckName()
+    for _, objectiveCard in ipairs(objectiveCards) do
+        local deckName = objectiveToDeckName[objectiveCard.getName()]
+        local entry = deckNameToFoundObjectives[deckName]
+        if not entry then
+            entry = {}
+            deckNameToFoundObjectives[deckName] = entry
+        end
+        table.insert(entry, objectiveCard)
+    end
+    return deckNameToFoundObjectives
+end
+
+function Objectives._getObjectiveToDeckName()
+    if Objectives._objectiveToDeckName and Objectives._objectiveToDeckNameTimestamp then
+        local age = Time.time - Objectives._objectiveToDeckNameTimestamp
+        if age > Objectives.CACHE_TIMEOUT_SECONDS then
+            Objectives._objectiveToDeckName = false
+        end
+    end
+    if not Objectives._objectiveToDeckName then
+        Objectives._objectiveToDeckNameTimestamp = Time.time
+        Objectives._objectiveToDeckName = {}
+        for cardName, _ in pairs(_deckHelper.getScoreCardNameSet()) do
+            local deckName = _deckHelper.getDeckName(cardName) or 'OTHER'
+            Objectives._objectiveToDeckName[cardName] = deckName
+        end
+    end
+    return Objectives._objectiveToDeckName
+end
+
+function Objectives.getRound()
+    local objectiveToDeckName = Objectives._getObjectiveToDeckName()
+    local publicObjectiveNameSet = {}
+    for objective, deckName in pairs(objectiveToDeckName) do
+        if deckName == 'Public Objectives I' or deckName == 'Public Objectives II' then
+            publicObjectiveNameSet[objective] = true
+        end
+    end
+    local inHandGuidSet = _zoneHelper.inHand()
+    local function isCandidate(object)
+        if object.tag ~= 'Card' then
+            return false
+        end
+        if inHandGuidSet[object.getGUID()] or object.held_by_color then
+            return false
+        end
+        if object.is_face_down then
+            return false
+        end
+        local name = object.getName()
+        return publicObjectiveNameSet[name]
+    end
+
+    local numObjectives = 0
+    local seen = {}
+    for _, object in ipairs(getAllObjects()) do
+        if isCandidate(object) and Objectives.isOnPublicObjectivesMat(object) then
+            local name = object.getName()
+            if publicObjectiveNameSet[name] and not seen[name] then
+                seen[name] = true
+                numObjectives = numObjectives + 1
+            end
+        end
+    end
+    local round = numObjectives - 1
+    return math.max(round, 1)
+end
+
+function Objectives.isOnPublicObjectivesMat(object)
+    local boxes = {}
+    local function addBoundingBox(name)
+        local object = Objects.getByName(name)
+        if object then
+            table.insert(boxes, _getBoundingBox(object))
+        end
+    end
+    addBoundingBox('Public Objectives I Mat')
+    addBoundingBox('Public Objectives II Mat')
+    for _, box in ipairs(boxes) do
+        if _insideBox(object, box) then
+            return true
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+Laws = {
+    _lawNameSet = false,
+}
+
+function Laws.getLawCards()
+    if not Laws._lawNameSet then
+        Laws._lawNameSet = {}
+        local lawNames = _deckHelper.getCardsWithSource({ deckName = 'Agenda' })
+        for _, lawName in ipairs(lawNames) do
+            Laws._lawNameSet[lawName] = true
+        end
+    end
+    local cardNames = {}
+    local nameToCard = {}
+    local inHandGuidSet = _zoneHelper.inHand()
+    local objectiveToDeckName = Objectives._getObjectiveToDeckName()
+    local agendaPhaseMat = Objects.getByName('Agenda Phase Mat')
+    local bb = agendaPhaseMat and _getBoundingBox(agendaPhaseMat)
+    local function isCandidate(object)
+        if object.tag ~= 'Card' then
+            return false
+        end
+        if inHandGuidSet[object.getGUID()] or object.held_by_color then
+            return false
+        end
+        if object.is_face_down then
+            return false
+        end
+        if bb and _insideBox(object, bb) then
+            return false
+        end
+        return true
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if isCandidate(object) then
+            local name = object.getName()
+            if Laws._lawNameSet[name] and not nameToCard[name] then
+                if not _deckHelper.isDiscard(object.getGUID()) then
+                    table.insert(cardNames, name)
+                    nameToCard[name] = object
+                end
+            end
+        end
+    end
+    -- Preserve discovery order.
+    local oldList = _state.laws or {}
+    cardNames = Technologies.pruneAndAppendMissing(oldList, cardNames)
+    _state.laws = cardNames
+    -- Generate object list.
+    local cards = {}
+    for _, cardName in ipairs(cardNames) do
+        local card = nameToCard[cardName]
+        table.insert(cards, card)
+    end
+    return cards
+end
+
+function Laws.getOwners(lawCards, ownerTokens)
+    local cardToOverlappingTokens = Objects.overlap(ownerTokens, lawCards)
+    local result = {}
+    for _, lawCard in ipairs(lawCards) do
+        local tokens = cardToOverlappingTokens[lawCard] or {}
+        local owners = {}
+        local seen = {}
+        for _, token in ipairs(tokens) do
+            local faction = _factionHelper.fromTokenName(token.getName())
+            local owner = faction and faction.color
+            if owner and not seen[owner] then
+                seen[owner] = true
+                table.insert(owners, owner)
+            end
+        end
+        result[lawCard] = owners
+    end
+    return result
+end
+
+-------------------------------------------------------------------------------
+
+Players = {}
+
+function Players.getActivePassedTokens()
+    local activePassedTokens = {}
+    for _, object in ipairs(getAllObjects()) do
+        local color = string.match(object.getName(), '^Active/Passed %((.*)%)')
+        if color then
+            table.insert(activePassedTokens, object)
+        end
+    end
+    return activePassedTokens
+end
+
+function Players.getSpeakerToken()
+    return Objects.getByName('Speaker Token')
+end
+
+-------------------------------------------------------------------------------
+
+Factions = {}
+
+function Factions.getLeaderCards()
+    local leaderNameSet = {}
+    for _, faction in pairs(_factionHelper.allFactions()) do
+        if faction.commander then
+            leaderNameSet[faction.commander] = true
+        end
+        if faction.hero then
+            leaderNameSet[faction.hero] = true
+        end
+    end
+    local inHandGuidSet = _zoneHelper.inHand()
+    local cards = {}
+    local function isCandidate(object)
+        if object.tag ~= 'Card' then
+            return false
+        end
+        if inHandGuidSet[object.getGUID()] then
+            return false
+        end
+        return leaderNameSet[object.getName()]
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if isCandidate(object) then
+            table.insert(cards, object)
+        end
+    end
+    return cards
+end
+
+function Factions.getAllianceCards()
+    local inHandGuidSet = _zoneHelper.inHand()
+    local function isCandidate(object)
+        if object.tag ~= 'Card' then
+            return false
+        end
+        if inHandGuidSet[object.getGUID()] or object.held_by_color then
+            return false
+        end
+        if object.is_face_down then
+            return false
+        end
+        local color = string.match(object.getName(), '^Alliance %((.*)%)$')
+        if color then
+            return true
+        end
+        local shortName = string.match(object.getName(), '^(.*) Alliance$')
+        local faction = shortName and _factionHelper.fromTokenName(shortName)
+        if faction then
+            return true
+        end
+    end
+    local cards = {}
+    for _, object in ipairs(getAllObjects()) do
+        if isCandidate(object) then
+            table.insert(cards, object)
+        end
+    end
+    return cards
+end
+
+-------------------------------------------------------------------------------
+
+Technologies = {}
+
+--- Get face-up AND face-down card objects (ignoring held cards).
+-- Face down because might be researched but exhuasted.
+-- @return table : list of objective card objects.
+function Technologies.getCards()
+    local techNameSet = {}
+    for name, _ in pairs(_technologyHelper.getTechNameSet()) do
+        techNameSet[name] = true
+        techNameSet[name .. ' Ω'] = true
+    end
+    local inHandGuidSet = _zoneHelper.inHand()
+    local function isCandidate(object)
+        if object.tag ~= 'Card' then
+            return false
+        end
+        if inHandGuidSet[object.getGUID()] or object.held_by_color then
+            return false
+        end
+        -- allow face down
+        return techNameSet[object.getName()]
+    end
+    local cards = {}
+    for _, object in ipairs(getAllObjects()) do
+        if isCandidate(object) then
+            table.insert(cards, object)
+        end
+    end
+    return cards
+end
+
+--- Given an updated list, append any new items not in the old list but
+-- otherwise preserve old list order.  Also remove any items in the old
+-- list that are not in the new list.
+-- @param oldList : use this item order.
+-- @param newList : append any new items not in old, remove any old items not in new.
+-- @return list : table with the add/prune modifications.
+function Technologies.pruneAndAppendMissing(oldList, newList)
+    assert(type(oldList) == 'table' and type(newList) == 'table')
+
+    local oldCounts = {}
+    for _, oldItem in ipairs(oldList) do
+        oldCounts[oldItem] = (oldCounts[oldItem] or 0) + 1
+    end
+    local newCounts = {}
+    for _, newItem in ipairs(newList) do
+        newCounts[newItem] = (newCounts[newItem] or 0) + 1
+    end
+
+    -- Start by copying over old items in order, prune any missing from new.
+    local result = {}
+    for _, item in ipairs(oldList) do
+        local newCount = newCounts[item]
+        if newCount then
+            newCounts[item] = newCount > 1 and (newCount - 1)
+            table.insert(result, item)
+        end
+    end
+
+    -- Then add any new entries.
+    for _, item in ipairs(newList) do
+        local oldCount = oldCounts[item]
+        if oldCount then
+            oldCounts[item] = oldCount > 1 and (oldCount - 1)
+        else
+            table.insert(result, item)
+        end
+    end
+
+    return result
+end
+
+-------------------------------------------------------------------------------
+
+function _getBoundingBox(object)
+    local bounds = object.getBounds()
+    return {
+        min = {
+            x = bounds.center.x - bounds.size.x / 2,
+            z = bounds.center.z - bounds.size.z / 2,
+        },
+        max = {
+            x = bounds.center.x + bounds.size.x / 2,
+            z = bounds.center.z + bounds.size.z / 2,
+        },
+    }
+end
+
+function _insideBox(object, bb)
+    local p = object.getPosition()
+    return p.x > bb.min.x and p.x < bb.max.x and p.z > bb.min.z and p.z < bb.max.z
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    self.setColorTint({ r = 0.25, g = 0.25, b = 0.25 })
+    self.setScale({ x = 2, y = 0.01, z = 2 })
+    self.setName('TI4_GAME_DATA_HELPER')
+    self.setDescription('Shared helper functions used by other objects, PLEASE LEAVE ON TABLE! This object is only visible to the black (GM) player.')
+
+    -- Only the GM/black player can see this object.  Others can still interact!
+    local invisibleTo = {}
+    for _, color in ipairs(Player.getColors()) do
+        if color ~= 'Black' then
+            table.insert(invisibleTo, color)
+        end
+    end
+    self.setInvisibleTo(invisibleTo)
+
+    _state = saveState and string.len(saveState) > 0 and JSON.decode(saveState) or _state
+
+    if string.find(GAME_DATA_HOST, 'localhost') then
+        broadcastToAll('Game data using localhost', 'Red')
+    end
+
+    self.addContextMenuItem('Report Data', _doReport)
+    self.addContextMenuItem('Report State', function() _logTable('_state', _state) end)
+    self.addContextMenuItem('Reset State', function() _state = DEFAULT_STATE end)
+
+    -- If resuming a split game restart the game data service.
+    if _state._gamedataOptIn and not _timerId then
+        startPeriodicUpdates({
+            delay = DEFAULT_ANON_PERIODIC_SECONDS
+        })
+    end
+end
+
+function onSave()
+    return JSON.encode(_state)
+end
+
+--- Trigger a delayed update when scoring the final point.
+function onObjectDrop(playerColor, droppedObject)
+    local tokenName = string.match(droppedObject.getName(), '^(.*) Owner Token')
+    if tokenName then
+        local score = Score.getScore({ droppedObject })
+        if score and (score > 0) and (score == Score.getScoreboardPoints()) then
+            triggerUploadGameData()
+        end
+    end
+end
+
+--- Called by TI4_SETUP_HELPER when setup finishes.
+-- Params:
+-- - playerCount (number).
+-- - extraRings (nil or number).
+-- - includePoK (nil or boolean).
+-- - playerTools (nil or boolean).
+function onSetupHelperSetupFinished(params)
+    if params.isRightClick then
+        printToAll('Game data onSetupHelperSetupFinished is a right click, ignoring')
+        return
+    end
+
+    _state._gamedataOptIn = params.gamedataOptIn
+
+    _state.setupTimestamp = math.floor(os.time() * 1000) / 1000
+
+    -- If opt-in and haven't already started (streamer) game data, start now.
+    if _state._gamedataOptIn and not _timerId then
+        startPeriodicUpdates({
+            delay = DEFAULT_ANON_PERIODIC_SECONDS
+        })
+    end
+end
+
+local _didOnPlayerTurnStartCheck = false
+function onPlayerTurnStart(player_color_start, player_color_previous)
+    -- A bug report says the map tool keeps re-saving the string every turn.
+    -- Unable to reproduce, hammer to make sure it only tries once.
+    if _didOnPlayerTurnStartCheck then
+        return
+    end
+    _didOnPlayerTurnStartCheck = true
+
+    if _state._gamedataOptIn or _gameDataKey then
+        -- If map builder is empty, trigger a save for stats recording
+        local mapString = Map.getMapString()
+        if (not mapString) or string.len(mapString) == 0 then
+            Map.saveMapString()
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function startPeriodicUpdates(params)
+    assert(type(params) == 'table')
+    assert((not params.key) or type(params.key) == 'string')
+    assert((not params.delay) or (type(params.delay) == 'number'))
+
+    _gameDataKey = params.key or false
+    local delay = params.delay or DEFAULT_KEY_PERIODIC_SECONDS
+    delay = math.max(delay, MIN_PERIODIC_SECONDS)
+    delay = math.min(delay, MAX_PERIODIC_SECONDS)
+    assert(type(delay) == 'number')
+
+    -- Stop any existing timer.
+    if _timerId then
+        Timer.destroy(_timerId)
+        _timerId = false
+    end
+
+    -- Start a new timer.
+    _timerId = self.getGUID() .. '_periodicGameData'
+    _timerPeriodicSeconds = delay
+    Timer.create({
+        identifier = _timerId,
+        function_name = '_uploadGameData',
+        function_owner = self,
+        delay = delay,
+        repetitions = 0,  -- until stopped
+    })
+    _uploadGameData()  -- do not wait for first timer, upload one now
+
+    -- Start analytics on a separate timer.
+    if _analyticsTimerId then
+        Timer.destroy(_analyticsTimerId)
+        _analyticsTimerId = false
+    end
+    _analyticsTimerId = self.getGUID() .. '_periodicAnalytics'
+    Timer.create({
+        identifier = _analyticsTimerId,
+        function_name = '_uploadAnalytics',
+        function_owner = self,
+        delay = 14 * 60,
+        repetitions = 0,  -- until stopped
+    })
+    _uploadAnalytics()  -- do not wait for first timer, upload one now
+
+    return delay  -- tell caller the update delay
+end
+
+function stopPeriodicUpdates()
+    _gameDataKey = false
+    if _timerId then
+        Timer.destroy(_timerId)
+        _timerId = false
+    end
+    if _analyticsTimerId then
+        Timer.destroy(_analyticsTimerId)
+        _analyticsTimerId = false
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function _sendGameData()
+    if _gameDataKey then
+        -- ALWAYS send when game data key is present
+        return true
+    elseif _state._gamedataOptIn then
+        -- To help prevent curiosity and solo griefing corruption REQUIRE
+        -- multiple players before uploading vonulary anonymized game data.
+        local seated = getSeatedPlayers()
+        return seated and #seated > 1
+    end
+end
+
+function _uploadGameData()
+    if not _sendGameData() then
+        return
+    end
+    asyncGatherData({
+        guid = self.getGUID(),
+        includeSteamNames = _gameDataKey and true or false,
+        callbackFunctionName = '_uploadGameDataCallback'
+    })
+end
+
+function _uploadGameDataCallback(data)
+    -- Suppress updates if nothing (other than timestamp) changed.
+    if data.crc then
+        if data.crc == _lastCrc then
+            return
+        end
+        _lastCrc = data.crc
+    end
+
+    local host = GAME_DATA_HOST
+    if _gameDataKey == GAME_DATA_LOCALHOST_KEY then
+        host = GAME_DATA_LOCALHOST
+    end
+
+    local url = host .. '/data'
+    if _gameDataKey then
+        url = url .. '?key=' .. _gameDataKey
+    end
+    local function callback(result)
+        if result.is_error then
+            print('!gamedata error: ' .. result.error)
+        end
+    end
+    WebRequest.post(url, JSON.encode(data), callback)
+end
+
+function _uploadAnalytics()
+    if not _sendGameData() then
+        return
+    end
+    Analytics.report()
+end
+
+-------------------------------------------------------------------------------
+
+function _doReport()
+    asyncGatherData({
+        guid = self.getGUID(),
+        callbackFunctionName = '_doReportCallback'
+    })
+end
+
+function _doReportCallback(data)
+    _logTable(self.getName(), data)
+end
+
+function _logTable(message, table, depth)
+    depth = depth or 1
+    assert(type(message) == 'string' and type(table) == 'table' and type(depth) == 'number')
+    local indent = '   '
+    local prefix = ''
+    if depth > 1 then
+        for i = 2, depth do
+            prefix = prefix .. indent
+        end
+    end
+    local indentedPrefix = prefix .. '   '
+    print(prefix .. message .. ' = {')
+    if depth < 4 then
+        for k, v in pairs(table) do
+            if type(v) == 'table' then
+                _logTable(tostring(k), v, depth + 1)
+            else
+                print(indentedPrefix .. tostring(k) .. ' = ' .. tostring(v))
+            end
+        end
+    else
+        -- Stop once too deep (also prevents infinite loops if cycles).
+        print(indentedPrefix .. '...')
+    end
+    print(prefix .. '}')
+end
+
+-------------------------------------------------------------------------------
+
+-- https://developers.google.com/analytics/devguides/collection/protocol/v1/devguide
+Analytics = {
+    URL = 'https://www.google-analytics.com/batch',
+    PAYLOAD = {
+        v = 1,
+        tid = 'UA-4959479-17',
+        cid = '-', -- client (user) id
+        t = 'pageview',
+        dp = '%2Fgamedata', -- URL escaped "page" name being visited
+    },
+    _lastReport = false,
+}
+
+function Analytics.report()
+    -- For drop-off reporting track a page for the session progress?
+    local maxScore = 0
+    for color, score in pairs(colorToScore()) do
+        if score > maxScore then
+            maxScore = score
+        end
+    end
+    local page = '%2Fscore' .. maxScore
+
+    -- Use "batch" to send one result per player.  This should help
+    -- capture repeat visits, at the expense of tracking number of players
+    -- instead of number of games.
+    local payloads = {}
+    local function addPayload(cid, page)
+        local payload = {}
+        for k, v in pairs(Analytics.PAYLOAD) do
+            if (k == 'cid') and cid then
+                v = cid
+            end
+            if (k == 'dp') and page then
+                v = page
+            end
+            table.insert(payload, k .. '=' .. v)
+        end
+        payload = table.concat(payload, '&')
+        table.insert(payloads, payload)
+    end
+
+    -- Add a hit for each SEATED player (ignore spectators).
+    local seatedSet = {}
+    for _, color in ipairs(getSeatedPlayers()) do
+        seatedSet[color] = true
+    end
+    for _, player in ipairs(Player.getPlayers()) do
+        if seatedSet[player.color] then
+            -- Hash ids, and only gather after opt-in on setup tile.
+            local cid = player.steam_id and string.format('%x', CRC32.hash(player.steam_id))
+            addPayload(cid, page)
+        end
+    end
+    local body = table.concat(payloads, '\n')
+
+    -- Do not send analytics for localhost tests.
+    if _gameDataKey == GAME_DATA_LOCALHOST_KEY then
+        print('LOCALHOST REPORT:\n' .. body)
+        return
+    end
+
+    local function callback(e)
+        -- if e.is_error then
+        --     print('response error: ' .. e.error)
+        -- end
+        -- if e.text then
+        --     print('response text: ' .. e.text)
+        -- end
+    end
+    local download = true
+    local headers = {}
+    if string.len(body) > 0 then
+        WebRequest.custom(Analytics.URL, 'POST', download, body, headers, callback)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+CRC32 = {
+    _tableData = false
+}
+
+function CRC32._table()
+    if not CRC32._tableData then
+        CRC32._tableData = {}
+        for i = 0, 0xff do
+            local rem = i
+            for _ = 1, 8 do
+                if bit32.band(rem, 1) == 1 then
+                    rem = bit32.rshift(rem, 1)
+                    rem = bit32.bxor(rem, 0xedb88320)
+                else
+                    rem = bit32.rshift(rem, 1)
+                end
+            end
+            CRC32._tableData[i] = rem
+        end
+    end
+    return CRC32._tableData
+end
+
+function CRC32.hash(str)
+    local crc = 0xffffffff
+    local crcTable = CRC32._table()
+    for i = 1, string.len(str) do
+        local c = string.byte(str, i)
+        local crc123 = bit32.rshift(crc, 8)
+        local crc4 = bit32.band(crc, 0xff)
+        crc = bit32.bxor(crc123, crcTable[bit32.bxor(crc4, c)])
+    end
+    return bit32.bxor(crc, 0xffffffff)
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

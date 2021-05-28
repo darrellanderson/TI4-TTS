@@ -1,0 +1,7 @@
+TI4_TileTable_v0.1_beta:
+- Milty for kicking it off, the new table and scripting
+- Darrell for more scripting
+- ThatRobHuman for new meshes for major GPU cost reduction
+- 3tamatulg for the unit stand and other models
+- Stom for circle drawing function
+- X3n for original tile gradient

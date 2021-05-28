@@ -1,0 +1,241 @@
+--- Sustain damage burn effect
+-- @author Darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+
+local PARTICLE_SYSTEM_COUNT = 15
+local ANIMATION_UPDATE_SECONDS = 0.2
+
+local _burnNameSet = {}
+
+local _burningObjectGuidSet = {}
+local _isBroken = false
+
+local _burnAnimation = {}
+local _burnAnimationWaitId = false
+local _periodicUpdateWaitId = false
+
+-------------------------------------------------------------------------------
+
+function burn(object)
+    _burningObjectGuidSet[object.getGUID()] = object
+end
+
+function unburn(object)
+    _burningObjectGuidSet[object.getGUID()] = nil
+    object.setVectorLines({})
+end
+
+-------------------------------------------------------------------------------
+
+function updateBurnSet()
+    local function isBurnable(object)
+        if object.held_by_color then
+            return false
+        end
+        if (object.tag ~= 'Generic') and (object.tag ~= 'Figurine') then
+            return false
+        end
+        if not _burnNameSet[object.getName()] then
+            return false
+        end
+        return true
+    end
+
+    local burnableObjects = {}
+    for _, object in ipairs(getAllObjects()) do
+        if isBurnable(object) then
+            table.insert(burnableObjects, object)
+        end
+    end
+
+    local anyBurning = false
+    for _, object in ipairs(burnableObjects) do
+        local guid = object.getGUID()
+        local shouldBurn = object.is_face_down
+        anyBurning = anyBurning or shouldBurn
+
+        if shouldBurn and not _burningObjectGuidSet[guid] then
+            burn(object)
+        end
+
+        if not shouldBurn and _burningObjectGuidSet[guid] then
+            unburn(object)
+        end
+    end
+
+    if anyBurning then
+        if not _burnAnimationWaitId then
+            _burnAnimationWaitId = Wait.frames(periodicUpdateBurnAnimation, 1)
+        end
+    else
+        if _burnAnimationWaitId then
+            Wait.stop(_burnAnimationWaitId)
+            _burnAnimationWaitId = false
+        end
+    end
+end
+
+function updateBurnAnimation()
+    -- Remove oldest.
+    while #_burnAnimation > PARTICLE_SYSTEM_COUNT do
+        table.remove(_burnAnimation, 1)
+    end
+
+    -- Age.
+    for _, particle in ipairs(_burnAnimation) do
+        particle.position.y = particle.position.y - particle.speed
+        particle.size = particle.size * 0.95
+        particle.color.a = particle.color.a * 0.9
+    end
+
+    -- Add new.
+    local position = {
+        x = -0.2 + math.random() * 0.4,
+        y = -0.2,
+        z = -1 + math.random() * 2
+    }
+    table.insert(_burnAnimation, {
+        position = position,
+        rotation = {
+            x = math.random() * 30 * (position.z > 0 and 1 or -1),
+            y = 0,
+            z = math.random() * 30 * (position.x > 0 and 1 or -1),
+        },
+        size = 0.3 + math.random() * 0.3,
+        speed = 0.04 + math.random() * 0.04,
+        color = {
+            r = 1,
+            g = math.random(),
+            b = 0,
+            a = 0.95
+        }
+    })
+
+    -- Make lines.
+    local lines = {}
+    for _, particle in ipairs(_burnAnimation) do
+        if particle.size > 0.1 then
+            table.insert(lines, {
+                points = {
+                    {
+                        x = particle.position.x, -- - particle.size / 2,
+                        y = particle.position.y,
+                        z = particle.position.z
+                    },
+                    {
+                        x = particle.position.x, -- + particle.size / 2,
+                        y = particle.position.y,
+                        z = particle.position.z
+                    },
+                },
+                rotation = particle.rotation,
+                thickness = particle.size,
+                color = particle.color,
+                loop = false,
+                square = false
+            })
+        end
+    end
+
+    for guid, object in pairs(_burningObjectGuidSet) do
+        object.setVectorLines(lines)
+    end
+end
+
+function periodicUpdateBurnSet()
+    updateBurnSet()
+    _periodicUpdateWaitId = Wait.time(periodicUpdateBurnSet, 2 + math.random())
+end
+
+function periodicUpdateBurnAnimation()
+    updateBurnAnimation()
+    _burnAnimationWaitId = Wait.time(periodicUpdateBurnAnimation, ANIMATION_UPDATE_SECONDS)
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    math.random(tonumber(self.getGUID(), 16))
+
+    for _, color in ipairs(Player.getColors()) do
+        _burnNameSet[color .. ' Mech'] = true
+        _burnNameSet[color .. ' Carrier'] = true
+        _burnNameSet[color .. ' Cruiser'] = true
+        _burnNameSet[color .. ' Destroyer'] = true
+        _burnNameSet[color .. ' Dreadnought'] = true
+        _burnNameSet[color .. ' Flagship'] = true
+        _burnNameSet[color .. ' PDS'] = true
+        _burnNameSet[color .. ' War Sun'] = true
+    end
+    for color, faction in pairs(_factionHelper.allFactions()) do
+        _burnNameSet[faction.flagship] = true
+    end
+
+    _periodicUpdateWaitId = Wait.time(periodicUpdateBurnSet, math.random())
+end
+
+function onDestroy()
+    for guid, _ in pairs(_burningObjectGuidSet) do
+        local object = getObjectFromGUID(guid)
+        if object then
+            unburn(object)
+        end
+    end
+    _burningObjectGuidSet = {}
+    if _periodicUpdateWaitId then
+        Wait.stop(_periodicUpdateWaitId)
+    end
+    if _burnAnimationWaitId then
+        Wait.stop(_burnAnimationWaitId)
+    end
+end
+
+function onObjectPickUp(playerColor, pickedUpObject)
+    assert(type(pickedUpObject) == 'userdata')
+    if _burningObjectGuidSet[pickedUpObject.getGUID()] then
+        unburn(pickedUpObject)
+    end
+end
+
+function onObjectDestroy(dyingObject)
+    if not _isBroken then
+        _isBroken = true  -- when exiting TTS this getGUID call errors out
+        if _burningObjectGuidSet[dyingObject.getGUID()] then
+            unburn(dyingObject)
+        end
+        _isBroken = false  -- didn't error out?  great, reset to healthy
+    end
+end
+
+function onObjectEnterContainer(container, enterObject)
+    if _burningObjectGuidSet[enterObject] then
+        unburn(dyingObject)
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

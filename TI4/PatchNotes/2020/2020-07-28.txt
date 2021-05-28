@@ -1,0 +1,18 @@
+Darrell:
+MultiRoller:
+- Blue Space / Savages Franken additions (was already done for the most part).
+
+Faction Helper:
+- Include command and faction sheet information with faction lookup.
+- Move starting units and technologies to the helper (from the unpacker).
+
+Unpack:
+- Place owner tokens on scoreboard zero.
+- Flip fleet tokens for correct orientation.
+
+Faction Borders:
+- Fix an initialization bug if the control view object gets deleted.
+
+Tactic Blue and Toppopia:
+Maps bag:
+- Add player counts to map tiles (4p, etc).

@@ -1,0 +1,327 @@
+-------------------------------------------------------------------------------
+--- Access control for tables.
+--
+-- Locked tables are empty, using a metatable to detect and redirect all forms
+-- of access to the actual table data.  Metatables contain a few custom fields:
+-- - '_name' string table name.
+-- - '_attrSet' table from set attribute names to true.
+-- - '_tableContents' table holding the actual locked table content.
+--
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.LockTable'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.LockTable = assert(not CrLua.LockTable) and {
+    _require = {}
+}
+
+CrLua.LockTable.ATTR = {
+    READ_ONLY = 1,
+    REQUIRE_KEY = 2
+}
+
+CrLua.LockTable.ACCESS_TYPE = {
+    READ_MISSING = 'read missing',
+    WRITE_NEW = 'write new',
+    OVERWRITE = 'overwrite'
+}
+
+-------------------------------------------------------------------------------
+--- Inject or overwrite a value into a locked table.
+-- This is similar to rawset, except it preserves locked access to set items.
+-- @param lockedTable table.
+-- @param key.
+-- @param value.
+-------------------------------------------------------------------------------
+function CrLua.LockTable.setEvenIfLocked(lockedTable, key, value)
+    assert(type(lockedTable) == 'table')
+    local metatable = getmetatable(lockedTable)
+    if metatable then
+        if not metatable._name or not metatable._tableContents then
+            error(TAG .. ': setEvenIfLocked has unknown metatable')
+        end
+        metatable._tableContents[key] = value
+    else
+        -- Not actually locked, do normal set.
+        lockedTable[key] = value
+    end
+end
+
+function CrLua.LockTable._testSetEvenIfLocked()
+    local table = CrLua.LockTable.readOnly('myTable', { 'foo', 'bar' })
+    CrLua.LockTable.setEvenIfLocked(table, 3, 'baz')
+    assert(table[1] == 'foo')
+    assert(table[3] == 'baz')
+end
+
+-------------------------------------------------------------------------------
+--- Error and stop script when misusing a locked table.
+-------------------------------------------------------------------------------
+function CrLua.LockTable._error(lockedTable, key, accessType)
+    assert(type(lockedTable) == 'table' and type(accessType) == 'string')
+    local metatable = assert(getmetatable(lockedTable))
+    local tableName = assert(metatable._name)
+    local keyName = tostring(key or '<nil>')
+    error(TAG .. ': ' .. accessType .. ' ' .. tableName .. '.' .. keyName)
+end
+
+-------------------------------------------------------------------------------
+--- Create a new table with the lock table metamethods.
+-- @param tableName string : use this as the tableName.key when reporting errors.
+-- @param attrs table : list of LockTable.ATTRS to apply.
+-- @param table : table to lock (this table itself is mutated!)
+-- @return table : the same table, returned for create-by-wrapping convenience.
+-------------------------------------------------------------------------------
+function CrLua.LockTable._apply(tableName, attrs, table)
+    assert(type(tableName) == 'string' and type(attrs) == 'table' and type(table) == 'table')
+
+    -- Do not attempt to lock a table that already has a metatable.
+    assert(not getmetatable(table), 'cannot apply LockTable when a metatable is already set: ' .. tableName)
+
+    local newMetaTable = {
+        _name = tableName,
+        _attrSet = {},
+        _tableContents = {}
+    }
+
+    -- Add the metatable methods to behave like the original table.
+    for k, v in pairs(CrLua.LockTable._metatable) do
+        newMetaTable[k] = v
+    end
+
+    -- Apply attrs.
+    for _, attr in ipairs(attrs) do
+        assert(type(attr) == 'number')
+        newMetaTable._attrSet[attr] = true
+    end
+
+    -- Move table contents.
+    for k, v in pairs(table) do
+        newMetaTable._tableContents[k] = v
+        table[k] = nil
+    end
+
+    setmetatable(table, newMetaTable)
+    return table
+end
+
+CrLua.LockTable._metatable = {}
+
+function CrLua.LockTable._metatable.__index(lockedTable, key)
+    local metatable = getmetatable(lockedTable)
+    local attrSet = metatable._attrSet
+    local tableContents = metatable._tableContents
+    local value = tableContents[key]
+    local existing = value ~= nil
+    if not existing and attrSet[CrLua.LockTable.ATTR.REQUIRE_KEY] then
+        CrLua.LockTable._error(lockedTable, key, CrLua.LockTable.ACCESS_TYPE.READ_MISSING)
+    end
+    return value
+end
+
+function CrLua.LockTable._metatable.__newindex(lockedTable, key, value)
+    local metatable = getmetatable(lockedTable)
+    local attrSet = metatable._attrSet
+    local tableContents = metatable._tableContents
+    local existing = tableContents[key] ~= nil
+    if attrSet[CrLua.LockTable.ATTR.READ_ONLY] then
+        local accessType = existing and CrLua.LockTable.ACCESS_TYPE.OVERWRITE or CrLua.LockTable.ACCESS_TYPE.WRITE_NEW
+        CrLua.LockTable._error(lockedTable, key, accessType)
+    elseif not existing and attrSet[CrLua.LockTable.ATTR.REQUIRE_KEY] then
+        CrLua.LockTable._error(lockedTable, key, CrLua.LockTable.ACCESS_TYPE.WRITE_NEW)
+    end
+    tableContents[key] = value
+end
+
+function CrLua.LockTable._metatable.__pairs(lockedTable)
+    local metatable = getmetatable(lockedTable)
+    local tableContents = metatable._tableContents
+    local function iter(_, k)
+        local k, v = next(tableContents, k)
+        if v ~= nil then
+            return k, v
+        end
+    end
+    return iter, lockedTable, nil
+end
+
+function CrLua.LockTable._metatable.__ipairs(lockedTable)
+    local metatable = getmetatable(lockedTable)
+    local tableContents = metatable._tableContents
+    local function iter(_, i)
+        local v = tableContents[i + 1]
+        if v ~= nil then
+            return i + 1, v
+        end
+    end
+    return iter, lockedTable, 0
+end
+
+function CrLua.LockTable._metatable.__len(lockedTable)
+    local metatable = getmetatable(lockedTable)
+    local tableContents = metatable._tableContents
+    return #tableContents
+end
+
+-------------------------------------------------------------------------------
+--- Make table read-only.
+-- Reads to missing values return nil, as normal.
+-- If the table has a _name entry, use that when reporting errors.
+-- @param table
+-- @param table : the same table as the argument for convenience assignment.
+-------------------------------------------------------------------------------
+function CrLua.LockTable.readOnly(tableName, table)
+    assert(type(tableName) == 'string' and type(table) == 'table')
+    assert(type(table) == 'table')
+
+    local attrs = { CrLua.LockTable.ATTR.READ_ONLY }
+    return CrLua.LockTable._apply(tableName, attrs, table)
+end
+
+function CrLua.LockTable._testReadOnly()
+    local table = CrLua.LockTable.readOnly('myTable', { 'foo', 'bar' })
+
+    -- Read existing key.
+    assert(table[1] == 'foo' and table[2] == 'bar')
+
+    -- Can read missing key.
+    assert(not table.missingKey)
+
+    -- Cannot write exiting key.
+    if pcall(function() table[2] = 'baz' end) then
+        error('wrote missing key')
+    end
+
+    -- Cannot write missing key.
+    if pcall(function() table.missingKey = 1 end) then
+        error('wrote missing key')
+    end
+
+    -- Verify pairs.
+    local count = 0
+    for k, v in pairs(table) do
+        assert((k == 1 and v == 'foo') or (k == 2 and v == 'bar'))
+        count = count + 1
+    end
+    assert(count == 2)
+
+    -- Verify ipairs.
+    local count = 0
+    for i, v in ipairs(table) do
+        assert((i == 1 and v == 'foo') or (i == 2 and v == 'bar'))
+        count = count + 1
+    end
+    assert(count == 2)
+
+    -- Verify len.
+    assert(#table == 2)
+end
+
+-------------------------------------------------------------------------------
+--- Make table read-only, and error if accessing missing key.
+-- Helps catch typos reading from must-have-item tables.
+-- @param table
+-- @param table : the same table as the argument for convenience assignment.
+-------------------------------------------------------------------------------
+function CrLua.LockTable.readOnlyRequireKey(tableName, table)
+    assert(type(tableName) == 'string' and type(table) == 'table')
+
+    local attrs = { CrLua.LockTable.ATTR.READ_ONLY, CrLua.LockTable.ATTR.REQUIRE_KEY }
+    return CrLua.LockTable._apply(tableName, attrs, table)
+end
+
+function CrLua.LockTable._testReadOnlyRequireKey()
+    local table = CrLua.LockTable.readOnlyRequireKey('myTable', { 'foo', 'bar' })
+
+    -- Read existing key.
+    assert(table[1] == 'foo' and table[2] == 'bar')
+
+    -- Cannot read missing key.
+    if pcall(function() return table.missingKey end) then
+        error('read missing key')
+    end
+
+    -- Cannot write exiting key.
+    if pcall(function() table[2] = 'baz' end) then
+        error('wrote missing key')
+    end
+
+    -- Cannot write missing key.
+    if pcall(function() table.missingKey = 1 end) then
+        error('wrote missing key')
+    end
+
+    -- Verify pairs.
+    local count = 0
+    for k, v in pairs(table) do
+        assert((k == 1 and v == 'foo') or (k == 2 and v == 'bar'))
+        count = count + 1
+    end
+    assert(count == 2)
+
+    -- Verify ipairs.
+    local count = 0
+    for i, v in ipairs(table) do
+        assert((i == 1 and v == 'foo') or (i == 2 and v == 'bar'))
+        count = count + 1
+    end
+    assert(count == 2)
+
+    -- Verify len.
+    assert(#table == 2)
+end
+
+-------------------------------------------------------------------------------
+--- Require all table access read or write an existing key.
+-- @param table
+-- @param table : the same table as the argument for convenience assignment.
+-------------------------------------------------------------------------------
+function CrLua.LockTable.readWriteRequireKey(tableName, table)
+    assert(type(tableName) == 'string' and type(table) == 'table')
+
+    local attrs = { CrLua.LockTable.ATTR.REQUIRE_KEY }
+    return CrLua.LockTable._apply(tableName, attrs, table)
+end
+
+function CrLua.LockTable._testreadWriteRequireKey()
+    local table = CrLua.LockTable.readWriteRequireKey('myTable', { 'foo', 'bar' })
+
+    -- Read existing key.
+    assert(table[1] == 'foo' and table[2] == 'bar')
+
+    -- Cannot read missing key.
+    if pcall(function() return table.missingKey end) then
+        error('read missing key')
+    end
+
+    -- Write exiting key.
+    table[2] = 'baz'
+    assert(table[2] == 'baz')
+    table[2] = 'bar'
+
+    -- Cannot write missing key.
+    if pcall(function() table.missingKey = 1 end) then
+        error('wrote missing key')
+    end
+
+    -- Verify pairs.
+    local count = 0
+    for k, v in pairs(table) do
+        assert((k == 1 and v == 'foo') or (k == 2 and v == 'bar'))
+        count = count + 1
+    end
+    assert(count == 2)
+
+    -- Verify ipairs.
+    local count = 0
+    for i, v in ipairs(table) do
+        assert((i == 1 and v == 'foo') or (i == 2 and v == 'bar'))
+        count = count + 1
+    end
+    assert(count == 2)
+
+    -- Verify len.
+    assert(#table == 2)
+end

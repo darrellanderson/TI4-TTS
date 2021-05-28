@@ -1,0 +1,13 @@
+- Color command token deposit/withdraw messages.
+- Workaround token bag glitch where tokens were not hovering over bags.
+- Strategy Card Automator now only acts after someone clicks the button, merely being on the table is no longer sufficient.
+- "Burninate" now shows burn animation for sustained cruisers (Saturn Engine II).
+- Remove commas from map attributes, e.g. "[PoK 6p]" to avoid search errors because spaces between terms mean AND whereas commas mean OR.
+- Fix auto-fill roller tool to disable plasma scoring when bombarding a second planet.
+- Repair sustained damage PDS during end of status phase.
+- New exploration decks right click option to report remaining cards (alphabetized).
+- New planet board right click options to fetch cards for planets in the active system.  Will find planets in the planets deck for those who don't like to place cards on systems.
+- Clean up art for mech, planets, leaders, exploration cards.
+- Fix map tool build when "{}" center tile replacement is a hyperlane.
+- MultiRoller now ignores middle mouse button clicks.
+- Map strings may now include "0" for home system positions and "-1" for empty space, building maps with such a string will move home systems to the specified locations.

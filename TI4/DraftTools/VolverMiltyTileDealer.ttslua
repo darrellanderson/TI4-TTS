@@ -1,0 +1,298 @@
+-- VolverMilty Tile Dealer
+-- Tile dealing system that ensures players get balanced tile hand
+-- Deals tiles from three tiers, with minimum and maximum spends for resources/influence
+-- @author Volverbot for design
+-- @author Milty for scripting and design
+
+local tier1 = {27, 28, 35, 37, 38, 69, 72, 75}
+local tier2 = {26, 29, 30, 33, 34, 62, 64, 65, 66, 70, 71, 74, 76}
+local tier3 = {19, 20, 21, 22, 23, 24, 25, 31, 32, 36, 59, 60, 61, 63, 73}
+
+local playerHands = {
+    ['Red'] = { ['tiles'] = {}},
+    ['Orange'] = {['tiles'] = {}},
+    ['Yellow'] = {['tiles'] = {}},
+    ['Green'] = {['tiles'] = {}},
+    ['Purple'] = {['tiles'] = {}},
+    ['Blue'] = {['tiles'] = {}},
+    ['Pink'] = {['tiles'] = {}},
+    ['White'] = {['tiles'] = {}},
+    ['Brown'] = {['tiles'] = {}},
+    }
+
+local bluebagGUID = '69311f'
+local redbagGUID = '14a45f'
+local blueDealPos = {7.67, 0.57, -0.08}
+local redDealPos = {-7.34, 0.57, 0.26}
+local minR = 0
+local minI = 0
+local minTotal = 9
+local maxTotal = 13
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local setupHelper = getHelperClient('TI4_SETUP_HELPER')
+local systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+function onLoad()
+    math.randomseed(os.time())
+    createButtons()
+    minR = 2.5
+    minI = 4
+end
+
+function createButtons()
+    self.createButton({
+        click_function = "setuptierhands",
+        function_owner = self,
+        label          = "Deal Tiles",
+        position       = {x = 0, y = 0.2, z = -0.5},
+        width          = 1200,
+        height         = 400,
+        font_size      = 200,
+    })
+    self.createButton({
+        click_function = 'pass',
+        function_owner = self,
+        label          = 'Minimum Resources',
+        position       = {x = 0, y = -0.2, z = -0.6},
+        rotation       = {x = 0, y = 0, z = 180},
+        width          = 0,
+        height         = 0,
+        font_size      = 125,
+    })
+    self.createButton({
+        click_function = 'pass',
+        function_owner = self,
+        label          = 'Minimum Influence',
+        position       = {x = 0, y = -0.2, z = 0.3},
+        rotation       = {x = 0, y = 0, z = 180},
+        width          = 0,
+        height         = 0,
+        font_size      = 125,
+    })
+    self.createInput({
+        input_function = 'onResourceValueChanged',
+        function_owner = self,
+        value          = 2.5,
+        alignment      = 4,
+        position       = {x = 0, y = -0.2, z = -0.3},
+        rotation       = {x = 0, y = 0, z = 180},
+        width          = 800,
+        height         = 200,
+        validation     = 3,
+        alignment      = 2,
+        value          = '',
+        label          = 'Value from 0 to 5',
+        tooltip        = 'Value from 0 to 5, default 2.5'
+    })
+    self.createInput({
+        input_function = 'onInfluenceValueChanged',
+        function_owner = self,
+        value          = 4,
+        alignment      = 4,
+        position       = {x = 0, y = -0.2, z = 0.6},
+        rotation       = {x = 0, y = 0, z = 180},
+        width          = 800,
+        height         = 200,
+        validation     = 3,
+        alignment      = 2,
+        value          = '',
+        label          = 'Value from 0 to 6',
+        tooltip        = 'Value from 0 to 6, default 4'
+    })
+end
+
+-- change minR value, limits values to allow for hand combinations
+function onResourceValueChanged(_, playerColor, value)
+    local numValue = tonumber(value)
+    if numValue then
+        if numValue >= 0 and numValue <= 5 then
+            minR = tonumber(value)
+        else
+            Player[playerColor].broadcast('Enter a resource number from 0 to 5')
+        end
+    else
+        minR = 2.5
+    end
+end
+
+-- change minI value, limits values to allow for hand combinations
+function onInfluenceValueChanged(_, playerColor, value)
+    local numValue = tonumber(value)
+    if numValue then
+        if numValue >= 0 and numValue <= 6 then
+            minI = tonumber(value)
+        else
+            Player[playerColor].broadcast('Enter an influence number from 0 to 6')
+        end
+    else
+        minI = 4
+    end
+end
+
+function setuptierhands(clickObject, clickPlayer)
+    if not setupHelper.getPoK() then
+        printToAll('Please set up the table with "Prophecy of Kings" expansion to include PoK tiles for dealing', 'Red')
+        return
+    end
+
+    local messageColor = 'Yellow'
+    broadcastToAll('Dealing Tiles. Printing Map Building Rules to Chat.', messageColor)
+
+    local delim = ''
+    for _ = 1, 20 do
+        delim = delim .. '\u{2550}'
+    end
+    local message = {
+        delim,
+        'VolverMilty PoK Map Building Rules:',
+        'Cormund and Everra may not be placed adjacent to your own home system unless forced. All other normal map building rules apply.',
+        'Planets are valued as highest resources or influence. Equal value planets are valued as 50% of each.',
+        'Current minimums are: Resources = ' .. tostring(minR) .. ', Influence = ' .. tostring(minI) .. ', Total = ' .. tostring(minTotal),
+        delim
+    }
+    printToAll(table.concat(message, '\n'), messageColor)
+
+    -- Get the union of seated and player area colors.
+    local seatedSet = {}
+    for _, color in ipairs(getSeatedPlayers()) do
+        seatedSet[color] = true
+    end
+    local colorList = {}
+    for _, color in ipairs(zoneHelper.zones()) do
+        if seatedSet[color] then
+            table.insert(colorList, color)
+        end
+    end
+    if #colorList == 0 then
+        return
+    end
+
+    makeHands(colorList)
+    dealHands(colorList)
+end
+
+function permute(tab)
+  local shuffled = {}
+  for i, v in ipairs(tab) do
+    local j = math.random(1, #shuffled+1)
+    table.insert(shuffled, j, v)
+  end
+  return shuffled
+end
+
+function dealHands(playerColorList)
+    local bluebag = assert(getObjectFromGUID(bluebagGUID))
+    local redbag = assert(getObjectFromGUID(redbagGUID))
+    local bluebagTiles = bluebag.getObjects()
+    for i, color in ipairs(playerColorList) do
+        local handinfo = Player[color].getHandTransform()
+        local takeParams = {
+            position = {handinfo.position.x,handinfo.position.y+2,handinfo.position.z},
+            rotation = {handinfo.rotation.x,handinfo.rotation.y+180,handinfo.rotation.z},
+        }
+        for j, tile in ipairs(playerHands[color].tiles) do
+            local tileGUID = systemHelper.systemFromTile(tile).guid
+            takeParams.guid = tileGUID
+            bluebag.takeObject(takeParams)
+        end
+    end
+    redbag.randomize()
+    redbag.deal(2)
+end
+
+-- generates hand combinations for each player
+function makeHands(playerColorList)
+    -- shuffles tile tier list
+    local randomtier1 = permute(tier1)
+    local randomtier2 = permute(tier2)
+    local randomtier3 = permute(tier3)
+    local adjCount = {#playerColorList+1, #playerColorList+1, #playerColorList+1}
+    for i, color in ipairs(playerColorList) do
+        local validHand = false
+        local adjusttier = {false, false, false}
+        while validHand == false do
+            -- makes a hand of tiles from each tier
+            local hand = {randomtier1[i],randomtier2[i],randomtier3[i]}
+            validHand = verifyHand(hand)
+            -- if hand doesn't hit thresholds, goes on to the next hand combination
+            if validHand == false then
+                if adjusttier[1] == false and adjusttier[2] == false and adjusttier[3] == false then
+                    adjusttier[3] = true
+                end
+                if adjusttier[1] == true then
+                    randomtier1[i], randomtier1[adjCount[1]] = randomtier1[adjCount[1]], randomtier1[i]
+                    adjusttier[1] = false
+                    adjCount[1] = adjCount[1] + 1
+                end
+                if adjusttier[2] == true then
+                    randomtier2[i], randomtier2[adjCount[2]] = randomtier2[adjCount[2]], randomtier2[i]
+                    adjusttier[2] = false
+                    adjCount[2] = adjCount[2] + 1
+                    if adjCount[2] > #tier2 then
+                        adjusttier[1] = true
+                        adjusttier[2] = false
+                        adjCount[2] = #playerColorList
+                    end
+                end
+                if adjusttier[3] == true then
+                    randomtier3[i], randomtier3[adjCount[3]] = randomtier3[adjCount[3]], randomtier3[i]
+                    adjusttier[3] = false
+                    adjCount[3] = adjCount[3] + 1
+                    if adjCount[3] > #tier3 then
+                        adjusttier[2] = true
+                        adjusttier[3] = false
+                        adjCount[3] = #playerColorList
+                    end
+                end
+            end
+        end
+        playerHands[color].tiles = {randomtier1[i],randomtier2[i],randomtier3[i]}
+    end
+end
+
+function verifyHand(tileTable)
+    local optR = 0.0
+    local optI = 0.0
+    -- sums hands optimized resources and influence, compares to minimum values
+    for i, tile in ipairs(tileTable) do
+        local system = systemHelper.systemFromTile(tile)
+        for j, planet in ipairs(system.planets) do
+            if planet.resources > planet.influence then optR = optR + planet.resources end
+            if planet.influence > planet.resources then optI = optI + planet.influence end
+            if planet.resources == planet.influence then
+                optR = optR + 0.5* planet.resources
+                optI = optI + 0.5* planet.influence
+            end
+        end
+    end
+    if optR >= minR and optI >= minI and optR+optI >= minTotal and optR+optI <= maxTotal then return true end
+    return false
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

@@ -1,0 +1,20 @@
+Color Picker:
+- Fix unit scale if they do not match what the table is using.
+- Delay change player color until after unpacking new items (in case any scripts want to find the command sheet when a player changes color).
+
+Autofill MultiRoller:
+- Fix plasma scoring assignment when not researched.
+- Move UI slightly higher so visible on low graphics settings.
+
+Faction Borders:
+- Move UI slightly higher so visible on low graphics settings.
+
+Build Area:
+- Fix detecting when inconsistencies in planet names.
+- Move UI slightly higher so visible on low graphics settings.
+
+Tactic Blue:
+- Updated Saves of Cymiae.
+- Updated reference deck.
+- MultiRoller tweak for homebrew.
+- Updated faction box art (fixes missing image).

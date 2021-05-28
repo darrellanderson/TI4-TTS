@@ -1,0 +1,4 @@
+- Fix SCPT draft tool placing speaker token.
+- Add setup option for a third extra ring, for "maps".
+- Map tool now prints a more informative error message when it does not place a home system during build.
+- Streamer gamedata now tolerates duplicated objectives.

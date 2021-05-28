@@ -1,0 +1,11 @@
+MultiRoller:
+- Fix flagship detection bug for middle seat player when flagships are in corner home systems.
+
+AutoFill MultiRoller:
+- Add to tooltip explaining fighter/infantry token color assignment matches closest ship/ground plastic, respectively.
+
+AutoFill MultiRoller Arena:
+- In variants bag, oversize tile where units get counted toward active system by the Auto-fill MultiRoller tool.
+
+Deleted Items:
+- Add ability for external objects to mark deletions as ok, prevent copies in deleted items bag.

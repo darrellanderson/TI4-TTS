@@ -1,0 +1,282 @@
+--- Add various game stats to the "notes" panel.
+-- @author Darrell, PhilRoi
+-- #include <~/CrLua/Objects/TI4_StatsUpdater>
+
+local WINDOW_SIZE = {
+    COLS = 40,
+    ROWS = 25
+}
+
+local HEX_COLOR = {
+    LABEL = 'cccc99',
+    Red = 'cc0000',
+    Green = '00cc00',
+    Orange = 'ee5500',
+    Pink = 'dd00dd',
+    White = 'e0e0e0',
+    Blue = '2255ee',
+    Purple = '9b59b6',
+    Yellow = 'dddd00',
+    Brown = '703A16',
+}
+
+-- For the log chat pad left with spaces so things line up.  Using strlen
+-- is okay, but can do better.  Just specify manually here.
+local PREFIX = {
+    LABEL = '            ',
+    Red = '      ',
+    Green = '  ',
+    Orange = '',
+    Pink = '    ',
+    White = '  ',
+    Blue = '    ',
+    Purple = ' ',
+    Yellow = ' ',
+    Brown = '  ',
+}
+
+local PERIODIC_SECONDS = 5
+
+local _waitId = false
+local _logNext = false
+local _periodicUpdates = false
+
+-------------------------------------------------------------------------------
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _gameDataHelper = getHelperClient('TI4_GAME_DATA_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+-------------------------------------------------------------------------------
+
+function updateNotes()
+    startLuaCoroutine(self, 'updateNotesCoroutine')
+end
+
+function updateNotesCoroutine()
+    -- Do not assume any object will still exist after yield.  Do separate
+    -- table scans for each category and process just that category same frame.
+    -- Yield before moving on.
+
+    local colorToScore = _gameDataHelper.colorToScore()
+    coroutine.yield(0)
+
+    local colorToResourcesInfluence = _gameDataHelper.colorToResourcesInfluence()
+    coroutine.yield(0)
+
+    local colorToCommandTokens = _gameDataHelper.colorToCommandTokens()
+    coroutine.yield(0)
+
+    local colorToTradeGoodsCommodities = _gameDataHelper.colorToTradeGoodsCommodities()
+    coroutine.yield(0)
+
+    -- Assemble the collections of strings for each row.
+    local rows = {
+        {
+            PREFIX.LABEL .. '[' .. HEX_COLOR.LABEL .. ']',
+            'VP',
+            'R',
+            'I',
+            'C/TG',
+            'T/F/S'
+        }
+    }
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local score = colorToScore[color] or 0
+
+        local resourcesInfluence = colorToResourcesInfluence[color] or {}
+        local resources = resourcesInfluence.resources.total or 0
+        local influence = resourcesInfluence.influence.total or 0
+        local resourcesUp = resourcesInfluence.resources.avail or 0
+        local influenceUp = resourcesInfluence.influence.avail or 0
+
+        local tradeGoodsCommodities = colorToTradeGoodsCommodities[color] or {}
+        local commodities = tradeGoodsCommodities.commodities or 0
+        local tradeGoods = tradeGoodsCommodities.tradeGoods or 0
+
+        local commandTokens = colorToCommandTokens[color] or {}
+        local numTactics = commandTokens.tactics or 0
+        local numFleet = commandTokens.fleet or 0
+        local numStrategy = commandTokens.strategy or 0
+
+        table.insert(rows, {
+            PREFIX[color] .. '[' .. HEX_COLOR[color] .. ']' .. color,
+            string.format('%d', score),
+            string.format('%d/%d', resourcesUp, resources),
+            string.format('%d/%d', influenceUp, influence),
+            string.format('%d/%d', commodities, tradeGoods),
+            string.format('%d/%d/%d', numTactics, numFleet, numStrategy)
+        })
+    end
+    coroutine.yield(0)
+
+    -- Get widest entry for each column.
+    local colWidth = {}
+    for _, row in ipairs(rows) do
+        for i, col in ipairs(row) do
+            colWidth[i] = math.max(colWidth[i] or 0, string.len(col))
+        end
+    end
+
+    local function pad(str, size)
+        local d = math.max(size - string.len(str), 0)
+        local left = d -- math.floor(d / 2.0)
+        local right = d -- math.ceil(d / 2.0)
+        local result = str
+        local padChar = ' '
+        for _ = 1, left do
+            result = padChar .. result
+        end
+        for _ = 1, right do
+            result = result .. padChar
+        end
+        return result
+    end
+
+    local gap = '    '
+    for i, row in ipairs(rows) do
+        for j, col in ipairs(row) do
+            if j > 1 then
+                row[j] = pad(row[j], colWidth[j])
+            end
+        end
+        rows[i] = table.concat(row, gap) .. ' '
+    end
+
+    -- Optionally add to player notes, do this before prepending empty lines!
+    local tabPrefix = 'Player stats when current turn (' .. (Turns.turn_color or 'N/A') .. ') started:'
+    local tabMessage = tabPrefix .. '\n' .. table.concat(rows, '\n')
+    local function getTab()
+        local tabName = 'TI4 Stats'
+        for _, tab in ipairs(Notes.getNotebookTabs()) do
+            if tab.title == tabName then
+                return tab
+            end
+        end
+        local tab = {
+            title = tabName,
+            body  = '',
+            color = 'Grey',
+        }
+        tab.index = Notes.addNotebookTab(tab)
+        if tab.index >= 0 then
+            return tab
+        end
+    end
+
+    if _logNext then
+        _logNext = false
+        local tab = getTab()
+        if tab then
+            tab.body = tabMessage
+            Notes.editNotebookTab(tab)
+        end
+    end
+
+    -- Log to on-screen notes if updates are enabled.
+    if _periodicUpdates then
+        -- Prepend lines so text is bottom-aligned.
+        while #rows < WINDOW_SIZE.ROWS do
+            table.insert(rows, 1, '')
+        end
+        local notes = table.concat(rows, '\n')
+        Notes.setNotes(notes)
+    end
+
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function _periodicUpdateNotes()
+    updateNotes()
+    _waitId = Wait.time(_periodicUpdateNotes, math.max(PERIODIC_SECONDS - 0.5 + math.random(), 0.1))
+end
+
+function togglePeriodicUpdates()
+    _periodicUpdates = not _periodicUpdates
+    if _periodicUpdates then
+        startPeriodicUpdates()
+    else
+        stopPeriodicUpdates()
+    end
+end
+
+function startPeriodicUpdates()
+    if not _waitId then
+        printToAll('Showing TI4 stats in notes (lower right).  Stats are score, resources/influence (ready and total), commodities/trade goods, and tactics/fleet/stategy command token counts.  To disable, either right-click the table and select "Hide TI4 Stats" to hide for all, or individual players may disable them via Menu -> Configuration -> Interface -> Notes.')
+        -- Only update player notes when a turn starts.
+    end
+    if _waitId then
+        -- Already running?  Stop and schedule the next soon.  Do not
+        -- run now b/c a player may be spamming the menu item.
+        Wait.stop(_waitId)
+        _waitId = Wait.time(_periodicUpdateNotes, 1)
+    else
+        _periodicUpdateNotes()
+    end
+end
+
+function stopPeriodicUpdates()
+    if _waitId then
+        Wait.stop(_waitId)
+        _waitId = false
+    end
+    local function delayedClear()
+        Notes.setNotes('')
+    end
+    Wait.frames(delayedClear, 2)
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    addContextMenuItem('Toggle TI4 Stats', togglePeriodicUpdates)
+    Notes.setNotes('')
+
+    -- Only the GM/black player can see this object.  Others can still interact!
+    local invisibleTo = {}
+    for _, color in ipairs(Player.getColors()) do
+        if color ~= 'Black' then
+            table.insert(invisibleTo, color)
+        end
+    end
+    self.setInvisibleTo(invisibleTo)
+end
+
+function onPlayerTurnStart(player_color_start, player_color_previous)
+    -- Record the next "start of turn" upate in the notebook.
+    _logNext = true
+
+    -- ALWAYS update player notes, even if not enabled?
+    -- No, if players want notes require them be enabled.
+    -- if _waitId then
+    --     Wait.stop(_waitId)
+    -- end
+    -- _waitId = Wait.time(_periodicUpdateNotes, 1)
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

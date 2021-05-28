@@ -1,0 +1,161 @@
+-- Place hidden zone over hands.
+-- @author Darrell
+-- #include <~/CrLua/Objects/TI4_HideHands>
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    -- Nested tables are considered cross script.  Make a local copy.
+    local function copyTable(t)
+        if t and type(t) == 'table' then
+            local copy = {}
+            for k, v in pairs(t) do
+                copy[k] = type(v) == 'table' and copyTable(v) or v
+            end
+            t = copy
+        end
+        return t
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return copyTable(helperObject.call(functionName, parameters)) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+function _hideHands()
+    -- Remove any existing.
+    _showAllHands()
+
+    -- Add hidden zones over each at-table hand.
+    for _, color in ipairs(_zoneHelper.zones()) do
+        local player = Player[color]
+        if player and player.getHandCount() > 0 then
+            local transform = player.getHandTransform(1)
+            local hiddenZone = spawnObject({
+                type              = 'FogOfWarTrigger',
+                position          = transform.position,
+                rotation          = transform.rotation,
+                scale             = {
+                    x = transform.scale.x + 15,
+                    y = transform.scale.y,
+                    z = transform.scale.z + 5,
+                },
+                callback_fucntion = nil,
+                sound             = false,
+                params            = {},
+                snap_to_grid      = false,
+            })
+            hiddenZone.setValue(color)
+            hiddenZone.setName('HIDE_HAND_' .. color)
+        end
+    end
+end
+
+--- Remove hidden zones for seated players.
+function _showSeatedHands()
+    local seatedSet = {}
+    for _, seated in ipairs(getSeatedPlayers()) do
+        seatedSet[seated] = true
+    end
+    for _, object in ipairs(getAllObjects()) do
+        local color = object.tag == 'Fog' and string.match(object.getName(), '^HIDE_HAND_(.*)$')
+        if color and seatedSet[color] then
+            destroyObject(object)
+        end
+    end
+end
+
+--- Remove hidden zones for all players.
+function _showAllHands()
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Fog' and string.match(object.getName(), '^HIDE_HAND_(.*)$') then
+            destroyObject(object)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad()
+    createUi()
+end
+
+function createUi()
+    local fontSize = 44
+    local labelFontSize = 90
+    local buttonFontSize = 90
+    local finePrintFontSize = 35
+    local scaleUpDown = 2
+    local y = 0.21
+
+    local z = -0.75
+    local dz = 0.45
+
+    self.clearButtons()
+
+    self.createButton({
+        click_function = 'doNothing',
+        function_owner = self,
+        label          = 'TI4 Hide Hands',
+        position       = { x = 0, y = y, z = z },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = { x = 1/scaleUpDown, y = 1, z = 1/scaleUpDown },
+        width          = 0,
+        height         = 0,
+        font_size      = labelFontSize * scaleUpDown,
+        tooltip        = nil,
+    })
+    z = z + dz
+    self.createButton({
+        click_function = '_hideHands',
+        function_owner = self,
+        label          = 'Hide',
+        position       = { x = 0, y = y, z = z },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = { x = 1/scaleUpDown, y = 1, z = 1/scaleUpDown },
+        width          = 1200,
+        height         = 400,
+        font_size      = buttonFontSize * scaleUpDown,
+        tooltip        = 'Place a hidden zone over all hands'
+    })
+    z = z + dz
+    self.createButton({
+        click_function = '_showSeatedHands',
+        function_owner = self,
+        label          = 'Show Seated',
+        position       = { x = 0, y = y, z = z },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = { x = 1/scaleUpDown, y = 1, z = 1/scaleUpDown },
+        width          = 1200,
+        height         = 400,
+        font_size      = buttonFontSize * scaleUpDown,
+        tooltip        = 'Remove hidden zones for seated players',
+    })
+    z = z + dz
+    self.createButton({
+        click_function = '_showAllHands',
+        function_owner = self,
+        label          = 'Show All',
+        position       = { x = 0, y = y, z = z },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = { x = 1/scaleUpDown, y = 1, z = 1/scaleUpDown },
+        width          = 1200,
+        height         = 400,
+        font_size      = buttonFontSize * scaleUpDown,
+        tooltip        = 'Remove hidden zones for all players',
+    })
+    z = z + dz
+end
+
+function doNothing()
+end
+
+-------------------------------------------------------------------------------

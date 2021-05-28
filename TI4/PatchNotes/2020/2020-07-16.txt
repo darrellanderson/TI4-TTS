@@ -1,0 +1,29 @@
+Strategy cards:
+- Activation popup now only appears for seated players.
+
+MultiRoller:
+- Blue Space tweak (Lancer Dreads SPC 4).
+- Fix Antimass for Lancer Dreads.
+
+Unpack:
+- Fix card name mismatch for unpack.
+- Blue Space starting units tweaks.
+- Unpack tokens can now also be just the owner token name without "Owner Token" suffix.
+
+Graveyard:
+- When placing into a bag (e.g. units), reset object rotation/flip to match bag.
+
+Variants:
+- Add "Burninate" gadget, place on table to make sustain damage'd units burn.
+
+Zone helper, faction helper:
+- Allow more than one player to play the same faction.  What kind of nut would do that?
+(Fixes set turns, auto-fill, and MultiRoller.  DOES NOT SUPPORT "end of status phase" button, collect and allocate tokens manually please.)
+- Move middle seat zone corners closer to player so zone overlaps the map tiles less.
+
+Map builder:
+- Partial support for Blue Space and TI3 systems.  For TI3 place the bag from variants on the table and cards into the planets deck.  Build gets from the TI3 bag but Clear will not put cards back there.
+- Add an "auto" button for zone lines, uses current player colors and zones are allocated according to faction sheet locations.
+
+Other:
+- Rename "XXehan" to "Xxehan" (along with system table entry).

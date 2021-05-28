@@ -1,0 +1,122 @@
+-------------------------------------------------------------------------------
+--- Push updates to Google Sheets.
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.TTS.Spreadsheet'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.TTS = CrLua.TTS or {}
+CrLua.TTS.Spreadsheet = assert(not CrLua.TTS.Spreadsheet) and {
+    _require = { 'Log' }
+}
+
+-- Google Apps Script proxy that pushes updates to the editable sheet.
+CrLua.TTS.Spreadsheet.GAS_PROXY = 'https://script.google.com/macros/s/AKfycbxOlBxlSJNWnwmd9r-4AcDAcdWOfOX5r3N9ox23DtNefgGbs_4nKrYR6A/exec'
+
+local _idToCells = {}
+
+function CrLua.TTS.Spreadsheet.idFromUrl(url)
+    return string.match(url, '^http[s]://docs.google.com/spreadsheets/.*/(.*)/edit')
+end
+
+--- Push only changed cells to the sheet.
+function CrLua.TTS.Spreadsheet.update(label, id, sheet, cells)
+    assert(type(label) == 'string' and type(id) == 'string' and type(cells) == 'table')
+    assert(not sheet or type(sheet) == 'string')
+
+    -- Get the subset of changed cells.
+    local persistentKey = id .. '/' .. (sheet or '')
+    local persistentCells = _idToCells[persistentKey] or {}
+    local updatedCells = false
+    for k, v in pairs(cells) do
+        if persistentCells[k] ~= v then
+            updatedCells = updatedCells or {}
+            updatedCells[k] = v
+        end
+    end
+    for k, v in pairs(persistentCells) do
+        if not cells[k] and string.len(v) > 0 then
+            updatedCells = updatedCells or {}
+            updatedCells[k] = ''
+        end
+    end
+
+    -- Update persistent cells content ONLY ON SUCCESS.
+    local function callback(webRequest)
+        if webRequest.is_error or webRequest.text ~= 'ok' then
+            CrLua.Log.w(TAG, 'update "' .. label .. '" failed: ' .. (webRequest.text or '-'))
+        else
+            CrLua.Log.i(TAG, 'update "' .. label .. '" success')
+            for k, v in pairs(updatedCells) do
+                persistentCells[k] = v
+            end
+            _idToCells[persistentKey] = persistentCells
+        end
+    end
+
+    if updatedCells then
+        CrLua.Log.i(TAG, 'updating "' .. label .. '"')
+        local postData = {
+            id = id,
+            sheet = sheet,
+            cells = updatedCells,
+        }
+        --CrLua.Log.d(TAG, 'postData', postData)
+        WebRequest.post(CrLua.TTS.Spreadsheet.GAS_PROXY, JSON.encode(postData), callback)
+    else
+        CrLua.Log.i(TAG, 'no changes for "' .. label .. '", skipping update')
+    end
+end
+
+function CrLua.TTS.Spreadsheet.get(label, id, sheet, cell, callback)
+    assert(type(label) == 'string' and type(id) == 'string' and type(cell) == 'string')
+    assert(not sheet or type(sheet) == 'string')
+    assert(not callback or type(callback) == 'function')
+
+    local url = CrLua.TTS.Spreadsheet.GAS_PROXY
+    url = url .. '?id=' .. id
+    if sheet then
+        url = url .. '&sheet=' .. sheet
+    end
+    url = url .. '&cell=' .. cell
+
+    local function callbackWrapper(webRequest)
+        if webRequest.is_error then
+            CrLua.Log.w(TAG, 'get failed ("' .. label .. '")')
+        else
+            CrLua.Log.i(TAG, 'get success ("' .. label .. '")')
+        end
+        if callback then
+            callback(webRequest.text)
+        end
+    end
+
+    WebRequest.get(url, callbackWrapper)
+end
+
+function CrLua.TTS.Spreadsheet.reserve(label, id, sheet, count, callback)
+    assert(type(label) == 'string' and type(id) == 'string' and type(count) == 'number')
+    assert(not sheet or type(sheet) == 'string')
+    assert(not callback or type(callback) == 'function')
+
+    local function callbackWrapper(webRequest)
+        if webRequest.is_error then
+            CrLua.Log.w(TAG, 'get failed ("' .. label .. '")')
+        else
+            CrLua.Log.i(TAG, 'get success ("' .. label .. '")')
+        end
+        if callback then
+            local rows = JSON.decode(webRequest.text)
+            callback(rows)
+        end
+    end
+
+    CrLua.Log.i(TAG, 'reserving ' .. count .. ' rows for "' .. label .. '"')
+    local postData = {
+        id = id,
+        sheet = sheet,
+        reserve = count,
+    }
+    WebRequest.post(CrLua.TTS.Spreadsheet.GAS_PROXY, JSON.encode(postData), callbackWrapper)
+end

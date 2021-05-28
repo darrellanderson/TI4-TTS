@@ -1,0 +1,137 @@
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+-------------------------------------------------------------------------------
+
+local UNIT_MODIFIERS = {
+    {
+        name = 'LI-ZHO MECH NAME HERE',  -- Li-Zho Mech
+        description = '+2 dice when alone',
+        owner = 'self',  -- applies to player zone it is inside
+        type = 'adjust',  -- adjusts existing units
+        applyFunctionName = 'applyMechPlusTwoDiceWhenAlone',
+        applyFunctionGuid = self.getGUID(),
+    },
+    {
+        name = 'MIRVEDA MECH NAME HERE',  -- Mirveda Mech
+        description = '+1 hit for each unit upgrade',
+        owner = 'self',  -- applies to player zone it is inside
+        type = 'adjust',  -- adjusts existing units
+        applyFunctionName = 'applyMechPlusOneHitPerUnitUpgrade',
+        applyFunctionGuid = self.getGUID(),
+    },
+    {
+        name = 'GHEMINA RAIDERS NAME HERE',
+        description = '+2 combat when in pairs',
+        owner = 'self',  -- applies to player zone it is inside
+        type = 'adjust',  -- adjusts existing units
+        applyFunctionName = 'applyCombatPlusTwoIfTwo',
+        applyFunctionGuid = self.getGUID(),
+    },
+}
+
+function applyMechPlusTwoDiceWhenAlone(unitAttrs)
+    local myUnitTypeToCount = unitAttrs._params.myUnitTypeToCount or {}
+    local alone = (myUnitTypeToCount['Mech'] or 0) > 0
+    for unitType, count in pairs(myUnitTypeToCount) do
+        if unitType ~= 'Mech' and count > 0 then
+            alone = false
+            break
+        end
+    end
+    if alone then
+        local attr = unitAttrs['Mech']
+        if attr.groundCombat then
+            attr.groundCombat.dice = (attr.groundCombat.dice or 0) + 2
+        end
+        if attr.spaceCombat then
+            attr.spaceCombat.dice = (attr.spaceCombat.dice or 0) + 2
+        end
+    end
+    return unitAttrs
+end
+
+function applyMechPlusOneHitPerUnitUpgrade(unitAttrs)
+    local color = unitAttrs._params.myColor
+    local unitUpgradeNameSet = {}
+    for _, name in ipairs(_unitHelper.getUnitUpgradeNames()) do
+        unitUpgradeNameSet[name] = true
+    end
+
+    local inHandGuidSet = _zoneHelper.inHand()
+    local guidToPosition = {}
+    local guidToName = {}
+    for _, object in ipairs(getAllObjects()) do
+        local guid = object.getGUID()
+        local name = object.getName()
+        if object.tag == 'Card' and (not inHandGuidSet[guid]) and unitUpgradeNameSet[name] then
+            guidToPosition[guid] = object.getPosition()
+            guidToName[guid] = name
+        end
+    end
+    local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
+    local seen = {}
+    local count = 0
+    for guid, color in pairs(guidToColor) do
+        local name = guidToName[guid]
+        if not seen[name] then
+            count = count + 1
+            seen[name] = true
+        end
+    end
+
+    local attr = unitAttrs['Mech']
+    if attr.groundCombat then
+        attr.groundCombat.hit = math.max((attr.groundCombat.hit or 0) - count, 0)
+    end
+    if attr.spaceCombat then
+        attr.spaceCombat.hit = math.max((attr.spaceCombat.hit or 0) - count, 0)
+    end
+end
+
+function applyCombatPlusTwoIfTwo(unitAttrs)
+    local myUnitTypeToCount = unitAttrs._params.myUnitTypeToCount or {}
+    for unitType, attrs in pairs(unitAttrs) do
+        local count = myUnitTypeToCount[unitType]
+        if unitType ~= 'Fighter' and count == 2 then
+            if attrs.spaceCombat then
+                attrs.spaceCombat.hit = attrs.spaceCombat.hit - 2
+            end
+            if attrs.groundCombat then
+                attrs.groundCombat.hit = attrs.groundCombat.hit - 2
+            end
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    for _, modifier in ipairs(UNIT_MODIFIERS) do
+        _unitHelper.injectUnitModifier(modifier)
+    end
+end
+
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

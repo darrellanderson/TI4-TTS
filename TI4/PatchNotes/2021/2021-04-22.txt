@@ -1,0 +1,9 @@
+- New "!timestamp" command to get game data timestamp associated with game report (for TheParsleySage's viewer, game data is not available until the following day UTC).
+- Fix issue where game data strategy card history shift a round, particularly for streamed games.
+- Deleted Items bag now ignores items marked with "DELETED_ITEMS_IGNORE" tag.
+- Here/AFK token now uses new TTS flip event to detect flipping.
+- Active/Passed token now uses new TTS flip event to detect flipping.
+- Base game setup no longer unpacks "FACTION alliance" cards.
+- Moved Mahact "FACTION alliance" card to variants, only used for 2v2v2 games.
+- Fixed typo in Imperial popup-window tooltip.
+- Rotated "Three's a crowd" map to match TTS seating.

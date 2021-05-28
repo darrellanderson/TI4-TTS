@@ -1,0 +1,229 @@
+--- Find things on the table.
+-- Ignore in-hand and discard pile cards.
+
+local _deckHelper = 0
+local _systemHelper = 0
+local _unitHelper = 0
+local _zoneHelper = 0
+
+-- Params: rule, or list of rules
+-- - type (string): object type (formerly tag).
+-- - name (string)
+-- - nameSet (table): string set
+-- - pattern (string)
+-- - zone (string)
+-- - rejectHeldBy (boolean): held by a player's pointer.
+-- - rejectInHand (boolean): in a player's hand.
+-- - rejectFaceDown (boolean)
+-- - rejectInDiscard (boolean): in deck discard pile.
+-- - rejectIdle (boolean): active/idle cards.
+-- - setPattern
+-- - setPosition
+-- - setZone
+-- - setHex
+--
+-- Result: result list, or list of result lists
+-- - name (string)
+-- - guid (string)
+-- -* pattern (string): capture result from string.match with rule.pattern
+-- -* position (table)
+-- -* zone (string)
+-- -* hex (string)
+
+function find(params)
+    assert(type(params) == 'table')
+
+    -- Make a list of lists if a single entry.
+    local rules = params
+    if not params[1] then
+        rules = { rules }
+    end
+
+    -- Sanity check rules.
+    local exclusive = {
+        name = true,
+        nameSet = true,
+        pattern = true
+    }
+    local ruleKeyToType = {
+        type = 'string',
+        name = 'string',
+        nameSet = 'table',
+        pattern = 'string',
+        zone = 'string',
+        rejectHeldBy == 'boolean',
+        rejectInHand == 'boolean',
+        rejectFaceDown == 'boolean',
+        rejectInDiscard == 'boolean',
+        rejectIdle = 'boolean',
+        setPattern = 'boolean',
+        setPosition = 'boolean',
+        setZone = 'boolean',
+        setHex = 'boolean',
+    }
+    for _, rule in ipairs(rules) do
+        local foundExclusive = false
+        for k, v in pairs(rule) do
+            local typeValue = ruleKeyToType[k]
+            if not typeValue then
+                error('search.find: unknown rule key "' .. k .. '"')
+            elseif typeValue ~= type(v) then
+                error('search.find: bad type for "' .. k .. '"')
+            end
+            if exclusive[k] then
+                if foundExclusive then
+                    error('search.find: only one search type allowed')
+                end
+                foundExclusive = k
+            end
+        end
+        if not foundExclusive then
+            error('search.find: missing search type')
+        end
+    end
+
+    -- Seed results with false for each rule, replace with list on find.
+    local results = {}
+    for _, _ in ipairs(rules) do
+        table.insert(results, false)
+    end
+
+    local inHandGuidSet = false
+    local function isMatch(rule, object)
+        if rule.type then
+            if rule.type ~= object.type then
+                return false
+            end
+        end
+
+        if rule.name then
+            local name = object.getName()
+            if rule.name ~= name then
+                return false
+            end
+        end
+
+        if rule.nameSet then
+            local name = object.getName()
+            if not rule.nameSet[name] then
+                return false
+            end
+        end
+
+        if rule.pattern then
+            local name = object.getName()
+            if not string.match(name, rule.pattern) then
+                return false
+            end
+        end
+
+        if rule.zone then
+            local position = object.getPosition()
+            local zone = _zoneHelper.zoneFromPosition(position)
+            if rule.zone ~= zone then
+                return false
+            end
+        end
+
+        -- TODO XXX
+        if rule.rejectHeldBy then
+            if object.held_by_color then
+                return false
+            end
+        end
+
+        if rule.rejectInHand then
+            local guid = object.getGUID()
+            inHandGuidSet = inHandGuidSet or _getInHandGuidSet()
+            if inHandGuidSet[guid] then
+                return false
+            end
+        end
+
+        if rule.rejectFaceDown then
+            if object.is_face_down then
+                return false
+            end
+        end
+
+        if rule.rejectInDiscard then
+            local guid = object.getGUID()
+            if _deckHelper.isDiscard(guid) then
+                return false
+            end
+        end
+
+        if rule.rejectIdle then
+            if _unitHelper._isToggleActiveCard(object) and not _unitHelper._isToggleActiveCardActive(object) then
+                return false
+            end
+        end
+
+        return true
+    end
+
+    local function makeResult(rule, object)
+        local result = {
+            name = object.getName(),
+            guid = object.getGUID()
+        }
+        if rule.setPattern and rule.pattern then
+            result.pattern = string.match(result.name, rule.pattern)
+        end
+        if rule.setPosition then
+            local position = object.getPosition()
+            result.position = {
+                x = position.x,  -- return simple types (position is vector?)
+                y = position.y,
+                z = position.z,
+            }
+        end
+        if rule.setZone then
+            result.zone = _zoneHelper.zoneFromPosition(object.getPosition())
+        end
+        if rule.setHex then
+            result.hex = _systemHelper.hexFromPosition(object.getPosition())
+        end
+        return result
+    end
+
+    for _, object in ipairs(getAllObjects()) do
+        for i, rule in ipairs(rules) do
+            if isMatch(rule, object) then
+                local resultsEntry = results[i]
+                if not resultsEntry then
+                    resultsEntry = {}
+                    results[i] = resultsEntry
+                end
+                local result = makeResult(rule, object)
+                table.insert(resultsEntry, result)
+            end
+        end
+    end
+
+    -- Return just the items if a single rule search, otherwise list of item lists.
+    return #results > 1 and results or results[1]
+end
+
+function _getInHandGuidSet()
+    local result = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        for i = 1, player.getHandCount() do
+            for _, object in ipairs(player.getHandObjects(i)) do
+                result[object.guid] = true
+            end
+        end
+    end
+    return result
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

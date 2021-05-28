@@ -1,0 +1,1059 @@
+--- Manage shared stategy card actions.
+-- @author GarnetBear did the original influence counting
+-- @author Darrell June 2020
+-- include <~/CrLua/Objects/TI4_Helpers/TI4_StrategyCardHelper>
+
+-- Users should copy this getHelperClient function, and in onLoad via:
+--
+-- local strategyCardHelper = getHelperClient('TI4_STRATEGY_CARD_HELPER')
+-- strategyCardHelper.register({
+--     guid = self.getGUID(),
+--     position = { x = ..., y = ..., z = ... },
+--     rotation = { x = ..., y = ..., z = ... },
+--     onPlayCallback = 'clickedOnPlay'  -- gets clicking player color as argument
+-- })
+--
+-- Where one can call any main function in this file via the helper.
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local function copyTable(t)
+    if t and type(t) == 'table' then
+        local copy = {}
+        for k, v in pairs(t) do
+            copy[k] = type(v) == 'table' and copyTable(v) or v
+        end
+        t = copy
+    end
+    return t
+end
+
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local ALLOCATE_COMMAND_TOKENS = {
+    localPosition = { x = -0.1, y = 1, z = -5 },
+    localDX = -0.4
+}
+
+local STRATEGY_CARD_INITIATIVE = {
+    ['Zero Strategy Token'] = 0,
+    ['Leadership'] = 1,
+    ['Diplomacy'] = 2,
+    ['Diplomacy (Revised)'] = 2,
+    ['Politics'] = 3,
+    ['Construction'] = 4,
+    ['Industry'] = 5,
+    ['Trade'] = 5,
+    ['Warfare'] = 6,
+    ['Trade (6)'] = 6,
+    ['Technology'] = 7,
+    ['Warfare (7)'] = 7,
+    ['Imperial'] = 8,
+    ['Logistics'] = 8,
+    ['Technology (9)'] = 9,
+    ['Imperial (10)'] = 10,
+}
+
+local STRATEGY_CARD_SHEET_NAME = 'Strategy Card Mat'
+
+local _guidToParameters = {}  -- strategy cards
+local _strategyCardSheetGuid = false
+local _allocatedTokenGuidToColor = {}  -- unassigned command tokens
+local _putTokenGuidSet = {}
+
+local _doNotReadySet = {}
+
+function injectDoNotReady(cardName)
+    assert(type(cardName) == 'string')
+    _doNotReadySet[cardName] = true
+end
+
+function _uniqueList(order)
+    local result = {}
+    local seenSet = {}
+    for _, color in ipairs(order) do
+        if not seenSet[color] then
+            seenSet[color] = true
+            table.insert(result, color)
+        end
+    end
+    return result
+end
+
+function _restrictToSeated(order)
+    local seatSet = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        seatSet[color] = true
+    end
+    local result = {}
+    for _, color in ipairs(order) do
+        if seatSet[color] then
+            table.insert(result, color)
+        end
+    end
+    return result
+end
+
+function _safeBroadcastToColor(message, playerColor, messageColor)
+    for _, player in ipairs(Player.getPlayers()) do
+        if player.color == playerColor then
+            broadcastToColor(message, playerColor, messageColor)
+            return
+        end
+    end
+    broadcastToAll(message, messageColor)
+end
+
+function _getStrategyCardSheet()
+    local result = _strategyCardSheetGuid and getObjectFromGUID(_strategyCardSheetGuid)
+    if not result then
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == STRATEGY_CARD_SHEET_NAME then
+                _strategyCardSheetGuid = object.getGUID()
+                result = object
+                break
+            end
+        end
+    end
+    return result
+end
+
+--- Called by strategy cards to register for return.
+function register(parameters)
+    assert(type(parameters) == 'table')
+    assert(type(parameters.guid) == 'string')
+    assert(type(parameters.ui) == 'string')
+    assert(type(parameters.onPlayCallback) == 'string')
+
+    _guidToParameters[parameters.guid] = parameters
+
+    local strategyCard = assert(getObjectFromGUID(parameters.guid))
+    strategyCard.clearButtons()
+
+    local BUTTON_WIDTH = 500
+    local BUTTON_HEIGHT = 200
+    local BUTTON_FONT_SIZE = 100
+
+    local position = { x = -0.2, y = -0.13, z = -1.25 }
+    local rotation = { x = 0, y = 0, z = 180 }
+    if parameters.flip then
+        -- "Extra Strat Cards" are flipped.
+        position.y = 0.13
+        rotation.z = 0
+    end
+
+    self.setVar('play_' .. parameters.guid, function(_, playerColor) _onClickPlay(strategyCard, parameters, playerColor) end)
+    strategyCard.clearButtons()
+    strategyCard.createButton({
+        click_function = 'play_' .. parameters.guid,
+        function_owner = self,
+        label = 'Play',
+        position = position,
+        rotation = rotation,
+        width = BUTTON_WIDTH,
+        height = BUTTON_HEIGHT,
+        font_size = BUTTON_FONT_SIZE,
+        tooltip = 'Show UI'
+    })
+
+    -- Strategy cards shift slightly between save and load, which gets worse
+    -- after each save/load cycle.  Force "close" cards to snap points.
+    -- This is a TTS bug, this code can be removed when that bug is fixed.
+    local index = assert(STRATEGY_CARD_INITIATIVE[strategyCard.getName()])
+    local sheet = _getStrategyCardSheet()
+    local snapPoint = sheet.call('getSnapPoint', index)
+    local position = sheet.positionToWorld(snapPoint.position)
+    position.y = strategyCard.getPosition().y
+    local rotation = {
+        x = 0,
+        y = sheet.getRotation().y + snapPoint.rotation.y,
+        z = 0
+    }
+    local dx = strategyCard.getPosition().x - position.x
+    local dz = strategyCard.getPosition().z - position.z
+    local d = math.sqrt(dx ^ 2 + dz ^ 2)
+    if d < 1 then
+        strategyCard.setPosition(position)
+        strategyCard.setRotation(rotation)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function _onClickPlay(strategyCard, parameters, playerColor)
+    assert(type(strategyCard) == 'userdata' and type(parameters) == 'table' and type('playerColor') == 'string')
+
+    -- Toggle visibility
+    local seated = {}
+    for _, color in pairs(getSeatedPlayers()) do
+        table.insert(seated, color)
+    end
+    local active = UI.getAttribute(parameters.ui, 'active')
+    active = string.lower(active) == 'true' and true or false
+    if active or #seated == 0 then
+        UI.setAttribute(parameters.ui, 'active', false)
+    else
+        UI.setAttribute(parameters.ui, "visibility", table.concat(seated, "|"))
+        UI.setAttribute(parameters.ui, "active", true)
+        -- Tell the card in case there is any custom handling there.
+        broadcastToAll('Activating ' .. strategyCard.getName(), playerColor)
+        strategyCard.call(parameters.onPlayCallback, playerColor)
+    end
+
+    -- Tell any interested parties.
+    local informObjects = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.getVar('onStrategyCardPlayed') then
+            table.insert(informObjects, object)
+        end
+    end
+    local guid = strategyCard.guid
+    for i, object in ipairs(informObjects) do
+        Wait.frames(function() object.call('onStrategyCardPlayed', guid) end, i)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+--- Compute initiative order based on strategy cards and Naalu token.
+function getInitiativeOrder()
+    local guidToInitiative = {}
+    local guidToPosition = {}
+    for _, object in ipairs(getAllObjects()) do
+        local initiative = STRATEGY_CARD_INITIATIVE[object.getName()]
+        if initiative then
+            local guid = object.getGUID()
+            guidToInitiative[guid] = initiative
+            guidToPosition[guid] = object.getPosition()
+        end
+    end
+
+    local guidToZoneColor = _zoneHelper.zonesFromPositions(guidToPosition)
+
+    local colorToInitiative = {}
+    local strategyCardGuidToPlayerColor = {}
+    for guid, initiative in pairs(guidToInitiative) do
+        local color = guidToZoneColor[guid]
+        if color then
+            local vsValue = colorToInitiative[color] or initiative
+            colorToInitiative[color] = math.min(initiative, vsValue)
+        end
+        if initiative > 0 then
+            strategyCardGuidToPlayerColor[guid] = color or false  -- false so included in map
+        end
+    end
+
+    -- Generate turn order, ONLY INCLUDE PLAYERS WITH INITIATIVE VALUES!
+    -- (Skip non-grey "spectators", non-players that can interact with table.)
+    local turnOrder = {}
+    for color, _ in pairs(colorToInitiative) do
+        table.insert(turnOrder, color)
+    end
+    table.sort(turnOrder, function(a, b) return colorToInitiative[a] < colorToInitiative[b] end)
+
+    turnOrder = _uniqueList(turnOrder)
+    turnOrder = _restrictToSeated(turnOrder)
+
+    return {
+        order = turnOrder,
+        strategyCardGuidToPlayerColor = strategyCardGuidToPlayerColor
+    }
+end
+
+-------------------------------------------------------------------------------
+
+function dealAllActionCards(dealOrder)
+    local lookForSet = {
+        ['Neural Motivator'] = true,
+    }
+
+    local guidToPosition = {}
+    local guidToName = {}
+    local eliminatedPlayerSet = {}
+
+    local inHandGuidSet = _zoneHelper.inHand()
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        local guid = object.getGUID()
+        if lookForSet[name] and (not inHandGuidSet[guid]) and (not object.is_face_down) then
+            guidToPosition[guid] = object.getPosition()
+            guidToName[guid] = name
+        end
+        if name == 'Player Eliminated' then
+            local color = _zoneHelper.zoneFromPosition(object.getPosition())
+            if color then
+                eliminatedPlayerSet[color] = true
+            end
+        end
+    end
+
+    local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
+
+    local function processColor(color)
+        local faction = _factionHelper.fromColor(color)
+        if not faction then
+            broadcastToAll('Deal action cards: no faction for ' .. color, 'Red')
+            return
+        end
+
+        if eliminatedPlayerSet[color] then
+            broadcastToAll('Deal action cards: ' .. color .. ' eliminated, skipping')
+            return
+        end
+
+        local abilitiesSet = {}
+        for _, ability in ipairs(faction.abilities) do
+            abilitiesSet[ability] = true
+        end
+        for guid, color2 in pairs(guidToColor) do
+            if color == color2 then
+                abilitiesSet[guidToName[guid]] = true
+            end
+        end
+
+        local count = 1
+        if abilitiesSet['Neural Motivator'] then
+            count = count + 1
+            _safeBroadcastToColor('Neural Motivator active.', color, {0.1,0.5,0.1})
+        end
+        if abilitiesSet['Scheming'] then
+            count = count + 1
+            _safeBroadcastToColor('Scheming.', color, {0.1,0.5,0.1})
+        end
+
+        -- Deal.
+        _deckHelper.deal({
+            deck = 'Actions',
+            count = count,
+            color = color
+        })
+    end
+
+    dealOrder = dealOrder or Turns.order
+    dealOrder = _uniqueList(dealOrder)
+    dealOrder = _restrictToSeated(dealOrder)
+
+    for _, color in ipairs(dealOrder) do
+        processColor(color)
+    end
+    broadcastToAll('Dealt Action Cards.')
+end
+
+-- "Minister of Policy" gets an action card "at the end of the status phase",
+-- do not mix this in with the standard "draw action cards" action.
+function _dealMinisterOfPolicyActionCard()
+    local ministerOfPolicyColor = false
+    local eliminatedPlayerSet = {}
+
+    local inHandGuidSet = _zoneHelper.inHand()
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        local guid = object.getGUID()
+        if name == 'Minister of Policy' and (not inHandGuidSet[guid]) and (not object.is_face_down) then
+            ministerOfPolicyColor = _zoneHelper.zoneFromPosition(object.getPosition())
+        end
+        if name == 'Player Eliminated' then
+            local color = _zoneHelper.zoneFromPosition(object.getPosition())
+            if color then
+                eliminatedPlayerSet[color] = true
+            end
+        end
+    end
+
+    local color = ministerOfPolicyColor
+    if color and not eliminatedPlayerSet[color] then
+        _safeBroadcastToColor('Minister of Policy active.', color, {0.1,0.5,0.1})
+        local count = 1
+        local faction = _factionHelper.fromColor(ministerOfPolicyColor)
+        for _, ability in ipairs(faction and faction.abilities or {}) do
+            if ability == 'Scheming' then
+                count = count + 1
+                _safeBroadcastToColor('Scheming.', color, {0.1,0.5,0.1})
+            end
+        end
+        _deckHelper.deal({
+            deck = 'Actions',
+            count = count,
+            color = color
+        })
+    end
+end
+-------------------------------------------------------------------------------
+
+--- Compute influence for all players.
+-- @param includeFaceDown boolean : if true, count face down cards too.
+-- @return table : map from color to influence number.
+function recomputeInfluence(includeFaceDown)
+    assert(not includeFaceDown or type(includeFaceDown) == 'boolean')
+
+    local colorToVoteCounter = {}
+    local representativeGovernment = false
+
+    local inHandGuidSet = _zoneHelper.inHand()
+    for _, object in ipairs(getAllObjects()) do
+        if not inHandGuidSet[object.getGUID()] then
+            local tag = object.tag
+            local name = object.getName()
+            local guid = object.getGUID()
+
+            if tag == 'Counter' then
+                local color = string.match(name, '(.*) Player Votes')
+                if color then
+                    colorToVoteCounter[color] = object
+                end
+            elseif tag == 'Card' then
+                if name == 'Representative Government' or name == 'Representative Government (PoK)' then
+                    if not object.is_face_down and not _deckHelper.isDiscard(guid) then
+                        representativeGovernment = true
+                        broadcastToAll('Representative Government active.', {0.1,0.5,0.1})
+                    end
+                end
+            end
+        end
+    end
+
+    local colorToResInfCards = _systemHelper.getColorToResInfCards(includeFaceDown)
+    local colorToResInfModifiers = _systemHelper.getColorToResInfModifiers()
+    local colorToInfluence = {}
+    for color, cards in pairs(colorToResInfCards) do
+        local modifiers = colorToResInfModifiers[color] or {}
+        cards = _systemHelper.applyResInfModifiers({
+            cards = copyTable(cards),  -- copy otherwise cross-script error
+            modifiers = modifiers,
+        })
+        local influence = 0
+        for _, card in ipairs(cards) do
+            influence = influence + (card.influence or 0)
+        end
+        colorToInfluence[color] = influence
+
+        if #modifiers > 0 then
+            local nameToDescription = _systemHelper.getResInfModifierDescriptions(modifiers)
+            local message = {}
+            for name, description in pairs(nameToDescription) do
+                table.insert(message, name .. ' (' .. description .. ')')
+            end
+            message = table.concat(message, ', ')
+            printToAll('Modifiers (' .. color .. '): ' .. message, color)
+        end
+    end
+
+    for color, voteCounter in pairs(colorToVoteCounter) do
+        local influence = colorToInfluence[color] or 0
+        if representativeGovernment then
+            influence = 1
+        end
+        voteCounter.setValue(influence)
+    end
+
+    return colorToInfluence
+end
+
+function resetAgendaTokens()
+    local resetNameSet = {
+        ['Any Whens?'] = 'Tile',
+        ['Any Afters?'] = 'Tile'
+    }
+    for _, color in ipairs(Player.getColors()) do
+        resetNameSet[color .. ' Player Votes'] = 'Counter'
+        resetNameSet['For:'] = 'Counter'
+        resetNameSet['Against:'] = 'Counter'
+    end
+    local voteCounters = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        local tag = resetNameSet[name]
+        if tag and object.tag == tag then
+            if object.is_face_down then
+                object.flip()
+            end
+            if name == 'For:' or name == 'Against:' then
+                object.setValue(0)
+            end
+        end
+    end
+end
+
+--- Move the speaker agenda token to match the speaker token.
+function moveSpeakerAgendaToken()
+    local speakerTokenName = 'Speaker Token'
+    local speakerTokenAgendaName = 'Speaker Token - Agenda'
+
+    local speakerToken = false
+    local speakerTokenAgenda = false
+    local colorToVoteCounter = {}
+
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if name == speakerTokenName then
+            speakerToken = object
+        elseif name == speakerTokenAgendaName then
+            speakerTokenAgenda = object
+        end
+        local color = string.match(name, '(.*) Player Votes')
+        if color then
+            colorToVoteCounter[color] = object
+        end
+    end
+
+    if speakerToken and speakerTokenAgenda then
+        local zoneColor = _zoneHelper.zoneFromPosition(speakerToken.getPosition())
+        local voteCounter = zoneColor and colorToVoteCounter[zoneColor]
+        if voteCounter then
+            local pos = voteCounter.getPosition()
+            pos.z = pos.z + 4.3 * (pos.z > 0 and 1 or -1)
+            local rot = voteCounter.getRotation()
+            rot.y = (rot.y + 180) % 360
+            local collide = false
+            local fast = true
+            speakerTokenAgenda.setLock(false)  -- paranoia
+            speakerTokenAgenda.setPositionSmooth(pos, collide, fast)
+            speakerTokenAgenda.setRotationSmooth(rot, collide, fast)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function _returnCommandTokens(factionTokenName)
+    assert(not factionTokenName or type(factionTokenName) == 'string')
+
+    -- Precompute names for straight string equality checks.
+    local tokenNameSet = {}
+    local bagNameSet = {}
+    if factionTokenName then
+        tokenNameSet[factionTokenName .. ' Command Token'] = true
+        bagNameSet[factionTokenName .. ' Command Tokens Bag'] = true
+    else
+        for _, faction in pairs(_factionHelper.allFactions()) do
+            tokenNameSet[faction.tokenName .. ' Command Token'] = true
+            bagNameSet[faction.tokenName .. ' Command Tokens Bag'] = true
+        end
+    end
+
+    local zoneExceptionObjectNameSet = {
+        ['Ghosts of Creuss Tile'] = true,
+        ['Wormhole Nexus Tile'] = true,
+    }
+    local zoneExceptionObjects = {}
+
+    -- Get bags and tokens.
+    local tokenNameToBag = {}
+    local commandTokens = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if object.tag == 'Bag' and bagNameSet[name] then
+            local tokenName = string.match(name, '^(.*) Command Tokens Bag$')
+            tokenNameToBag[tokenName .. ' Command Token'] = object
+        elseif tokenNameSet[name] then
+            table.insert(commandTokens, object)
+        elseif zoneExceptionObjectNameSet[name] then
+            table.insert(zoneExceptionObjects, object)
+        end
+    end
+    coroutine.yield(0)
+
+    -- Identify tokens in any player's zone.
+    local guidToPosition = {}
+    for _, commandToken in ipairs(commandTokens) do
+        guidToPosition[commandToken.getGUID()] = commandToken.getPosition()
+    end
+    local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
+    coroutine.yield(0)
+
+    local exceptionPosRadiusSq = {}
+    for _, exceptionObject in ipairs(zoneExceptionObjects) do
+        local bounds = exceptionObject.getBounds()
+        local radius = math.max(bounds.size.x, bounds.size.z) / 2
+        exceptionPosRadiusSq[exceptionObject.getPosition()] = radius * radius
+    end
+    local function shouldPut(commandToken)
+        if not guidToColor[commandToken.getGUID()] then
+            return true  -- not in any player zone
+        end
+        local p1 = commandToken.getPosition()
+        for p2, radius in pairs(exceptionPosRadiusSq) do
+            local dSq = (p1.x - p2.x) ^ 2 + (p1.z - p2.z) ^ 2
+            if dSq <= radius then
+                return true  -- inside exception circle
+            end
+        end
+    end
+
+    -- Put tokens.
+    local putCount = 0
+    for _, commandToken in ipairs(commandTokens) do
+        local guid = commandToken.getGUID()
+        local bag = tokenNameToBag[commandToken.getName()]
+        if shouldPut(commandToken) and bag then
+            _putTokenGuidSet[guid] = true
+            bag.putObject(commandToken)
+            putCount = putCount + 1
+        end
+        coroutine.yield(0)
+    end
+
+    -- Wait for puts to complete before proceeding.
+    local function putPending()
+        for _, _ in pairs(_putTokenGuidSet) do
+            return true
+        end
+    end
+    local timeout = Time.time + 3
+    while putPending() and Time.time < timeout do
+        coroutine.yield(0)
+    end
+    _putTokenGuidSet = {}
+
+    if factionTokenName then
+        broadcastToAll('Returned ' .. putCount .. 'x ' .. factionTokenName .. ' Command Tokens.')
+    else
+        broadcastToAll('Returned Command Tokens.')
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function _allocateCommandTokens()
+    local lookForSet = {
+        ['Hyper Metabolism'] = true,
+        ['Cybernetic Enhancements Ω'] = true,
+    }
+
+    local nameToCommandTokensBag = {}
+    local guidToPosition = {}
+    local guidToName = {}
+
+    local inHandGuidSet = _zoneHelper.inHand()
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        local guid = object.getGUID()
+        if object.tag == 'Bag' then
+            local tokenName = string.match(name, '^(.*) Command Tokens Bag')
+            if tokenName then
+                nameToCommandTokensBag[tokenName] = object
+            end
+        end
+        if lookForSet[name] and (not inHandGuidSet[guid]) and (not object.is_face_down) then
+            guidToPosition[guid] = object.getPosition()
+            guidToName[guid] = name
+        end
+    end
+    coroutine.yield(0)
+
+    local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
+    coroutine.yield(0)
+
+    local function processColor(color)
+        local faction = _factionHelper.fromColor(color)
+        if not faction then
+            broadcastToAll('Allocate command tokens: no faction for ' .. color, 'Red')
+            return
+        end
+
+        local commandTokensBag = nameToCommandTokensBag[faction.tokenName]
+        if not commandTokensBag then
+            broadcastToAll('Allocate command tokens: missing ' .. faction.tokenName .. ' Command Tokens Bag', 'Red')
+            return
+        end
+
+        local commandSheet = getObjectFromGUID(faction.commandSheetGuid)
+        if not commandSheet then
+            broadcastToAll('Allocate command tokens: missing ' .. color .. ' Command Sheet', 'Red')
+            return
+        end
+
+        local abilitiesSet = {}
+        for _, ability in ipairs(faction.abilities) do
+            abilitiesSet[ability] = true
+        end
+        for guid, color2 in pairs(guidToColor) do
+            if color == color2 then
+                abilitiesSet[guidToName[guid]] = true
+            end
+        end
+
+        local count = 2
+        if abilitiesSet['Hyper Metabolism'] then
+            count = count + 1
+            _safeBroadcastToColor('Hyper Metabolism active.', color, {0.1,0.5,0.1})
+        end
+        if abilitiesSet['Versatile'] then
+            count = count + 1
+            _safeBroadcastToColor('Versatile active.', color, {0.1,0.5,0.1})
+        end
+        if abilitiesSet['Cybernetic Enhancements Ω'] and faction and faction.name ~= 'The L1Z1X Mindnet' then
+            count = count + 1
+            _safeBroadcastToColor('Cybernetic Enhancements Ω used. Returning to L1Z1X Mindnet player.', color, {0.1,0.5,0.1})
+
+            -- Return L1Z1X promissory.
+            local card = false
+            for guid, name in pairs(guidToName) do
+                if name == 'Cybernetic Enhancements Ω' then
+                    card = getObjectFromGUID(guid)
+                    break
+                end
+            end
+            local mindnet = _factionHelper.fromTokenName('L1Z1X Mindnet')
+            local mindnetColor = mindnet and mindnet.color
+            if card and mindnetColor then
+                card.deal(1, mindnetColor)
+            end
+        end
+
+        -- Do the alloation.  Watch out for an empty bag!
+        local pos = ALLOCATE_COMMAND_TOKENS.localPosition
+        local dx = ALLOCATE_COMMAND_TOKENS.localDX
+        for i = 1, count do
+            if commandTokensBag.getQuantity() == 0 then
+                _safeBroadcastToColor('You are out of Command Tokens.', color, {0.8,0.2,0.2})
+                break
+            end
+            local token = commandTokensBag.takeObject({
+                position = commandSheet.positionToWorld({
+                    x = pos.x + (i * dx),
+                    y = pos.y + 1 + (i * 0.25),
+                    z = pos.z
+                })
+            })
+            _addUnallocatedCommandToken(token, color)
+        end
+    end
+
+    for _, color in ipairs(_zoneHelper.zones()) do
+        processColor(color)
+        coroutine.yield(0)
+    end
+    broadcastToAll('Gained Command Tokens.')
+end
+
+-------------------------------------------------------------------------------
+
+function _readyCards()
+    local excludeNameSet = {}
+    for cardName, _ in pairs(_doNotReadySet) do
+        excludeNameSet[cardName] = true
+    end
+    local function exclude(itemOrItems)
+        if itemOrItems then
+            if type(itemOrItems) == 'string' then
+                excludeNameSet[itemOrItems] = true
+            elseif type(itemOrItems) == 'table' then
+                for _, item in ipairs(itemOrItems) do
+                    assert(type(item) == 'string')
+                    excludeNameSet[item] = true
+                end
+            else
+                error('bad type')
+            end
+        end
+    end
+    for _, faction in pairs(_factionHelper.allFactions()) do
+        exclude(faction.commander)
+        exclude(faction.hero)
+    end
+
+    local inHandGuidSet = _zoneHelper.inHand()
+    local function isCandidate(object)
+        if object.tag ~= 'Card' then
+            return false
+        end
+        if not object.is_face_down then
+            return false
+        end
+        if inHandGuidSet[object.getGUID()] then
+            return false
+        end
+        if excludeNameSet[object.getName()] then
+            return false
+        end
+        return true
+    end
+
+    local guidToPosition = {}
+    for _, object in ipairs(getAllObjects()) do
+        if isCandidate(object) then
+            guidToPosition[object.getGUID()] = object.getPosition()
+        end
+    end
+    coroutine.yield(0)
+
+    local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
+    for guid, color in pairs(guidToColor) do
+        if color then
+            getObjectFromGUID(guid).flip()
+        end
+    end
+    broadcastToAll('Readied Cards.')
+end
+
+-------------------------------------------------------------------------------
+
+function _repairUnits()
+    local unitNameSet = {}
+    for _, faction in pairs(_factionHelper.allFactions()) do
+        unitNameSet[faction.flagship] = true
+    end
+    for _, color in ipairs(_zoneHelper.zones()) do
+        unitNameSet[color .. ' Infantry'] = true
+        unitNameSet[color .. ' Fighter'] = true
+        unitNameSet[color .. ' Destroyer'] = true
+        unitNameSet[color .. ' Carrier'] = true
+        unitNameSet[color .. ' Cruiser'] = true
+        unitNameSet[color .. ' Dreadnought'] = true
+        unitNameSet[color .. ' War Sun'] = true
+        unitNameSet[color .. ' Flagship'] = true
+        unitNameSet[color .. ' Space Dock'] = true
+        unitNameSet[color .. ' PDS'] = true
+        unitNameSet[color .. ' Mech'] = true
+    end
+
+    for _, object in ipairs(getAllObjects()) do
+        if unitNameSet[object.getName()] then
+            local rotation = object.getRotation()
+            if rotation.z > 90 and rotation.z < 270 then
+                object.flip()
+            end
+        end
+    end
+
+    broadcastToAll('Repaired Units.')
+end
+
+-------------------------------------------------------------------------------
+
+function _returnStrategyCards()
+    local politicalStabilityColor = false
+    local foundGuids = {}
+    local guidToPosition = {}
+
+    local inHandGuidSet = _zoneHelper.inHand()
+    for _, object in ipairs(getAllObjects()) do
+        local guid = object.getGUID()
+        if _guidToParameters[guid] then
+            table.insert(foundGuids, guid)
+            guidToPosition[guid] = object.getPosition()
+        end
+        if object.getName() == 'Political Stability' and (not object.is_face_down) and (not inHandGuidSet[guid]) then
+            politicalStabilityColor = _zoneHelper.zoneFromPosition(object.getPosition())
+        end
+    end
+    coroutine.yield(0)
+
+    local sheet = assert(_getStrategyCardSheet())
+    local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
+    for _, guid in ipairs(foundGuids) do
+        local strategyCard = getObjectFromGUID(guid)
+        local name = strategyCard.getName()
+        local color = guidToColor[guid]
+        if color and color == politicalStabilityColor then
+            broadcastToAll(color .. ' has Political Stability, not returning ' .. name .. ' strategy card', {0.1,0.5,0.1})
+        else
+            local index = assert(STRATEGY_CARD_INITIATIVE[name])
+            if #foundGuids > 8 and sheet.getStateId() ~= 2 then
+                index = index - 1
+            end
+            local snapPoint = sheet.call('getSnapPoint', index)
+            local position = sheet.positionToWorld(snapPoint.position)
+            local rotation = {
+                x = 0,
+                y = sheet.getRotation().y + snapPoint.rotation.y,
+                z = 0
+            }
+
+            local dx = strategyCard.getPosition().x - position.x
+            local dz = strategyCard.getPosition().z - position.z
+            local d = math.sqrt(dx ^ 2 + dz ^ 2)
+
+            if d > 1 then
+                local collide = false
+                local fast = true
+                local abovePos = { x = position.x, y = position.y + 1, z = position.z }
+                strategyCard.setLock(false)  -- paranoia
+                strategyCard.setPositionSmooth(abovePos, collide, fast)
+                strategyCard.setRotationSmooth(rotation, collide, fast)
+            end
+        end
+        coroutine.yield(0)
+    end
+
+    broadcastToAll('Returned Strategy Cards.')
+end
+
+-------------------------------------------------------------------------------
+
+function _endStatusPhaseCoroutine()
+    recomputeInfluence(true)
+    coroutine.yield(0)
+
+    resetAgendaTokens()
+    coroutine.yield(0)
+
+    moveSpeakerAgendaToken()
+    coroutine.yield(0)
+
+    _returnCommandTokens()
+    coroutine.yield(0)
+
+    _allocateCommandTokens()
+    coroutine.yield(0)
+
+    _readyCards()
+    coroutine.yield(0)
+
+    _repairUnits()
+    coroutine.yield(0)
+
+    _returnStrategyCards()
+    coroutine.yield(0)
+
+    _dealMinisterOfPolicyActionCard()
+    coroutine.yield(0)
+
+    return 1
+end
+
+function endStatusPhase()
+    startLuaCoroutine(self, '_endStatusPhaseCoroutine')
+end
+
+local _returnCommandTokensFactionQueue = {}
+
+function _returnCommandTokensForFactionCoroutine()
+    local factionTokenName = assert(table.remove(_returnCommandTokensFactionQueue))
+
+    _returnCommandTokens(factionTokenName)
+    coroutine.yield(0)
+
+    return 1
+end
+
+function returnCommandTokensForFaction(factionTokenName)
+    assert(type(factionTokenName) == 'string')
+
+    table.insert(_returnCommandTokensFactionQueue, factionTokenName)
+    startLuaCoroutine(self, '_returnCommandTokensForFactionCoroutine')
+end
+
+-------------------------------------------------------------------------------
+
+function _addUnallocatedCommandToken(object, color)
+    local guid = object.getGUID()
+    _allocatedTokenGuidToColor[guid] = color
+    _resetUnallocatedCommandTokenSignal()
+end
+
+function _clearUnallocatedCommandToken(object)
+    local guid = object.getGUID()
+    if guid and _allocatedTokenGuidToColor[guid] then
+        _allocatedTokenGuidToColor[guid] = nil
+        _resetUnallocatedCommandTokenSignal()
+    end
+end
+
+local _resetUnallocatedCommandTokenWaitId = false
+
+function _resetUnallocatedCommandTokenSignal()
+    local function delayed()
+        _resetUnallocatedCommandTokenWaitId = false
+
+        local colorToUnallocatedCount = {}
+        for guid, color in pairs(_allocatedTokenGuidToColor) do
+            colorToUnallocatedCount[color] = (colorToUnallocatedCount[color] or 0) + 1
+        end
+
+        for _, object in ipairs(getAllObjects()) do
+            if object.tag == 'Counter' then
+                local color = string.match(object.getName(), '(.*) Player Votes')
+                if color then
+                    if colorToUnallocatedCount[color] then
+                        object.createButton({
+                            click_function = 'doNothing',
+                            function_owner = self,
+                            label          = 'Please allocate\nCommand Tokens',
+                            position       = { x = 0, y = 0.24, z = 0.25 },
+                            rotation       = { x = 0, y = 180, z = 0 },
+                            width          = 400,
+                            height         = 50,
+                            font_size      = 40,
+                            color          = 'White',
+                            font_color     = 'Black',
+                        })
+                    else
+                        object.clearButtons()
+                    end
+                end
+            end
+        end
+    end
+
+    if _resetUnallocatedCommandTokenWaitId then
+        Wait.stop(_resetUnallocatedCommandTokenWaitId)
+        _resetUnallocatedCommandTokenWaitId = false
+    end
+    _resetUnallocatedCommandTokenWaitId = Wait.frames(delayed, 5)
+end
+
+function doNothing() end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    self.setColorTint({ r = 0.25, g = 0.25, b = 0.25 })
+    self.setScale({ x = 2, y = 0.01, z = 2 })
+    self.setName('TI4_STRATEGY_CARD_HELPER')
+    self.setDescription('Shared helper functions used by other objects, PLEASE LEAVE ON TABLE! This object is only visible to the black (GM) player.')
+
+    -- Only the GM/black player can see this object.  Others can still interact!
+    local invisibleTo = {}
+    for _, color in ipairs(Player.getColors()) do
+        if color ~= 'Black' then
+            table.insert(invisibleTo, color)
+        end
+    end
+    self.setInvisibleTo(invisibleTo)
+end
+
+function onObjectPickUp(playerColor, pickedUpObject)
+    assert(type(playerColor) == 'string', type(pickedUpObject) == 'userdata')
+
+    -- Merely picking up an allocated token clears "unassigned".
+    _clearUnallocatedCommandToken(pickedUpObject)
+
+    -- Rotate strategy cards being picked up outside a player zone?
+    -- NO, "rotate" make the object drop and "setRotation[Smooth]" fails.
+end
+
+function onObjectDestroy(dyingObject)
+    local guid = dyingObject.getGUID()
+    if guid and _putTokenGuidSet[guid] then
+        _putTokenGuidSet[guid] = nil
+    end
+    _clearUnallocatedCommandToken(dyingObject)
+end
+
+-------------------------------------------------------------------------------
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

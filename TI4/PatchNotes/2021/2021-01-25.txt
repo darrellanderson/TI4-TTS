@@ -1,0 +1,43 @@
+This change does not use any new TTS features introduced in TTS v13, and will work with the prior TTS version in the "beta" channel.
+- Fix "Neural Motivator" card image.
+- Update PoK planet card backs to be visually in line with others.
+- Fix some map images with incorrect slice values.
+- Update some map strings to take advantage of 0 for home system positions.
+- Fix right click "report remaining" on exploration deck after shuffling (when the explore option restocks the deck).
+- Fix some action card description line wraps.
+- Planet board now fetches planet cards face down.
+- Planet board now fetches legendary planet cards, preserving face up/down when liberating.
+- Strategy Card Automator (in the tools bag) reports available strategy token substitutes such as the "Scepter of Emelpar" relic.
+- Strategy Card Automator no longer consumes a token when a faction with "Masters of Trade" follows Trade.
+- Leader sheets now have snap points in Franken games.
+- Fix blank buttons on the faction selector.
+- Fix faction unpacking when not using the PoK expansion.
+- New setup option to place common tools in each player area (planet & tech boards, build area).
+- New map tool right click option to create a premade map tile.
+
+22b:
+- Fix setup issue purging codex cards.
+- Fix faction selector button visibility.
+- Fix some "exiting game" errors related to how the new TTS version unloads a game.
+- Added "tech reporter" to the tools bag to submit anonymized game statistics for analysis.
+
+22c:
+- Restore vote counter placement.
+- Franken + Strategy Card Automator "trade" now uses correct commodities value.
+- Discarding promissory notes (via a graveyard) now returns them to the owning player.
+- Strategy Card Automator now presents options when strategy token alternatives are available.
+- Strategy Card Automator now returns trade agreements and moves commodities when refreshing AND the trade agreement is face up in a player area (not in hand).
+- Strategy Card Automator now has a "draw secrets" setting, will only draw the card when enabled.
+- Faction Selector now has a right-click option to unpack via the faction token in the player zone.
+
+22d:
+- Lock token bags on setup.
+- Strategy Card Automator now requires trade agreements be face up on the table (not hand) during refresh to pass commodities to the agreement holder.
+- Strategy Card Automator no longer deals secrets for Imperial primary when dealing secrets is disabled.
+- Fix Strategy Card Automator closing windows early.
+- Fix some issues with homebrew faction and unit modifier injection.
+- Updated Cabal token art to be more distinct from Nekro.
+- Generic "spreadsheet update" data instead of spreadsheet format.
+- Fix "Blitz" adding bombardment to Nekro+Flagship Infantry.
+- "Mutiny" agenda card now has right click option to rename For/Against (used by streamer tools).
+- "The Codex" relic card now has right click option to report action card discards.

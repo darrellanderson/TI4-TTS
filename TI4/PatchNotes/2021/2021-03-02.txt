@@ -1,0 +1,8 @@
+- New SCPT draft per-player selection mats, improved button tooltips for clarity.
+- New Argent Flight vote reminder token, unpacks with faction.
+- Fix map tool when map string starts with "18" (Mecatol).
+- Fix map tool to allow lowercase a/b for hyperlane tile side.
+- Fix Carrion hero error if dice take too long to finish rolling.
+- Fix roller repeating "vs color" buttons when a player has multiple hand zones.
+- Fix build area to ignore cards drawn into hands.
+- If submitting anonymized game data, dropping a token on the final score of the scoreboard triggers submission.

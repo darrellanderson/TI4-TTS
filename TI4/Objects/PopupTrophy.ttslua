@@ -1,0 +1,72 @@
+--- Flat token in neutral space, becomes a trophy in a player area.
+-- Also signals game data game (may have) finished.
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _gameDataHelper = getHelperClient('TI4_GAME_DATA_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local STATE_ID_FLAT = 1
+local STATE_ID_TROPHY = 2
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    _tellDeletedItemsToIgnoreMe()
+end
+
+function onDrop(playerColor)
+    local zone = _zoneHelper.zoneFromPosition(self.getPosition())
+    local isFlat = self.getStateId() == STATE_ID_FLAT
+
+    -- If in a zone and flat, switch to trophy.
+    if zone and isFlat then
+        self.setState(STATE_ID_TROPHY)
+        _announceTrophy(zone)
+        _gameDataHelper.triggerUploadGameData()
+    end
+
+    -- If not in a zone and trophy, switch to flat.
+    if (not zone) and (not isFlat) then
+        self.setState(STATE_ID_FLAT)
+    end
+end
+
+function onStateChange(old_guid)
+    _tellDeletedItemsToIgnoreMe()
+end
+
+-------------------------------------------------------------------------------
+
+function _announceTrophy(playerColor)
+    local playerColorToName = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        playerColorToName[player.color] = player.steam_name
+    end
+    local playerName = playerColorToName[playerColor] or playerColor
+    if playerName == 'SCPT Hunter' then
+        playerName = playerName .. '*'  -- just a little easter egg
+    end
+    broadcastToAll('\u{2666}\u{2666}\u{2666} Congratulations ' .. playerName .. '! \u{2666}\u{2666}\u{2666}', 'Yellow')
+end
+
+function _tellDeletedItemsToIgnoreMe()
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' and object.getName() == 'TI4 Deleted Items' then
+            object.call('ignoreGuid', self.getGUID())
+        end
+    end
+end

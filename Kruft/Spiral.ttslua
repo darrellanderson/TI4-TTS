@@ -1,0 +1,54 @@
+-------------------------------------------------------------------------------
+--- Get points equidistant along a spiral.
+-- @see https://stackoverflow.com/questions/13894715/draw-equidistant-points-on-a-spiral
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.Kruft.Spiral'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.Kruft = CrLua.Kruft or {}
+CrLua.Kruft.Spiral = assert(not CrLua.Kruft.Spiral) and {}
+
+-------------------------------------------------------------------------------
+--- Reset the spiral generator.
+-- @param distanceBetweenPoints
+-- @param distanceBetweenSpirals
+-- @param y : y position for spiral points.
+-------------------------------------------------------------------------------
+function CrLua.Kruft.Spiral.new(distanceBetweenPoints, distanceBetweenSpirals, y)
+    local b = distanceBetweenSpirals / (math.pi * 2)
+    return {
+        distanceBetweenPoints = distanceBetweenPoints,
+        b = b,
+        r = distanceBetweenPoints,
+        phi = distanceBetweenPoints / b,
+        y = y
+    }
+end
+
+-------------------------------------------------------------------------------
+--- Position taken objects in a spiral pattern above the table.
+-- @return table : {x,y,z} position.
+-------------------------------------------------------------------------------
+function CrLua.Kruft.Spiral.nextPosition(data)
+    data.phi = data.phi + (data.distanceBetweenPoints / data.r)
+    data.r = data.phi * data.b
+    return {
+        x = data.r * math.cos(data.phi),
+        y = data.y,
+        z = data.r * math.sin(data.phi)
+    }
+end
+
+--- Spiral generator.  Call to get a function, call that repeatedly for points.
+function spiral(dPos, dRing, y)
+    local b = dRing / (math.pi * 2.0)
+    local phi = dPos / b
+    local r = dPos
+    return function()
+        phi = phi + (pPos / r)
+        r = phi * b
+        return { x = r * math.cos(phi), y = y, z = r * math.sin(phi) }
+    end
+end

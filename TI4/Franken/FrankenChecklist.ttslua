@@ -1,0 +1,103 @@
+local BUTTON_X0_LEFT = -1.6
+local BUTTON_X0_RIGHT = 1.2
+local BUTTON_DX = 0.2
+local BUTTON_Y = 0.2
+local BUTTON_Z = { -0.8, -0.4, 0, 0.4, 0.8 }
+local BUTTON_COUNT_LEFT = { 2, 2, 2, 2, 2 }
+local BUTTON_COUNT_RIGHT = { 2, 3, 2, 3, 4 }
+local DARKEN_LAST_LEFT = { 1, 1, 1, 1, 1 }
+local DARKEN_LAST_RIGHT = { 0, 0, 1, 1, 1 }
+local BOTTOM_EXTRA_LEFT = { 0, 0, 0, 1, 0 }
+local BOTTOM_EXTRA_RIGHT = { 0, 0, 0, 1, 1 }
+
+local LABELS = {
+    "PROMISSORY NOTES           RED TILES",
+    "STARTING FLEETS              BLUE TILES",
+    "STARTING TECH         HOME SYSTEMS",
+    "COMMODITIES             FACTION TECH",
+    "FLAGSHIPS            FACTION ABILITIES",
+}
+
+function onLoad()
+    createInputs(true)
+    createInputs(false)
+end
+
+
+function createButtons(p0, dx, rotation, count, darkenCount)
+    for i = 0, count - 1 do
+        local buttonIndex = #(self.getButtons() or {}) + 1
+        local pressFunc = function() buttonPress(buttonIndex) end
+        self.setVar('press' .. buttonIndex, pressFunc)
+        self.createButton({
+            click_function = 'press' .. buttonIndex,
+            function_owner = self,
+            label          = '',
+            position       = {
+                x = p0.x + i * dx,
+                y = p0.y,
+                z = p0.z
+            },
+            rotation       = rotation,
+            width          = 100,
+            height         = 100,
+            color          = i < (count - darkenCount) and 'White' or 'Grey'
+        })
+    end
+end
+
+function createInputs(isTop)
+    assert(type(isTop) == 'boolean')
+    local y = isTop and 0.2 or 0
+    local rotation = isTop and {0,0,0} or {0,0,180}
+
+    for i, label in ipairs(LABELS) do
+        local labelX = -0.2 * (isTop and 1 or -1)
+        local z = BUTTON_Z[i]
+
+        self.createButton({
+            click_function = "none",
+            function_owner = self,
+            label          = label,
+            position       = { x = labelX, y = y, z = z },
+            rotation       = rotation,
+            width          = 0,
+            height         = 0,
+            font_size      = 80,
+        })
+
+        -- Left
+        local x0 = BUTTON_X0_LEFT * (isTop and 1 or -1)
+        local p0 = { x = x0, y = y, z = z }
+        local dx = -BUTTON_DX * (isTop and 1 or -1)
+        local count = BUTTON_COUNT_LEFT[i] + (isTop and 0 or BOTTOM_EXTRA_LEFT[i])
+        local darkenCount = DARKEN_LAST_LEFT[i] + (isTop and 0 or BOTTOM_EXTRA_LEFT[i])
+        createButtons(p0, dx, rotation, count, darkenCount)
+
+        -- Right
+        local x0 = BUTTON_X0_RIGHT * (isTop and 1 or -1)
+        local p0 = { x = x0, y = y, z = z }
+        local dx = BUTTON_DX * (isTop and 1 or -1)
+        local count = BUTTON_COUNT_RIGHT[i] + (isTop and 0 or BOTTOM_EXTRA_RIGHT[i])
+        local darkenCount = DARKEN_LAST_RIGHT[i] + (isTop and 0 or BOTTOM_EXTRA_RIGHT[i])
+        createButtons(p0, dx, rotation, count, darkenCount)
+    end
+end
+
+function buttonPress(index)
+    local buttons = self.getButtons()
+    local button = buttons[index]
+    button.label = button.label == '' and 'X' or ''
+    self.editButton(button)
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

@@ -1,0 +1,20 @@
+Tactic Blue:
+- Blue Space faction box update.
+- Faction cards update.
+
+Darrell:
+- Bang whisper ("!red hello") now announces the whisper happened to everyone.  Fixes an issue where if there were multiple spectators only the first would see it.
+
+Blue Space:
+- Rename Gheldor home system tile use the full name (required by new unpack).
+
+Unpack:
+- Update to table-flexible positions.
+- Lock home system, faction sheet.
+- Space out "other" items rather than stacking.
+- Allow flagship in starting unit set, fix Blue Space / Rhodyn to use it.
+- Faction boxes now use explicit "tech", "promissory", and "planets" bags to organize cards (safer, easier for homebrew).
+- Now allows anyone to click unpack to unpack the faction token in that player area.
+
+Secrets:
+- Track which secrets have been played, mouseover for description of each secret.

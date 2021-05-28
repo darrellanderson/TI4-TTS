@@ -1,0 +1,74 @@
+GOOGLE_SHEET_ID = '1Szdiyw-4N48E8ztPpKSPNdCyahp3Pzh9DC_OkM8VYRo'
+
+#include <~/CrLua/Log>
+#include <~/CrLua/TTS/Spreadsheet>
+
+-- Remember a single path for each name.
+_seenNameSet = {}
+_nameAndPathList = {}
+
+function onLoad(save_state)
+    self.addContextMenuItem('go', function() startLuaCoroutine(self, 'goCoroutine') end)
+end
+
+function goCoroutine()
+    local stopSet = {
+        ['Draft2021'] = true,
+        ['Variant Pieces (Searching Recommended)'] = true,
+    }
+
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if string.len(name) > 0 and not stopSet[name] then
+            explore(object.getData(), {})
+            coroutine.yield(0)
+        end
+    end
+    coroutine.yield(0)
+
+    print('Found ' .. (#_nameAndPathList) .. ' unique names')
+
+    local cells = {}
+    for i, nameAndPath in ipairs(_nameAndPathList) do
+        cells['A' .. (i + 1)] = nameAndPath.path
+        cells['B' .. (i + 1)] = nameAndPath.name
+    end
+
+    local label = 'path and names'
+    local id = GOOGLE_SHEET_ID
+    local sheet = 'Sheet1'
+    CrLua.TTS.Spreadsheet.update(label, id, sheet, cells)
+
+    return 1
+end
+
+function explore(objectData, path)
+    local name = assert(objectData.Nickname)
+    if not _seenNameSet[name] then
+        _seenNameSet[name] = name
+        table.insert(_nameAndPathList, { name = name, path = table.concat(path, '/') })
+    end
+
+    if objectData.ContainedObjects then
+        table.insert(path, name)
+
+        print('exploring ' .. table.concat(path, '/'))
+        coroutine.yield(0)
+
+        for _, containedObject in ipairs(objectData.ContainedObjects) do
+            explore(containedObject, path)
+        end
+        table.remove(path)
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

@@ -1,0 +1,33 @@
+Franken:
+- Right click Franken bag for setup / remove zone menu items.
+- "Normal" strategy cards now support Franken (Scheming, Versatile).
+- "Normal" MultiRoller supports Franken (rename it to have "Franken" in the name)
+
+Deleted Items:
+- Ignore deleted hidden zones.
+
+Build Area:
+- Allow decks as well as card (looks inside decks, Alister suggestion).
+
+Autofill MultiRoller:
+- Fix PDS2 handling for some Blue Space factions.
+
+Strategy Cards:
+- Report error instead of failing if not able to find the vote counter.
+- Only return tokens in the table area (one Blue Space faction places them on foreign faction sheets).  Also fixes potentially not reclaiming tokens on Ghosts home system depending on where it is on the table.
+- Do not return strategy cards if "Political Stability" is face up in zone.
+- Add "Please allocate Command Tokens" reminder to the vote counters until allocated tokens move.
+
+MultiRoller:
+- Fix some Blue Space flagships.
+- Use shared factions, zones.
+
+Place Trade Goods and Set Turns:
+- Bottom side has a button to end status phase for all.
+
+Faction Borders:
+- Hopefully finally fix UI not showing up for some players.
+
+Globals:
+- Use shared systems, factions, zones.
+- Added "bang whisper", if you type "/red message" you whisper red privately.  If you type "!red message" you send the private message to red, but also print an announcement to other players that the whisper happened.

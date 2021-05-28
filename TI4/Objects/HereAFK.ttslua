@@ -1,0 +1,41 @@
+--- Report when flipped.
+-- Suggested by Grumpus on ti4-mod-feedback-bugs-help 8-1-20
+-- @author Darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local _isFaceDown = false
+
+function onLoad(save_state)
+    _isFaceDown = self.is_face_down
+end
+
+function onRotate(spin, flip, player_color, old_spin, old_flip)
+    -- Do not read is_face_down, flip may still be in progress.  Use "flip" arg.
+    local isFaceDown = (flip > 90) and (flip < 270)
+    if _isFaceDown ~= isFaceDown then
+        _isFaceDown = isFaceDown
+
+        local color = _zoneHelper.zoneFromPosition(self.getPosition())
+        local status = _isFaceDown and 'AFK' or 'here'
+        local message = 'Here/AFK: ' .. (color or 'Token') .. ' is ' .. status
+
+        printToAll(message, color)
+    end
+end

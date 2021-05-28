@@ -1,0 +1,1165 @@
+--- Show the produce and consume costs for contained objects.
+-- @author Darrell
+
+local TAG = 'BuildArea'
+
+local BASE_PRODUCTION = 2
+
+local OBJECT_EFFECTS = {
+    -- Tokens
+    ['x1 Commodities/Tradegoods'] = {
+        tradegoods = true,
+        resources = 1,
+    },
+    ['x3 Commodities/Tradegoods'] = {
+        tradegoods = true,
+        resources = 3,
+    },
+
+    -- Technologies
+    ['Sarween Tools'] = {
+        anywhereInPlayerZone = true,
+        requireFaceUp = true,
+        sarween = true,
+    },
+    ['Mirror Computing'] = {
+        anywhereInPlayerZone = true,
+        requireFaceUp = true,
+        objectEffectsOverrides = {
+            ['x1 Commodities/Tradegoods'] = {
+                resources = 2,
+            },
+            ['x3 Commodities/Tradegoods'] = {
+                resources = 6,
+            },
+        },
+    },
+    ['Hegemonic Trade Policy'] = {
+        requireFaceUp = true,
+        hegemonic = true,
+    },
+    ['AI Development Algorithm'] = {
+        aiDevelopmentAlgorithm = true
+    },
+
+    -- Actions
+    ['War Machine (1)'] = {
+        anywhereInPlayerZone = true,
+        requireFaceUp = true,
+        warmachine = true,
+    },
+    ['War Machine (2)'] = {
+        anywhereInPlayerZone = true,
+        requireFaceUp = true,
+        warmachine = true,
+    },
+    ['War Machine (3)'] = {
+        anywhereInPlayerZone = true,
+        requireFaceUp = true,
+        warmachine = true,
+    },
+    ['War Machine (4)'] = {
+        anywhereInPlayerZone = true,
+        requireFaceUp = true,
+        warmachine = true,
+    },
+
+    -- Leaders
+    ['Berekar Berekon'] = {
+        berekar = true,
+    },
+}
+
+local FACTION_EFFECTS = {
+    ['Amalgamation'] = {
+        amalgamation = true,
+        fillUnitColor = true,
+    },
+}
+
+-------------------------------------------------------------------------------
+
+local _config = {
+    defaultWidth = 8.37,
+    defaultHeight = 5,
+    minWidth = 8.37,
+    minHeight = 5,
+    thickness = 0.3,
+}
+
+local _data = {
+    playerColor = 'Grey',
+    width = _config.defaultWidth,
+    height = _config.defaultHeight,
+
+    boundingBox = false,
+
+    lowerNameToResources = false,
+    lowerNameToResourcesLastUpdateTime = false,
+
+    inside = {},
+
+    dragOffset = {
+        x = 0,
+        z = 0
+    },
+
+    philModeProductionValue = false
+}
+
+local _deckHelper = false
+local _factionHelper = false
+local _systemHelper = false
+local _unitHelper = false
+local _zoneHelper = false
+
+local _graveyardGuid = false
+
+local _unitAttributes = false
+local _unitAttributesLastUpdateTime = false
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    CrLua.Log.d(TAG, 'onLoad')
+    math.randomseed(tonumber(self.getGUID(), 16))
+
+    local saveState = saveState and JSON.decode(saveState)
+    _data.width = saveState and saveState.width or _data.width
+    _data.height = saveState and saveState.height or _data.height
+    _data.width = math.max(_data.width, _config.minWidth)
+    _data.height = math.max(_data.height, _config.minHeight)
+    _data.playerColor = saveState and saveState.playerColor or _data.playerColor
+
+    _deckHelper = CrLua.TTS.HelperClient.get('TI4_DECK_HELPER')
+    _factionHelper = CrLua.TTS.HelperClient.get('TI4_FACTION_HELPER')
+    _systemHelper = CrLua.TTS.HelperClient.get('TI4_SYSTEM_HELPER')
+    _unitHelper = CrLua.TTS.HelperClient.get('TI4_UNIT_HELPER')
+    _zoneHelper = CrLua.TTS.HelperClient.get('TI4_ZONE_HELPER')
+
+    self.addContextMenuItem("Warp to active", warpToActiveSystem, false)
+    self.addContextMenuItem("Warp to home", warpToHomeSystem, false)
+    self.addContextMenuItem("Trash trade goods", trashTradeGoods, false)
+    self.addContextMenuItem("Toggle Phil Mode", togglePhilMode)
+
+    Wait.frames(updateEverything, 2)
+end
+
+function onSave()
+    return JSON.encode({
+        width = _data.width,
+        height = _data.height,
+        playerColor = _data.playerColor,
+    })
+end
+
+function onObjectDrop(playerColor, droppedObject)
+    assert(type(playerColor) == 'string' and type(droppedObject) == 'userdata')
+    if droppedObject == self then
+        CrLua.Log.d(TAG, 'onObjectDrop: self')
+        _graveyardGuid = false
+        updateEverything()
+    elseif isInsideBuildArea(droppedObject.getPosition()) then
+        _data.inside[droppedObject] = true
+        updateProduceConsumeValues()
+    end
+end
+
+function onObjectPickUp(playerColor, pickedUpObject)
+    assert(type(playerColor) == 'string' and type(pickedUpObject) == 'userdata')
+    if pickedUpObject == self then
+        CrLua.Log.d(TAG, 'onObjectPickUp: self')
+    elseif _data.inside[pickedUpObject] then
+        _data.inside[pickedUpObject] = nil
+        updateProduceConsumeValues()
+    end
+end
+
+function onPlayerChangeColor(playerColor)
+    CrLua.Log.d(TAG, 'onPlayerChangeColor')
+    Wait.frames(updateEverything, 2)
+end
+
+function onObjectDestroy(dyingObject)
+    if _data.inside[dyingObject] then
+        _data.inside[dyingObject] = nil
+        updateEverything()
+    end
+end
+
+function onObjectSpawn(object)
+    local guid = object.getGUID()
+
+    local function delayedCheckSpawn()
+        local object = getObjectFromGUID(guid)
+        if object and (not _data.inside[object]) and isInsideBuildArea(object.getPosition()) then
+            _data.inside[object] = true
+            updateProduceConsumeValues()
+        end
+    end
+
+    -- Often objects are drawn from a bag with a mouse points, and will be
+    -- "held by color" at spawn time with a certain "on object drop" detected
+    -- above.  Some scripts can create objects (e.g. numpad spawn, or swapping
+    -- tokens and plastic).  In those cases, check up on those objects after
+    -- a few seconds to see if they landed in zone.
+    local name = object.getName()
+    if (not object.held_by_color) and string.len(name) > 0 then
+        if OBJECT_EFFECTS[name] or _unitHelper.isUnitName(name) then
+            Wait.time(delayedCheckSpawn, 2.5 + math.random())
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function _getUnitAttributes(unitType)
+    assert(type(unitType) == 'string')
+    if _unitAttributes and (_unitAttributesLastUpdateTime or 0) > (Time.time - 15) then
+        return _unitAttributes[unitType]
+    end
+
+    _updateUnitAttributes()
+
+    return _unitAttributes[unitType]
+end
+
+function _updateUnitAttributes(produceUnitNameToUnitWithCount)
+    assert(not produceUnitNameToUnitWithCount or type(produceUnitNameToUnitWithCount) == 'table')
+
+    local unitTypeToCount = {}
+    for unitType, unit in pairs(produceUnitNameToUnitWithCount or {}) do
+        unitTypeToCount[unitType] = unit.count
+    end
+
+    local color = getPlayerColor()
+
+    local unitOverrides = _unitHelper.getColorToUnitOverrides()[color] or {}
+    local unitModifiers = _unitHelper.getColorToUnitModifiers()[color] or {}
+
+    -- Apply unit overrides.
+    local unitAttrs = _unitHelper.getUnitAttributes(unitOverrides)
+
+    -- Apply unit modifiers.
+    unitAttrs = _unitHelper.applyUnitModifiers({
+        unitAttrs = assert(unitAttrs),
+        myColor = color or 'Grey',
+        myUnitModifiers = unitModifiers,
+        myUnitTypeToCount = unitTypeToCount or {},
+        opponentColor = false,
+        opponentUnitModifiers = false,
+        opponentUnitTypeToCount = false
+    })
+
+    _unitAttributes = unitAttrs
+    _unitAttributesLastUpdateTime = Time.time
+end
+
+
+function _getProduction()
+    local spaceDock = _getUnitAttributes('Space Dock')
+    local production = (spaceDock and spaceDock.production) or 0
+    if production < 0 then
+        return 'R+' .. (-production)
+    end
+    return '' .. production
+end
+
+--- Get UnitHelper units {guid, unitType, count}.
+function _getUnitsInsideBuildArea()
+    local units = {}
+    for _, unit in ipairs(_unitHelper.getUnits()) do
+        if isInsideBuildArea(unit.position) then
+            local unitObject = getObjectFromGUID(unit.guid)
+            if unitObject and not unitObject.held_by_color then
+                table.insert(units, unit)
+            end
+        end
+    end
+    return units
+end
+
+local function _warpToSystem(system)
+    assert(type(system) == 'table')
+    print(TAG .. ': warping to ' .. system.string)
+
+    local systemObject = getObjectFromGUID(system.guid)
+    if not systemObject then
+        error('missing system guid ' .. system.guid)
+    end
+
+    local zoneColor = _zoneHelper.zoneFromPosition(self.getPosition())
+
+    local unitObjects = {}
+    for _, unit in ipairs(_getUnitsInsideBuildArea()) do
+        local unitObject = getObjectFromGUID(unit.guid)
+        if (not unit.color or unit.color == zoneColor) and unitObject then
+            table.insert(unitObjects, unitObject)
+        end
+    end
+
+    local p0 = systemObject.getPosition()
+    for i, unitObject in ipairs(unitObjects) do
+        _data.inside[unitObject] = nil
+        local phi = math.rad(i * (360 / #unitObjects))
+        local r = 2
+        local collide = false
+        local fast = true
+        unitObject.setPositionSmooth({
+            x = p0.x + r * math.cos(phi),
+            y = p0.y + 3,
+            z = p0.z + r * math.sin(phi)
+        }, collide, fast)
+    end
+end
+
+function warpToActiveSystem()
+    local system = _systemHelper.getActivatedSystem()
+    if system then
+        _warpToSystem(system)
+    else
+        print(TAG .. ': no active system.')
+    end
+    Wait.time(updateProduceConsumeValues, 1)
+    Wait.time(updateProduceConsumeValues, 3)  -- again, in case warp was slow
+end
+
+function warpToHomeSystem()
+    local zoneColor = _zoneHelper.zoneFromPosition(self.getPosition())
+    local faction = zoneColor and _factionHelper.fromColor(zoneColor)
+    local tile = faction and faction.home
+    local system = _systemHelper.systemFromTile(tile)
+    if system then
+        _warpToSystem(system)
+    else
+        print(TAG .. ': no home system.')
+    end
+    Wait.time(updateProduceConsumeValues, 1)
+    Wait.time(updateProduceConsumeValues, 3)  -- again, in case warp was slow
+end
+
+function trashTradeGoods()
+    local function getGraveyard()
+        local graveyard = _graveyardGuid and getObjectFromGUID(_graveyardGuid)
+        if graveyard then
+            return graveyard
+        end
+        local bestGraveyard = false
+        local bestDistanceSq = false
+        local p1 = self.getPosition()
+        for _, object in ipairs(getAllObjects()) do
+            if object.tag == 'Bag' and string.match(object.getName(), '^TI4 Graveyard') then
+                local p2 = object.getPosition()
+                local dSq = (p1.x - p2.x) ^ 2 + (p1.z - p2.z) ^ 2
+                if not bestDistanceSq or dSq < bestDistanceSq then
+                    bestGraveyard = object
+                    bestDistanceSq = dSq
+                end
+            end
+        end
+        _graveyardGuid = bestGraveyard and bestGraveyard.getGUID()
+        return bestGraveyard
+    end
+
+    local tradeGoods = {}
+    for object, _ in pairs(_data.inside) do
+        if string.match(object.getName(), 'x[13] Commodities/Tradegoods') then
+            table.insert(tradeGoods, object)
+        end
+    end
+
+    local graveyard = getGraveyard()
+    if graveyard then
+        for _, tradeGood in ipairs(tradeGoods) do
+            _data.inside[tradeGood] = nil
+            graveyard.putObject(tradeGood)
+        end
+    end
+    updateProduceConsumeValues()
+end
+
+function togglePhilMode()
+    if _data.philModeProductionValue then
+        _data.philModeProductionValue = false
+    else
+        _data.philModeProductionValue = 4
+    end
+    drawBoundingBox()
+    updateProduceConsumeValues()
+end
+
+-------------------------------------------------------------------------------
+
+function onButtonClick(player, option, id)
+    announce(_data.items, _data.resourcesAndCost)
+    commit()
+end
+
+function onInputValueChanged(player, value, id)
+    if id == 'philModeProductionValue' then
+        _data.philModeProductionValue = tonumber(value)
+        drawBoundingBox()
+    else
+        error('unknown input ' .. id)
+    end
+end
+
+function onBeginDrag(player, option, id)
+    local gpp = player.getPointerPosition()
+    if not gpp then
+        _data.dragOffset = nil
+        return
+    end
+
+    local pp = self.positionToLocal(gpp)
+    _data.dragOffset = {
+        x = _data.width - pp.x,
+        z = _data.height - pp.z
+    }
+end
+
+function onEndDrag(player, option, id)
+    local gpp = player.getPointerPosition()
+    if not gpp or not _data.dragOffset then
+        return
+    end
+
+    local pp = self.positionToLocal(gpp)
+    _data.width = pp.x + _data.dragOffset.x
+    _data.height = pp.z + _data.dragOffset.z
+    _data.width = math.max(_data.width, _config.minWidth)
+    _data.height = math.max(_data.height, _config.minHeight)
+    updateEverything()
+end
+
+function onDrag(player, option, id)
+    local gpp = player.getPointerPosition()
+    if not gpp or not _data.dragOffset then
+        return
+    end
+
+    local pp = self.positionToLocal(gpp)
+    _data.width = pp.x + _data.dragOffset.x
+    _data.height = pp.z + _data.dragOffset.z
+    _data.width = math.max(_data.width, _config.minWidth)
+    _data.height = math.max(_data.height, _config.minHeight)
+    updateBoundingBox()
+end
+
+-------------------------------------------------------------------------------
+
+function updateEverything()
+    updatePlayerColor()
+    updateBoundingBox()
+    updateInsideBuildArea()
+    updateProduceConsumeValues()
+end
+
+function updatePlayerColor()
+    _data.playerColor = getPlayerColor() or 'Grey'
+    self.setColorTint(_data.playerColor)
+end
+
+function updateBoundingBox()
+    _data.boundingBox = getLocalBoundingBox()
+    drawBoundingBox()
+end
+
+function updateInsideBuildArea()
+    local inHandGuidSet = _zoneHelper.inHand()
+    _data.inside = {}
+    for _, object in ipairs(getAllObjects()) do
+        local inHand = inHandGuidSet[object.getGUID()]
+        local inBuildArea = isInsideBuildArea(object.getPosition())
+        if (not inHand) and inBuildArea then
+            _data.inside[object] = true
+        end
+    end
+end
+
+function updateProduceConsumeValues()
+    _data.items = getProduceConsumeItems()
+    _data.resourcesAndCost = getProduceConsumeResourcesAndCost(_data.items)
+    drawUi(_data.items, _data.resourcesAndCost)
+end
+
+-------------------------------------------------------------------------------
+
+function getLocalBoundingBox()
+    local bounds = self.getBoundsNormalized()
+    local scale = self.getScale()
+    local min = {
+        x = -bounds.size.x / 2.0 / scale.x,
+        y = -bounds.size.y / 2.0,
+        z = -bounds.size.z / 2.0 / scale.z
+    }
+    local max = {
+        x = min.x + _data.width,
+        y = bounds.size.y / 2.0,
+        z = min.z + _data.height
+    }
+    return {
+        min = min,
+        max = max
+    }
+end
+
+function isInsideBuildArea(position)
+    assert(type(position) == 'table')
+    local p = self.positionToLocal(position)
+    local bb = _data.boundingBox
+    return bb.min.x <= p.x and p.x <= bb.max.x and bb.min.z <= p.z and p.z <= bb.max.z
+end
+
+function getResourcesAndInfluence(objectName)
+    assert(type(objectName) == 'string')
+
+    local now = Time.time
+    local last = _data.lowerNameToResourcesLastUpdateTime or 0
+    local age = math.abs(now - last)
+    if age > 3 then
+        _data.lowerNameToResourcesLastUpdateTime = now
+        _data.lowerNameToResources = false
+    end
+
+    if not _data.lowerNameToResources then
+        _data.lowerNameToResources = {}
+        for lowerName, planet in pairs(_systemHelper.planets()) do
+            _data.lowerNameToResources[lowerName] = {
+                resources = planet.resources or 0,
+                influence = planet.influence or 0
+            }
+        end
+        for lowerName, other in pairs(_systemHelper.nonPlanetResourceInfluenceCards()) do
+            _data.lowerNameToResources[lowerName] = {
+                resources = other.resources or 0,
+                influence = other.influence or 0
+            }
+        end
+    end
+    return _data.lowerNameToResources[string.lower(objectName)]
+end
+
+function getPlayerColor()
+    local zoneColor = _zoneHelper.zoneFromPosition(self.getPosition())
+    CrLua.Log.d(TAG, 'getPlayerColor: ' ..(zoneColor or 'nil'))
+    return zoneColor
+end
+
+function getProduceConsumeItems()
+    CrLua.Log.d(TAG, 'getProduceConsumeItems')
+    local playerColor = _data.playerColor
+
+    -- Get objects to consider.
+    local inHandGuidSet = _zoneHelper.inHand()
+    local objects = CrLua.Table.join(_data.inside, {})
+    local function useOutsizeBuildAreaObject(object)
+        local objectEffects = OBJECT_EFFECTS[object.getName()]
+        if not objectEffects then
+            return false
+        end
+        if inHandGuidSet[object.getGUID()] then
+            return false
+        end
+        if objectEffects.requireFaceUp and object.is_face_down then
+            return false
+        end
+        if object.tag == 'Card' and _deckHelper.isDiscard(object.getGUID()) then
+            return false
+        end
+        if objectEffects.anywhereInPlayerZone then
+            return playerColor and _zoneHelper.zoneFromPosition(object.getPosition()) == playerColor
+        end
+        return objectEffects.anywhereOnTable
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if useOutsizeBuildAreaObject(object) then
+            objects[object] = true
+        end
+    end
+
+    local result = {
+        consumeObjectNameToCount = {},
+        produceUnitNameToUnitWithCount = {},
+        objectEffectsOverrides = {},
+        sarween = false,
+        hegemonic = false,
+        warmachine = false,
+        aiDevelopmentAlgorithm = false,
+        amalgamation = false,
+        berekar = false,
+    }
+
+    local unitsInBuildingArea = _getUnitsInsideBuildArea()
+
+    -- add faction abilities if available
+    if playerColor then
+        local playerFaction = _factionHelper.fromColor(playerColor)
+
+        if playerFaction then
+            for _, factionAbility in ipairs(playerFaction.abilities) do
+                local abilityEffect = FACTION_EFFECTS[factionAbility]
+                if abilityEffect then
+                    result.amalgamation = result.amalgamation or abilityEffect.amalgamation and {}
+
+                    -- Faction abilities may require a color on tokens
+                    if abilityEffect.fillUnitColor then
+                        unitsInBuildingArea = _unitHelper.fillUnitColors(unitsInBuildingArea)
+                    end
+                end
+            end
+        end
+    end
+
+    for _, unit in ipairs(unitsInBuildingArea) do
+        -- Count unit for building player if we're lacking any color info, or if unit color matches player color
+        if not playerColor or not unit.color or unit.color == playerColor then
+            if result.produceUnitNameToUnitWithCount[unit.unitType] then
+                unit.count = unit.count + result.produceUnitNameToUnitWithCount[unit.unitType].count
+            end
+            result.produceUnitNameToUnitWithCount[unit.unitType] = unit
+        -- If unit color doesn't match and amalgamation is active, count towards free units for the unit type
+        elseif result.amalgamation and playerColor and unit.color ~= playerColor then
+            result.amalgamation[unit.unitType] = (result.amalgamation[unit.unitType] or 0) + 1
+        end
+    end
+
+    local function addItem(name)
+        local resourcesAndInfluence = getResourcesAndInfluence(name)
+        if resourcesAndInfluence then
+            result.consumeObjectNameToCount[name] = (result.consumeObjectNameToCount[name] or 0) + 1
+        end
+        local objectEffects = OBJECT_EFFECTS[name]
+        if objectEffects then
+            if objectEffects.resources then
+                result.consumeObjectNameToCount[name] = (result.consumeObjectNameToCount[name] or 0) + 1
+            end
+            if objectEffects.objectEffectsOverrides then
+                result.objectEffectsOverrides = CrLua.Table.join(result.objectEffectsOverrides, objectEffects.objectEffectsOverrides)
+            end
+            result.sarween = result.sarween or objectEffects.sarween
+            result.hegemonic = result.hegemonic or objectEffects.hegemonic
+            result.warmachine = result.warmachine or objectEffects.warmachine
+            result.aiDevelopmentAlgorithm = result.aiDevelopmentAlgorithm or objectEffects.aiDevelopmentAlgorithm
+            result.berekar = result.berekar or objectEffects.berekar
+        end
+    end
+
+    for object, _ in pairs(objects) do
+        if object.tag == 'Deck' then
+            for _, entry in ipairs(object.getObjects()) do
+                addItem(entry.name)
+            end
+        else
+            addItem(object.getName())
+        end
+    end
+
+    if result.aiDevelopmentAlgorithm then
+        -- Detect unit upgrades (AI Development Algorithm)
+        local unitUpgradeSet = {}
+        local unitUpgradeCount = 0
+        if playerColor then
+            local unitUpgradeNameSet = {}
+            for _, name in ipairs(_unitHelper.getUnitUpgradeNames()) do
+                unitUpgradeNameSet[name] = true
+            end
+            local guidToPosition = {}
+            local function maybeAdd(object)
+                if object.tag ~= 'Card' then
+                    return
+                elseif inHandGuidSet[object.getGUID()] then
+                    return
+                elseif object.is_face_down then
+                    return
+                elseif not unitUpgradeNameSet[object.getName()] then
+                    return
+                end
+                guidToPosition[object.getGUID()] = object.getPosition()
+            end
+            for _, object in ipairs(getAllObjects()) do
+                maybeAdd(object)
+            end
+            local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
+            for guid, color in pairs(guidToColor) do
+                if color == playerColor then
+                    local object = getObjectFromGUID(guid)
+                    local name = object.getName()
+                    if not unitUpgradeSet[name] then
+                        unitUpgradeSet[name] = true
+                        unitUpgradeCount = unitUpgradeCount + 1
+                    end
+                end
+            end
+        end
+
+        result.aiDevelopmentAlgorithm = unitUpgradeCount
+    end
+
+    CrLua.Log.d(TAG, 'getProduceConsumeItems', result)
+    return result
+end
+
+function getProduceConsumeResourcesAndCost(produceConsumeItems)
+    assert(type(produceConsumeItems) == 'table')
+    CrLua.Log.d(TAG, 'getProduceConsumeResourcesAndCost')
+
+    local result = {
+        resources = 0,
+        cost = 0,
+        numUnits = 0,
+    }
+
+    for objectName, count in pairs(produceConsumeItems.consumeObjectNameToCount) do
+        local objectEffects = OBJECT_EFFECTS[objectName]
+        local objectEffectsOverrides = produceConsumeItems.objectEffectsOverrides[objectName]
+        objectEffects = CrLua.Table.join(objectEffects or {}, objectEffectsOverrides or {})
+        if objectEffects.resources then
+            result.resources = result.resources + objectEffects.resources * count
+        end
+
+        local resourcesAndInfluence = getResourcesAndInfluence(objectName)
+        if resourcesAndInfluence and resourcesAndInfluence.resources then
+            result.resources = result.resources + resourcesAndInfluence.resources * count
+        end
+    end
+
+    _updateUnitAttributes(produceConsumeItems.produceUnitNameToUnitWithCount)
+
+    for unitType, unit in pairs(produceConsumeItems.produceUnitNameToUnitWithCount) do
+        local unitAttrs = _getUnitAttributes(unit.unitType)
+        -- If amalgamation is present, find how many units whose cost should be ignored.
+        local amalgamatedUnitsOfType = produceConsumeItems.amalgamation and produceConsumeItems.amalgamation[unit.unitType] or 0
+        local productionConsumed = math.ceil(unit.count * (unitAttrs.productionConsumed or 1)) - (unitAttrs.freeProduction or 0)
+
+        result.cost = result.cost + math.ceil(math.max(unit.count - amalgamatedUnitsOfType, 0) * (unitAttrs.cost or 0))
+        result.numUnits = result.numUnits + productionConsumed
+    end
+
+    if produceConsumeItems.aiDevelopmentAlgorithm then
+        result.cost = math.max(result.cost - produceConsumeItems.aiDevelopmentAlgorithm, 0)
+    end
+
+    if produceConsumeItems.berekar then
+        result.cost = math.max(result.cost - 2, 0)
+    end
+
+    -- If Hegemonic Trade Policy (swap resouce/influence values), replace
+    -- hegemonic with the chosen planet.
+    if produceConsumeItems.hegemonic then
+        local best = false
+        for objectName, _ in pairs(produceConsumeItems.consumeObjectNameToCount) do
+            local resourcesAndInfluence = getResourcesAndInfluence(objectName)
+            local useThis = true
+            useThis = useThis and resourcesAndInfluence
+            useThis = useThis and resourcesAndInfluence.influence > resourcesAndInfluence.resources
+            useThis = useThis and (not best or resourcesAndInfluence.influence > best.influence)
+            if useThis then
+                best = resourcesAndInfluence
+            end
+        end
+        if best then
+            CrLua.Log.d(TAG, 'hegemonic')
+            result.resources = result.resources - best.resources
+            result.resources = result.resources + best.influence
+        end
+    end
+
+    CrLua.Log.d(TAG, 'getProduceConsumeResourcesAndCost', result)
+    return result
+end
+
+-------------------------------------------------------------------------------
+
+function drawBoundingBox()
+    local bb = _data.boundingBox
+    local d = _config.thickness / 2.0
+    local y = bb.max.y - 0.01
+    local lines = {{
+        points = {
+            { x = bb.min.x + d, y = y, z = bb.min.z + d },
+            { x = bb.min.x + d, y = y, z = bb.max.z - d },
+            { x = bb.max.x - d, y = y, z = bb.max.z - d },
+            { x = bb.max.x - d, y = y, z = bb.min.z + d },
+        },
+        color = _data.playerColor,
+        rotation = { x = 0, y = 0, z = 0 },
+        thickness = _config.thickness,
+        loop = true,
+        square = true,
+    }}
+
+    if _data.philModeProductionValue and _data.philModeProductionValue > 0 then
+        local x0 = bb.min.x + self.getBoundsNormalized().size.x
+        local z0 = bb.min.z
+
+        -- Draw planet area separator.
+        table.insert(lines, {
+            points = {
+                { x = x0, y = y, z = bb.min.z },
+                { x = x0, y = y, z = bb.max.z },
+            },
+            color = _data.playerColor,
+            rotation = { x = 0, y = 0, z = 0 },
+            thickness = _config.thickness,
+            loop = false,
+            square = true,
+        })
+
+        -- Divide remaining area into N boxes.
+        local numCols = math.floor(math.sqrt(_data.philModeProductionValue))
+        local numRows = math.ceil(_data.philModeProductionValue / numCols)
+
+        local w = bb.max.x - x0
+        local h = bb.max.z - z0
+
+        local dx = w / math.max(numCols, 1)
+        for col = 1, numCols - 1 do
+            local x = x0 + col * dx
+            table.insert(lines, {
+                points = {
+                    { x = x, y = y, z = bb.min.z },
+                    { x = x, y = y, z = bb.max.z },
+                },
+                color = _data.playerColor,
+                rotation = { x = 0, y = 0, z = 0 },
+                thickness = _config.thickness,
+                loop = false,
+                square = true,
+            })
+        end
+
+        local dz = h / math.max(numRows, 1)
+        for row = 1, numRows - 1 do
+            local z = z0 + row * dz
+            table.insert(lines, {
+                points = {
+                    { x = x0, y = y, z = z },
+                    { x = bb.max.x, y = y, z = z },
+                },
+                color = _data.playerColor,
+                rotation = { x = 0, y = 0, z = 0 },
+                thickness = _config.thickness,
+                loop = false,
+                square = true,
+            })
+        end
+
+        local d = math.min(dx, dz) * 0.2
+        for col = 1, numCols - 1 do
+            local x = x0 + (col + 0.5) * dx
+            for row = 1, numRows - 1 do
+                local z = z0 + (row + 0.5) * dz
+                if row * numCols + col >= _data.philModeProductionValue then
+                    table.insert(lines, {
+                        points = {
+                            { x = x - d, y = y, z = z - d },
+                            { x = x + d, y = y, z = z + d},
+                        },
+                        color = _data.playerColor,
+                        rotation = { x = 0, y = 0, z = 0 },
+                        thickness = _config.thickness,
+                        loop = false,
+                        square = true,
+                    })
+                    table.insert(lines, {
+                        points = {
+                            { x = x + d, y = y, z = z - d },
+                            { x = x - d, y = y, z = z + d},
+                        },
+                        color = _data.playerColor,
+                        rotation = { x = 0, y = 0, z = 0 },
+                        thickness = _config.thickness,
+                        loop = false,
+                        square = true,
+                    })
+                end
+            end
+        end
+
+    end
+
+    self.setVectorLines(lines)
+end
+
+function drawUi(items, resourcesAndCost)
+    assert(type(items) == 'table' and type(resourcesAndCost) == 'table')
+    CrLua.Log.d(TAG, 'drawUi')
+    assert(type(_data.playerColor) == 'string')
+    local colorTable = Color.fromString(_data.playerColor)
+    local hexColor = '#' .. Color.toHex(colorTable)
+
+    local function trimFloat(value)
+        return math.floor(value * 1000.0) / 1000.0
+    end
+
+    -- Text panel size.
+    local bounds = self.getBoundsNormalized()
+    local boundsWidth = bounds.size.x
+    local boundsHeight = bounds.size.z
+    local boundsDepth = bounds.size.y  -- do not scale?
+    local panelWidth = bounds.size.x - _config.thickness
+    local panelHeight = bounds.size.z - _config.thickness
+
+    -- Apply inverse scale.
+    local scale = self.getScale()
+    boundsWidth = boundsWidth / scale.x
+    boundsHeight = boundsHeight / scale.z
+    panelWidth = panelWidth / scale.x
+    panelHeight = panelHeight / scale.z
+    bounds = nil
+
+    -- Draggable corner.
+    local cornerWidth = 0.75
+    local cornerHeight = cornerWidth
+    local cornerX = _data.width - (boundsWidth / 2.0) - (cornerWidth / 2.0)
+    local cornerY = _data.height - (boundsHeight / 2.0) - (cornerHeight / 2.0)
+
+    -- UI uses x100 units.
+    panelWidth = panelWidth * 100
+    panelHeight = panelHeight * 100
+    cornerWidth = cornerWidth * 100
+    cornerHeight = cornerHeight * 100
+    cornerX = cornerX * 100
+    cornerY = cornerY * 100
+    local panelPosition = '0 0 ' .. trimFloat(boundsDepth * 50.0 + 2)
+    local cornerPosition = trimFloat(cornerX) .. ' ' .. trimFloat(cornerY) .. ' ' .. trimFloat(-boundsDepth * 50.0 + 1)
+
+    local r1c1 = 'Build Cost: ' .. (resourcesAndCost and resourcesAndCost.cost or '-')
+    if resourcesAndCost and items and items.sarween then
+        r1c1 = r1c1 .. '-ST'
+    end
+    if resourcesAndCost and items and items.warmachine then
+        r1c1 = r1c1 .. '-WM'
+    end
+    local r2c1 = 'Resources: ' .. (resourcesAndCost and resourcesAndCost.resources or '-')
+    local r1c2 = '# Units: ' .. (resourcesAndCost and resourcesAndCost.numUnits or '-')
+    local r2c2 = 'Production: ' .. _getProduction()
+    if items and items.warmachine then
+        r2c2 = r2c2 .. '+WM'
+    end
+
+    local w = panelWidth - 30
+    local w1 = w * 0.45
+    local w2 = w - (2 * w1)
+    local fontSize = 40
+
+    local columnWidths = trimFloat(w1) .. ' ' .. trimFloat(w1) .. ' ' .. trimFloat(w2)
+
+    self.UI.setXmlTable({
+        {
+            tag = 'Defaults',
+            children = {
+                {
+                    tag = 'Text',
+                    attributes = {
+                        color = '#ffffff',
+                        fontSize = fontSize,
+                        fontStyle = 'Bold',
+                        alignment = 'MiddleCenter',
+                        horizontalOverflow = 'Overflow',
+                        verticalOverflow = 'Overflow',
+                    }
+                },
+                {
+                    tag = 'Button',
+                    attributes = {
+                        fontSize = fontSize,
+                        fontStyle = 'Bold',
+                        onClick = 'onButtonClick',
+                    }
+                },
+            }
+        },
+        {
+            tag = 'Panel',
+            attributes = {
+                position = panelPosition,
+                rotation = '180 0 0',
+                width = panelWidth,
+                height = panelHeight,
+                color = '#222222ff'
+            },
+            children = {
+                {
+                    tag = 'TableLayout',
+                    attributes = {
+                        cellBackgroundColor = 'Clear',
+                        padding = '15 15 15 15',
+                        columnWidths = columnWidths,
+                    },
+                    children = {
+                        {
+                            tag = 'Row',
+                            children = {
+                                { tag = 'Cell', children = {{
+                                    tag = 'Text',
+                                    value = r1c1
+                                }}},
+                                { tag = 'Cell', children = {{
+                                    tag = 'Text',
+                                    value = r1c2
+                                }}},
+                                { tag = 'Cell', children = {{
+                                    tag = 'Button',
+                                    attributes = {
+                                        id = 'done',
+                                        height = panelHeight,
+                                    },
+                                    value = '\u{25BA}'
+                                }}},
+                            }
+                        },
+                        {
+                            tag = 'Row',
+                            children = {
+                                { tag = 'Cell', children = {{
+                                    tag = 'Text',
+                                    value = r2c1
+                                }}},
+                                { tag = 'Cell', children = {{
+                                    tag = 'Text',
+                                    value = r2c2
+                                }}},
+                                { tag = 'Cell', children = {{
+                                    tag = 'InputField',
+                                    attributes = {
+                                        active = _data.philModeProductionValue and true or false,
+                                        id = 'philModeProductionValue',
+                                        onValueChanged = 'onInputValueChanged',
+                                        characterValidation = 'Integer',
+                                        characterLimit = 2,
+                                        fontSize = fontSize * 0.9,
+                                        fontStyle = 'Bold',
+                                        horizontalOverflow = 'Overflow',
+                                        verticalOverflow = 'Overflow',
+                                        text = _data.philModeProductionValue or 4
+                                    },
+                                }}},
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        {
+            tag = 'Panel',
+            attributes = {
+                id = 'corner',
+                allowDragging = true,
+                restrictDraggingToParentBounds = false,
+                returnToOriginalPositionWhenReleased = false,
+                onDrag = 'onDrag',
+                onBeginDrag = 'onBeginDrag',
+                onEndDrag = 'onEndDrag',
+                position = cornerPosition,
+                rotation = '180 0 0',
+                width = cornerWidth,
+                height = cornerHeight,
+                color = hexColor
+            },
+        }
+    })
+end
+
+-------------------------------------------------------------------------------
+
+function announce(items, resourcesAndCost)
+    assert(type(items) == 'table' and type(resourcesAndCost) == 'table')
+    CrLua.Log.d(TAG, 'announce')
+    local produce = {}
+    for unitType, unit in pairs(items.produceUnitNameToUnitWithCount) do
+        if unit.count > 1 then
+            if unitType ~= 'Infantry' then
+                unitType = unitType .. 's'
+            end
+        end
+        table.insert(produce, unit.count .. ' ' .. unitType)
+    end
+
+    local tradegoods = 0
+    local consume = {}
+    for objectName, count in pairs(items.consumeObjectNameToCount) do
+        local objectEffects = OBJECT_EFFECTS[objectName]
+        local objectEffectsOverrides = items.objectEffectsOverrides[objectName]
+        objectEffects = CrLua.Table.join(objectEffects or {}, objectEffectsOverrides or {})
+        if objectEffects.tradegoods then
+            tradegoods = tradegoods + (objectEffects.resources * count)
+        else
+            table.insert(consume, objectName)
+        end
+    end
+    if tradegoods > 0 then
+        table.insert(consume, tradegoods .. ' tradegood' .. (tradegoods > 1 and 's' or ''))
+    end
+    if items.amalgamation then
+        local amalgamated = {}
+
+        for unitType, consumedAmount in pairs(items.amalgamation) do
+            local unitTypeProduced = items.produceUnitNameToUnitWithCount[unitType] and items.produceUnitNameToUnitWithCount[unitType].count or 0
+
+            if consumedAmount and consumedAmount > 0 then
+                local leftoverAmalgamation = consumedAmount - unitTypeProduced
+                if leftoverAmalgamation > 0 then
+                    table.insert(amalgamated, unitTypeProduced .. 'x ' .. unitType .. ' consumed (' .. leftoverAmalgamation .. ' leftover)')
+                else
+                    table.insert(amalgamated, consumedAmount .. 'x ' .. unitType .. ' consumed')
+                end
+            end
+        end
+
+        table.insert(consume, 'Amalgamation: ' .. table.concat(amalgamated, '; '))
+    end
+    if items.aiDevelopmentAlgorithm then
+        table.insert(consume, 'AI Development Algorithm (' .. items.aiDevelopmentAlgorithm .. ')' )
+    end
+
+    local message = table.concat({
+        _data.playerColor,
+        ' producing ' .. resourcesAndCost.numUnits .. ' units',
+        ' { ' .. table.concat(produce, ', ') .. ' }',
+        ' with production ' .. _getProduction(),
+        items.warmachine and '+WM' or '',
+        ' and total cost ' .. resourcesAndCost.cost,
+        items.sarween and '-ST' or '',
+        items.warmachine and '-WM' or '',
+        items.berekar and ' (BB)' or '',
+        ',',
+        ' consuming ' .. resourcesAndCost.resources,
+        ' resources',
+        ' { ' .. table.concat(consume, ', ') .. ' }',
+        '.',
+    }, '')
+    printToAll(message, _data.playerColor)
+end
+
+function commit()
+    CrLua.Log.d(TAG, 'commit')
+    local inHandGuidSet = _zoneHelper.inHand()
+    for object, _ in pairs(_data.inside) do
+        local tag = object.tag
+        local faceUp = not object.is_face_down
+        local inHand = inHandGuidSet[object.getGUID()]
+        if (tag == 'Card' or tag == 'Deck') and faceUp and (not inHand) then
+            object.flip()
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+#include <~/CrLua/CrLua>
+#include <~/CrLua/LockGlobals>
+
+#include <~/CrLua/LockTable>
+#include <~/CrLua/Log>
+#include <~/CrLua/Table>
+
+#include <~/CrLua/TTS/HelperClient>
+
+--CrLua.Log.setLogLevel(CrLua.Log.LOG_LEVEL.DEBUG)
+--#include <~/CrLua/UnitTest>
+--CrLua.UnitTest.runTests('CrLua.TI4.System', CrLua.TI4.System, true)
+
+CrLua.assertRequired({ 'Log', 'Table', 'TTS.HelperClient' })
+CrLua.lock()

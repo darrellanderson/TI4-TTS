@@ -1,0 +1,18 @@
+- CODEX 2!  Right click faction tokens and change state to see faction summaries.
+- Hyperlanes Tiles bag right-click 5p option now places at the "south" end of the map.
+- Workaround a TTS bug causing strategy cards to shift slightly between save and load.
+- Fix typos in some faction abilities.
+- New "Franken Box" in variants, replaces all flavors of Franken bags (old bags are still in variants for now, should there be any problems).
+
+MiltyDraft toggle to add priority to incorporating wormholes and legendary planets:
+1. Includes empty space alpha and beta wormholes and asteroid alpha wormhole.
+2. Prioritizes incorporating Quann/Atlas (50% either, 50% both) and Lodor (50% chance of additional priority).
+3. Prioritizes legendary planets (25% Primor, 25% Hope's End, 50% both).
+
+Moved to "pending delete" bag, objects will move to a separate workshop item in a future update:
+- Alister's systems
+- Mechanized Units (homebrew)
+- Homebrew Distant Suns Cards
+- Distant Suns Tokens
+- Civilians
+- From the Silence of Space Race Pack

@@ -1,0 +1,145 @@
+-------------------------------------------------------------------------------
+--- Lua logging functions
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.Log'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.Log = assert(not CrLua.Log) and {
+    _require = {},
+    _data = {}
+}
+
+CrLua.Log.LOG_LEVEL = {
+    DEBUG = { level = 1, shortString = 'd' },
+    INFO = { level = 2, shortString = 'i' },
+    WARNING = { level = 3, shortString = 'w' },
+	ERROR = { level = 4, shortString = 'e' },
+    NONE = { level = 5, shortString = 'x' },
+}
+
+-- Store mutable level in a nested table to avoid mutating anything in Log.
+CrLua.Log._data.level = CrLua.Log.LOG_LEVEL.NONE
+
+-------------------------------------------------------------------------------
+--- Get the current log level.
+-- @return table : current log level.
+-------------------------------------------------------------------------------
+function CrLua.Log.getLogLevel()
+    return CrLua.Log._data.level
+end
+
+-------------------------------------------------------------------------------
+--- Set the log level, only log messagees at this level and above.
+-- @param level table : CrLua.Log.LOG_LEVEL value.
+-------------------------------------------------------------------------------
+function CrLua.Log.setLogLevel(level)
+    assert(level and type(level.level) == 'number' and type(level.shortString) == 'string')
+    CrLua.Log._data.level = level
+end
+
+function CrLua.Log._logTable(message, table, depth)
+    assert(type(message) == 'string' and type(table) == 'table' and type(depth) == 'number')
+
+    local indent = '   '
+    local prefix = ''
+    if depth > 1 then
+        for i = 2, depth do
+            prefix = prefix .. indent
+        end
+    end
+    local indentedPrefix = prefix .. '   '
+
+    print(prefix .. message .. ' = {')
+    if depth < 4 then
+        for k, v in pairs(table) do
+            if type(v) == 'table' then
+                CrLua.Log._logTable(tostring(k), v, depth + 1)
+            else
+                print(indentedPrefix .. tostring(k) .. ' = ' .. tostring(v))
+            end
+        end
+    else
+        -- Stop once too deep (also prevents infinite loops if cycles).
+        print(indentedPrefix .. '...')
+    end
+    print(prefix .. '}')
+end
+
+function CrLua.Log._log(logLevel, tag, message, table)
+    -- Be verbose about bad arguments here, easy to pass the wrong item.
+    -- ALWAYS verify arguments even if log level will suppress logging,
+    -- otherwise bugs can creep in that only tickle when logging is enabled.
+    if type(tag) ~= 'string' then
+        error(TAG .. '_log: tag is not a string', 2)
+    elseif type(message) ~= 'string' then
+        error(TAG .. '_log: message is not a string', 2)
+    elseif table and type(table) ~= 'table' then
+        error(TAG .. '_log: table is not a table', 2)
+    end
+
+    if logLevel.level < CrLua.Log._data.level.level then
+        return
+    end
+
+    -- Insert the tag as message prefix.
+    message = tag .. ' ' .. message
+
+    -- Inject a [timestamp/level] prefix.
+    local timestamp = os.date('%I:%M.%S')
+    message = '[' .. timestamp .. '/' .. logLevel.shortString .. '] ' .. message
+
+    if table then
+        CrLua.Log._logTable(message, table, 1)
+    else
+        print(message)
+    end
+end
+
+function CrLua.Log._testLog()
+    local originalLogLevel = CrLua.Log.getLogLevel()
+    CrLua.Log.setLogLevel(CrLua.Log.LOG_LEVEL.DEBUG)
+    CrLua.Log._log(CrLua.Log.LOG_LEVEL.DEBUG, 'TAG', 'test message', { foo = 1, bar = { a = 1, b = 2 } })
+    CrLua.Log.setLogLevel(originalLogLevel)
+end
+
+-------------------------------------------------------------------------------
+--- Log a debug message.
+-- @param tag string.
+-- @param message string.
+-- @table optional table, logging contents if given.
+-------------------------------------------------------------------------------
+function CrLua.Log.d(tag, message, table)
+    CrLua.Log._log(CrLua.Log.LOG_LEVEL.DEBUG, tag, message, table)
+end
+
+-------------------------------------------------------------------------------
+--- Log an info message.
+-- @param tag string.
+-- @param message string.
+-- @table optional table, logging contents if given.
+-------------------------------------------------------------------------------
+function CrLua.Log.i(tag, message, table)
+    CrLua.Log._log(CrLua.Log.LOG_LEVEL.INFO, tag, message, table)
+end
+
+-------------------------------------------------------------------------------
+--- Log a warning message.
+-- @param tag string.
+-- @param message string.
+-- @table optional table, logging contents if given.
+-------------------------------------------------------------------------------
+function CrLua.Log.w(tag, message, table)
+    CrLua.Log._log(CrLua.Log.LOG_LEVEL.WARNING, tag, message, table)
+end
+
+-------------------------------------------------------------------------------
+--- Log an error message.
+-- @param tag string.
+-- @param message string.
+-- @table optional table, logging contents if given.
+-------------------------------------------------------------------------------
+function CrLua.Log.e(tag, message, table)
+    CrLua.Log._log(CrLua.Log.LOG_LEVEL.ERROR, tag, message, table)
+end

@@ -1,0 +1,208 @@
+--- Reset system tiles to use ThatRobHuman's new mesh / UV map.
+-- @author darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+
+local _guidToSystem = false
+local _deletedItems = false
+local _deletePendingSet = {}
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    _guidToSystem = _systemHelper.systems()
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' and object.getName() == 'TI4 Deleted Items' then
+            _deletedItems = object
+            break
+        end
+    end
+    self.addContextMenuItem('Systems JPG', function() startLuaCoroutine(self, 'systemsToJpgCoroutine') end)
+end
+
+function onObjectDestroy(dyingObject)
+    _deletePendingSet[dyingObject.getGUID()] = nil
+end
+
+function safeDestroyObject(object)
+    assert(type(object) == 'userdata')
+    local guid = object.getGUID()
+    if _deletedItems then
+        _deletedItems.call('ignoreGuid', guid)
+    end
+    _deletePendingSet[guid] = true
+    destroyObject(object)
+    while _deletePendingSet[guid] do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+end
+
+function safePutObject(bag, object)
+    assert(type(bag) == 'userdata' and type(object) == 'userdata')
+    assert(bag.tag == 'Bag' or bag.tag == 'Infinite')
+    assert(not object.getLock(), object.getName() .. ' locked')
+    local guid = object.getGUID()
+    _deletePendingSet[guid] = true
+    bag.putObject(object)
+    while _deletePendingSet[guid] do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+end
+
+function safeTakeObjectAndLock(bag, guid)
+    assert(type(bag) == 'userdata' and ((not guid) or type(guid) == 'string'))
+    local pos = bag.getPosition()
+    local object = bag.takeObject({
+        guid = guid,
+        position = { x = pos.x, y = pos.y + 5, z = pos.z },
+        smooth = false
+    })
+    while object.spawning do
+        coroutine.yield(0)
+    end
+    object.setLock(true)
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+    return object
+end
+
+-------------------------------------------------------------------------------
+
+function processTile(bag, tileGuid)
+    assert(type(tileGuid) == 'string')
+
+    local tile = false
+    if bag then
+        tile = safeTakeObjectAndLock(bag, tileGuid)
+    else
+        tile = getObjectFromGUID(tileGuid)
+    end
+    assert(tile)
+    local tilename = tile.getName()
+    local bagName = bag and bag.getName() or '-'
+    local system = assert(_guidToSystem[tileGuid])
+
+    -- Mutate JSON (b/c reload changes the guid).
+    local json = JSON.decode(tile.getJSON())
+    local spawnParams = {
+        json = false,  -- overwrite later
+        position = tile.getPosition(),
+        rotation = tile.getRotation(),
+        scale = tile.getScale(),
+        sound = false,
+        snap_to_grid = false
+    }
+
+    -- Fix image
+    local url = assert(json.CustomMesh.DiffuseURL)
+    local url = 'http://localhost:8080/tojpg?img=' .. url
+    json.CustomMesh.DiffuseURL = url
+
+    safeDestroyObject(tile)
+    spawnParams.json = JSON.encode(json)
+    tile = spawnObjectJSON(spawnParams)
+    while tile.spawning do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    if bag then
+        tile.setLock(false)
+        safePutObject(bag, tile)
+    end
+end
+
+-- Process one at a time, expect guid collisions due to copy/paste.
+function processFactionBox(bag, boxGuid)
+    assert(type(bag) == 'userdata' and type(boxGuid) == 'string')
+    assert(bag.tag == 'Bag' or bag.tag == 'Infinite')
+    local box = safeTakeObjectAndLock(bag, boxGuid)
+    assert(box.tag == 'Bag', 'bad box tag ' .. box.tag)
+
+    --print('FACTION ' .. bag.getName() .. ' -> ' .. box.getName())
+
+    for _, entry in ipairs(box.getObjects()) do
+        if _guidToSystem[entry.guid] then
+            processTile(box, entry.guid)
+            coroutine.yield(0)
+        end
+    end
+
+    box.setLock(false)
+    safePutObject(bag, box)
+end
+
+function systemsToJpgCoroutine()
+
+    -- Find top-level tiles.
+    for _, object in ipairs(getAllObjects()) do
+        if _guidToSystem[object.getGUID()] then
+            processTile(false, object.getGUID())
+            coroutine.yield(0)
+        end
+    end
+    coroutine.yield(0)
+
+    -- Find second-level tiles (Franken home systems bags on table).
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' then
+            for _, entry in ipairs(object.getObjects()) do
+                if _guidToSystem[entry.guid] then
+                    processTile(object, entry.guid)
+                    coroutine.yield(0)
+                end
+            end
+        end
+    end
+    coroutine.yield(0)
+
+    -- Find faction boxes inside top-level containers.
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' then
+            for _, entry in ipairs(object.getObjects()) do
+                local tokenName = string.match(entry.name, '^(.*) Box$')
+                if tokenName and _factionHelper.fromTokenName(tokenName) then
+                    processFactionBox(object, entry.guid)
+                end
+            end
+        end
+    end
+
+    print('systemsToJpgCoroutine FINISHED')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

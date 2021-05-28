@@ -1,0 +1,2258 @@
+--- Execute many strategy card actions, see description for details.
+-- @author Jirach08
+-- #include <~/CrLua/Objects/StrategyCardAutomator>
+
+function getHelperClient(helperObjectName)
+	local function getHelperObject()
+		for _, object in ipairs(getAllObjects()) do
+			if object.getName() == helperObjectName then return object end
+		end
+		error('missing object "' .. helperObjectName .. '"')
+	end
+	-- Nested tables are considered cross script.  Make a local copy.
+	local function copyTable(t)
+		if t and type(t) == 'table' then
+			local copy = {}
+			for k, v in pairs(t) do
+				copy[k] = type(v) == 'table' and copyTable(v) or v
+			end
+			t = copy
+		end
+		return t
+	end
+	local helperObject = false
+	local function getCallWrapper(functionName)
+		helperObject = helperObject or getHelperObject()
+		if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+		return function(parameters) return copyTable(helperObject.call(functionName, parameters)) end
+	end
+	return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _strategyCardHelper = getHelperClient('TI4_STRATEGY_CARD_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+local _setupHelper = getHelperClient('TI4_SETUP_HELPER')
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
+local _technologyHelper = getHelperClient('TI4_TECHNOLOGY_HELPER')
+
+local _active = false
+
+local _pointorder = {
+	["Flagship"] = 1,
+	["War Sun"] = 2,
+	["Dreadnought"] = 3,
+	["Carrier"] = 4,
+	["Cruiser"] = 5,
+	["Destroyer"] = 6,
+	["Fighter"] = 7,
+	["PDS"] = 8,
+	["Infantry"] = 9,
+	["Space Dock"] = 10
+}
+
+local _customLayout = {
+	['assignSpeakerButton'] = {
+		tag = 'Button',
+		attributes = {
+			id = 'politics_primary',
+			color = "green",
+			textcolor = "black",
+			tooltip = "Open menu to assign the speaker",
+			text = 'Assign Speaker',
+			onClick = "genericFollow(Politics Primary)"
+		}
+	},
+	['simpleTechnologyMenu'] = {
+		tag = "VerticalLayout",
+		attributes = {
+			id = "technology",
+			height="300",
+			width="200",
+			allowDragging="true",
+			returnToOriginalPositionWhenReleased="false",
+			rectAlignment="UpperLeft",
+			offsetXY="1200 -80",
+			visibility="false"
+		},
+		children = {
+			{
+				tag = "Button",
+				attributes = {
+					id = "technology_primary",
+					color = "black",
+					textcolor = "white",
+					tooltip="+ Research 1 technology.&#xA;+ Spend 6 resources to research 1 technology.",
+					textAlignment="UpperLeft",
+					text = "Technology Primary Ability"
+				}
+			},
+			{
+				tag = "Button",
+				attributes = {
+					id = 'technology_primary',
+					color = "green",
+					textcolor = "black",
+					text = 'Technology Primary',
+					tooltip = "Open Technology Menu.",
+					onClick = "genericFollow(Technology Primary)"
+				}
+			},
+			{
+				tag = "Button",
+				attributes = {
+					id = "technology_secondary",
+					color = "black",
+					textcolor = "white",
+					tooltip="+ Spend 1 token from your strategy pool and 4 resources to research 1 technology.",
+					textAlignment="UpperLeft",
+					text = "Technology Secondary Ability"
+				}
+			},
+			{
+				tag = "Button",
+				attributes = {
+					id = 'technology_secondary',
+					color = "green",
+					textcolor = "black",
+					text = 'Technology Secondary',
+					tooltip = "Open Technology Menu. Consumes a strategy token from your strategy pool.",
+					onClick = "genericFollow(Technology Secondary)"
+				}
+			},
+			{
+				tag = "Button",
+				attributes = {
+					id = "technology_pass",
+					color = "red",
+					textcolor = "black",
+					text = "Pass",
+					onClick = "notFollow(Technology)"
+				}
+			},
+			{
+				tag = "Button",
+				attributes = {
+					id = "technology_close",
+					color = "black",
+					textcolor = "white",
+					text = "Close Menu",
+					onClick = "closeMenu(technology)"
+				}
+			},
+		}
+	},
+	['politicsPopupTable'] = {
+		tag = "VerticalLayout",
+		attributes = {
+			id = "politicsPopup",
+			height = "150",
+			offsetXY="1000 -80",
+			active="false",
+			visibility=""
+		},
+		children = {
+			{
+				tag = 'Button',
+				attributes = {
+					id = "politics_Popup",
+					color = "black",
+					textcolor = "white",
+					text = "Assign Speaker"
+				}
+
+			},
+			{
+				tag = 'Button',
+				attributes = {
+					id = "politics_Popup",
+					color = "green",
+					textcolor="black",
+					text = "Self",
+					onClick = "genericSilent(self)"
+				}
+			},
+			{
+				tag = 'Button',
+				attributes = {
+					id = "politicsPopup_Popup",
+					color = "black",
+					textcolor="white",
+					text = "Close",
+					onClick = "genericSilent(close)"
+				}
+			}
+		}
+	},
+	['technologyPopupTable'] = {
+		tag = "VerticalLayout",
+		attributes = {
+			id = "COLORPLACEHOLDERtechnologyPopup",
+			height = "150",
+			offsetXY="1000 -80",
+			active="false",
+			visibility=""
+		},
+		children = {
+			{
+				tag = 'Button',
+				attributes = {
+					id = "technology_Popup",
+					color = "black",
+					textcolor = "white",
+					text = "Select Faction Technology"
+				}
+			},
+			{
+				tag = 'Button',
+				attributes = {
+					id = "COLORPLACEHOLDERtechnologyPopup_Popup",
+					color = "black",
+					textcolor="white",
+					text = "Close Menu",
+					onClick = "genericSilent(close)"
+				}
+			}
+		}
+	},
+	["technologyPopupButton"] = {
+		tag = "Button",
+		attributes = {
+			id = "technology_generic",
+			onClick = "genericSilent(TECHPLACEHOLDER)",
+			textcolor = "black",
+			text = "TECHPLACEHOLDER",
+			color = "white"
+		}
+	},
+	['secondaryPopupTable'] = {
+		tag = "VerticalLayout",
+		attributes = {
+			id = "COLORPLACEHOLDERCARDPLACEHOLDERSecondaryPopup",
+			--height = "150",
+			height = "300",
+			offsetXY="1400 -80",
+			active="false",
+			visibility=""
+		},
+		children = {
+			{
+				tag = 'Button',
+				attributes = {
+					id = "CARDPLACEHOLDER_secondaryPopup",
+					color = "black",
+					textcolor = "white",
+					text = "Select CARDPLACEHOLDER Secondary Payment."
+				}
+			},
+			{
+				tag = 'Button',
+				attributes = {
+					id = "COLORPLACEHOLDERCARDPLACEHOLDERSecondaryPopup_Popup",
+					color = "black",
+					textcolor="white",
+					text = "Close Menu",
+					onClick = "genericSilent(close)"
+				}
+			}
+		}
+	},
+	["secondaryPopupButton"] = {
+		tag = "Button",
+		attributes = {
+			id = "CARDPLACEHOLDER_secondaryPopup",
+			onClick = "genericSilent(OPTIONPLACEHOLDER)",
+			textcolor = "black",
+			text = "OPTIONPLACEHOLDER",
+			color = "green"
+		}
+	},
+	['colorButton'] = {
+		tag = 'Button',
+		attributes = {
+			textColor = "black",
+			fontSize = "14",
+			color="COLORPLACEHOLDER",
+			text="COLORPLACEHOLDER"
+		}
+	},
+	['colorSelector'] = {
+		tag = "HorizontalLayout",
+		attributes = {
+			id = "colorSelector"
+		},
+		children = {},
+	},
+	["tradeAttributes"] = {
+		tooltip = "Refresh COLORPLACEHOLDER Player's commodities",
+		id = "trade_primary",
+		onClick = "tradeSelected(COLORPLACEHOLDER)"
+	},
+	["politicsPopupAttributes"] = {
+		tooltip = "Assign Speaker Token to COLORPLACEHOLDER",
+		id = "politics_Popup",
+		onClick = "genericSilent(COLORPLACEHOLDER)"
+	},
+	["imperial"] = {
+		tag = "HorizontalLayout",
+		attributes = { id = "imperial_primary" },
+		children = {
+			{
+				tag = "Button",
+				attributes = {
+					id = "imperial_primary",
+					color = "green",
+					textcolor = "black",
+					text = "Score Mecatol Rex",
+					tooltip = "Only usable if you control Mecatol Rex. VP track is NOT updated automatically.",
+					onClick = "genericSilent(Mecatol Rex)"
+				}
+			},
+			{
+				tag = "Button",
+				attributes = {
+					id = "imperial_primary",
+					color = "green",
+					textcolor = "black",
+					text = "Draw Secret",
+					onClick = "genericFollow(Imperial Primary)"
+				}
+			}
+		}
+	}
+}
+
+local _ObjectManual = [[
+Features:
+Leadership - Primary and Number: gain command tokens.
+All other secondaries consume a (non fleet) strategy token (in strat. pool) or open a menu.
+Politics - Speaker: Moves speaker token, Draws 2 Action and Agendas. - Sec.: draws 2 Actioncards Construction - Allocate constructed units. Trade - Prim.: Allocates 3 resources, Refreshes commodities (removes all from comm. pool and gain correct #)- Color: Refreshes colors commodities - Sec.: Refreshes your commodities (does not use a command token as "Master of Trade"(Hacan)).
+Tech: Draws the card from tech deck, use Tech Board if available. - Faction Tech: Opens a choice popup - Comm Tokens: gain tokens as Necro. Imperial - Score: Only writes message - Secret: Draws secret. - Secondary: Draws secret (if Toggled on).
+Acquiescence and Trade Agreements are resolved if face up in the player zone.
+]]
+
+local backManual = {
+	tag = "Panel",
+	attributes = {
+		position = '0 0 -20.5',
+		rotation = '0 0 180',
+		width = 200,
+		height = 270,
+		scale = '1.35 0.709 1.0',
+	},
+	children = {
+		{
+			tag = "Text",
+			attributes = {
+				resizeTextForBestFit = "true",
+				alignment = "UpperLeft",
+				horizontalOverflow = "wrap"
+			},
+			value = _ObjectManual
+		}
+	}
+}
+
+local backManual = {
+	tag = "Panel",
+	attributes = {
+		position = '0 0 -20.5',
+		rotation = '0 0 180',
+		width = 200,
+		height = 270,
+		scale = '1.35 0.709 1.0',
+	},
+	children = {
+		{
+			tag = "Text",
+			attributes = {
+				resizeTextForBestFit = "true",
+				alignment = "UpperLeft",
+				horizontalOverflow = "wrap"
+			},
+			value = _ObjectManual
+		}
+	}
+}
+
+local _updateUiText = "Please click the 'Update UI' button after all players have chosen a faction. Adds automation features (on first use) and updates the colors listed under politics and trade."
+
+local objectUI = {
+	tag = "VerticalLayout",
+	attributes = {
+		position = '20 24 2',
+		rotation = '0 180 180',
+		width = 200,
+		height = 20,
+		padding = '10 10 10 10',
+		spacing = 10,
+		scale = '1.35 1.0 0.709'
+	},
+	children = {
+		{
+			tag = 'Toggle',
+			attributes = {
+				id = 'AutomateSecretsToggle',
+				onValueChanged = 'onToggleValueChanged',
+				default = 'false',
+				fontSize = 14,
+			},
+			value = "Don't deal Secrets"
+		}
+	},
+}
+
+local backUI = {
+	tag = "Panel",
+	attributes = {
+		position = '0 0 -20.5',
+		rotation = '0 0 180',
+		width = 200,
+		height = 270,
+		scale = '1.35 0.709 1.0',
+	},
+	children = {
+		{
+			tag = "Text",
+			attributes = {
+				resizeTextForBestFit = "true",
+				alignment = "UpperLeft",
+				horizontalOverflow = "wrap"
+			},
+			value = _ObjectManual
+		}
+	}
+}
+local _dontDealSecrets = false
+function onToggleValueChanged(player, value, id)
+	local valueAsBool = string.lower(value) == 'true' and true or false
+	_dontDealSecrets = valueAsBool
+	if _dontDealSecrets then
+		broadcastToAll("No longer automatically dealing Secrets for Imperial Secondary.", 'Red')
+	else
+		broadcastToAll("Automatically dealing Secrets for Imperial Secondary.", 'Green')
+	end
+end
+
+function onLoad()
+	_dontDealSecrets = false
+	--Description on Back of the Object as well as Toggle on front.
+	self.UI.setXmlTable({objectUI,backUI})
+	local descriptionText = [[
+	Please click 'Update UI' to enable automation and to modify strategy card windows (such as choosing speaker, faction techology menus).
+
+	Secondary actions consume a command token or open a menu to select an alternative.
+
+	Leadership: gain command tokens.
+	Politics: move speaker, draw agenda and action cards.
+	Construction: allocate units/command token.
+	Trade: gain tradegoods and commodities.
+	Tech: draw tech cards (use Tech board if available).
+	Imperial: draw secret (if toggled on).
+
+	Acquiescence and Trade Agreements are resolved if face up in the player zone.
+
+	Place this object in a bag (or delete it) to stop getting strategy card automation.
+	]]
+	self.setDescription(descriptionText)
+
+	local scaleX = 0.73
+	local scaleZ = 1.41
+	local rescale = {x=1/scaleX, y=1, z=1/scaleZ}
+	self.setScale({x=scaleX,y=1,z=scaleZ})
+	self.rotate({x=0,y=0,z=0})
+
+	-- update UI button
+	self.createButton({
+		tooltip = "Adds automation buttons (on first click) and updates Trade and Politics colors (on first click as well as future clicks).",
+		click_function = "updateUiOnClick",
+		function_owner = self,
+		position = {x=0, y=0.0, z=-0.1},
+		rotation = {x=0, y=0, z=180},
+		scale = rescale,
+		width = 900,
+		height = 350,
+		font_size = 100,
+		label = "Update UI",
+	})
+
+	-- front text
+	self.createButton({
+		width = 0,
+		height = 0,
+		font_size = 120,
+		label = "Strategy Card\nAutomator",
+		rotation = {x=0, y=0, z=180},
+		position = {x=0, y=0.0, z=-0.66},
+		scale = rescale,
+		click_function = "doNothing",
+		function_owner = self
+	})
+	self.createButton({
+		width = 0,
+		height = 0,
+		font_size = 60,
+		label = "Please click 'Update UI' after all\nplayers have chosen a faction.",
+		font_color = "Red",
+		rotation = {x=0, y=0, z=180},
+		position = {x=0, y=0.0, z=0.6},
+		scale = rescale,
+		click_function = "doNothing",
+		function_owner = self
+	})
+	self.createButton({
+		width = 0,
+		height = 0,
+		font_size = 40,
+		label = "Description of the automation on the back",
+		rotation = {x=0, y=0, z=180},
+		position = {x=0, y=0.0, z=0.85},
+		scale = rescale,
+		click_function = "doNothing",
+		function_owner = self
+	})
+
+
+
+end
+
+function doNothing()
+	return false
+end
+
+--------------------------------------------------------------------------------
+-------------------------------- MAIN ------------------------------------------
+--------------------------------------------------------------------------------
+
+function onStrategyCardButtonClicked(params)
+	assert(type(params.player) == 'string')
+	assert(type(params.strategyCard) == 'string')
+	assert(type(params.value) == 'string')
+
+	-- Player MUST click the button before automator takes any actions.
+	if not _active then
+		return
+	end
+
+	local card = string.match(params.strategyCard, "(.*)_.*")
+	local action = string.gsub(params.strategyCard, card.."_", "")
+	local color = params.player
+	local option = params.value
+
+	local secondarySuccessful = false
+
+	--log("Card:"..card.." Action:"..action .. " Option:"..option.. " Color:".. color)
+
+	--take care of ALL pass and close
+	if (action == "close") or (action == "pass") or (option == "close") then
+		if action == "Popup" then
+			_closePopupUi(color, card)
+		else
+			_closeMenu(color, card)
+		end
+		return
+	end
+
+	-- all secondary actions consume a strategy token (except leadership).
+	-- EXCEPTION: if player has scepter of emelpar or is has mahact agent available
+	-- or has Yssaril agent available with mahact agent in game.
+	-- would be nice to have alt key to choose to use alternative, but not possible in xml buttons.
+	local capitalizedCardName = string.gsub(card, "^%l", string.upper)
+
+	if action == "secondary" and card ~= "leadership" then
+		local altPayment = _getStrategytokenAlternative(color)
+		if not altPayment then
+			secondarySuccessful = _consumeStrategyToken(color, capitalizedCardName)
+			if not secondarySuccessful then
+				return  -- consumeStrategyToken printed the error message
+			end
+		else
+			_openPopupUi(color, color..card.."SecondaryPopup")
+			return
+		end
+	end
+
+	local constructionCommandToken = true
+	local localoption = option
+
+	if action == "secondaryPopup" then
+		action = string.gsub(action, "Popup", "")
+
+		local i,j
+		i,j = string.find(option," %[.*%]")
+		if i and i<j then
+			localoption = string.sub(option,1,i-1)
+			option = "A "..string.sub(option,i+2,j-1)
+		end
+
+		secondarySuccessful = _useStrategytokenAlternative(color, capitalizedCardName, localoption)
+		if secondarySuccessful then
+			_closePopupUi(color, color..card.."SecondaryPopup")
+		end
+	end
+
+	-------------------------- Diplomacy ---------------------------------------
+	-------------------------- warfare -----------------------------------------
+	if (card == "diplomacy") or (card == "warfare") then
+		-- only keep open if secondary was not successful
+		if (action == "secondary") and (not secondarySuccessful) then
+			return
+		else
+			_closeMenu(color, card)
+			return
+		end
+	end
+
+	-------------------------- Leadership --------------------------------------
+
+	if card == "leadership" then
+		if action == "primary" then
+			_dealLeadershipCommandTokens(color, 3, {x=0,y=0,z=-1}, 'Leadership')
+		elseif action == "secondary" then
+			_dealLeadershipCommandTokens(color, option, {x=0,y=0,z=0}, 'Leadership')
+			_closeMenu(color, card)
+		end
+		return
+	end
+
+	-------------------------- Politics ----------------------------------------
+
+	-- we have the actions primary, secondary, and popup
+	if card == "politics" then
+		-- assign Speaker Button opens Popup
+		if (action == "primary") and (option == "Politics Primary") then
+			_openPopupUi(color, card.."Popup")
+			return
+			-- this is the button "Both Top/Both Bottom/One Each"
+		elseif (action == "primary") then
+			_closeMenu(color, card)
+		end
+		--popup has actions "close" and "primary"
+		if (action == "Popup") then
+			if option == "close" then
+				_closeMenu(color, card.."Popup")
+			else
+				-- primary passes "self" or COLOR as option
+				local success = _assignSpeaker(color, option)
+				if success then
+					_dealPoliticsActionCards(color)
+					_dealPoliticsAgendas(color)
+
+					_closePopupUi(color, card.."Popup")
+				end
+			end
+		end
+		if (action == "secondary") and secondarySuccessful then
+			_dealPoliticsActionCards(color)
+			_closeMenu(color, card)
+		end
+		return
+	end
+
+	-------------------------- Construction ------------------------------------
+
+	if card == "construction" then
+		local constructionSuccessful = false
+		local tokenSet = {}
+
+		if action == "primary" then
+			if option == "a Space Dock and a PDS" then
+				tokenSet = {"PDS","Space Dock"}
+			else
+				tokenSet = {"PDS","PDS"}
+			end
+			constructionSuccessful = _allocateConstructionUnits(color, tokenSet)
+		end
+		if (action == "secondary") and secondarySuccessful then
+			tokenSet = {string.sub(option, 3, -1)}
+
+			-- if player is using "Jae Mir Kan" or "Ssruu" no longer draw the command token from reinforcements
+			if not ((localoption == "Jae Mir Kan") or (localoption == "Ssruu")) then
+				table.insert(tokenSet, 1, "Command Token")
+			end
+			constructionSuccessful = _allocateConstructionUnits(color, tokenSet)
+		end
+		if constructionSuccessful then
+			_closeMenu(color,card)
+		end
+		return
+	end
+
+	--------------------------  Trade ------------------------------------------
+
+	if card == "trade" then
+		if action == "primary" then
+			--primary passes options "Trade Primary" or COLOR
+			if option == "Trade Primary" then
+				_gain3Tradegoods(color)
+				_refreshCommodities(color)
+			else
+				_refreshCommodities(option)
+			end
+		elseif (action == "secondary") and secondarySuccessful then
+			_refreshCommodities(color)
+			_closeMenu(color, card)
+		end
+		return
+	end
+
+	-------------------------- Technology --------------------------------------
+
+	if card == "technology" then
+		-- we only have action == "generic" to work with here.
+
+		if action == "primary" or ((action == "secondary") and secondarySuccessful) then
+			_openPopupUi(color, "technologyPopup")
+			_closeMenu(color, card)
+		end
+
+		if action == "generic" then
+			-- passes the tech name as option
+			-- option "Faction Tech" opens the faction tech Popup COLORtechnologyPopup
+			if option == "Faction Tech" then
+				_openPopupUi(color, color.."technologyPopup")
+			end
+			-- picks the tech card and takes care of necro command tokens
+			queueResearchTech(color, option)
+		elseif action == "Popup" and option == "close" then
+			_closeMenu(color, color..card.."Popup")
+		end
+		return
+	end
+
+	-------------------------- Imperial ----------------------------------------
+
+	if card == "imperial" then
+		-- actions "primary", "secondary"
+		if action == "primary" then
+			--options ~"gains 1 vp from controlling Mecatol Rex", "Imperial Primary"
+			if string.find(option, "Mecatol Rex") then
+				-- maybe outsource checking to separate function to not inflate the code?
+				if not _isObjectOwner(color, "Mecatol Rex") then
+					_safeBroadcastToColor("Imperial: " .. color .. " does have Mecatol Rex planet card, not scoring.", color, "Red")
+				else
+					broadcastToAll("Imperial: " .. color .. " scores 1 VP for Mecatol Rex", color)
+					_closeMenu(color, card)
+				end
+			else
+				-- only called if "Mecatol Rex" not clicked.
+				if (not _dontDealSecrets) then
+					_dealImperialSecret(color)
+				end
+				_closeMenu(color, card)
+			end
+		elseif (action == "secondary") and secondarySuccessful then
+			if (not _dontDealSecrets) then
+				_dealImperialSecret(color)
+			end
+			_closeMenu(color, card)
+		end
+		return
+	end
+end
+
+------------------------------ Custom UI ---------------------------------------
+
+function _openPopupUi(color, option)
+	assert(type(color) == "string")
+	assert(type(option) == "string")
+
+	if (UI.getAttributes(option) == nil) then
+		return
+	end
+
+	local vis = UI.getAttribute(option, "visibility")
+	local act = UI.getAttribute(option, "active")
+	if vis == "" or vis == nil then
+		vis = color
+		assert(act~="true", option .. " is active but not visible")
+	else
+		local i,j = string.find(vis, color)
+		if i ~= nil and j ~= nil then
+			assert(act=="true", option .. " is visible but not active")
+		end
+		vis = vis .. "|" .. color
+	end
+
+	UI.setAttribute(option, "visibility", vis)
+	if (act == nil) or (act == "false") then
+		UI.setAttribute(option, "active", "true")
+		act = "true"
+	end
+end
+
+function _closePopupUi(color, option)
+	assert(type(color) == "string")
+	assert(type(option) == "string")
+	if (UI.getAttributes(option) == nil) then
+		return
+	end
+	_closeMenu(color, option)
+end
+
+-- closeMenu (just like in global), but closes all associated Popups
+-- if the card is a Popup, we do not want to reset the visibility for all,
+-- because we only make the Popups selectively visible to players.
+function _closeMenu(color, card)
+	local i, j = string.find(card, "Popup")
+	local Popup = false
+	if i ~= nil and j ~= nil then
+		Popup = true
+		if (UI.getAttributes(card) == nil) then
+			return
+		end
+	end
+
+	local vis = UI.getAttribute(card, "visibility")
+	if vis == nil or vis == "" then
+		return
+	end
+
+	local newVis = vis
+
+	local i, j = string.find(vis, color)
+	local l = string.len(vis)
+	if i ~= nil and j ~= nil then
+		if i == 1 then
+			if j == l then
+				newVis = ""
+			else
+				newVis = string.sub(vis,j+2,l)
+			end
+		else
+			if j == l then
+				newVis = string.sub(vis,1,i-2)
+			else
+				newVis = string.sub(vis,1,i-1) .. string.sub(vis,j+2,l)
+			end
+		end
+	end
+	if newVis == "" then
+		UI.setAttribute(card, "active", "false")
+		if not Popup then
+			broadcastToAll("All players have responded", "Black")
+		end
+	end
+	UI.setAttribute(card, "visibility", newVis)
+end
+
+------------------------------ build custom UI ---------------------------------
+local _defaultLayoutBackup = false
+
+function updateUiOnClick(player, option, alt)
+	_active = true
+	local colorTable = {}
+	local factionColors = {}
+	local missingFactionColors = false
+
+	-- Get all player zone colors as eligible for color choices (player may be
+	-- running late or disconnected, still include their zone).  Only register
+	-- faction techs for players with factions, warn about missing factions.
+	for _, color in pairs(_zoneHelper.zones()) do
+		local faction = _factionHelper.fromColor(color)
+		if faction then
+			table.insert(factionColors, color)
+		else
+			missingFactionColors = missingFactionColors or {}
+			table.insert(missingFactionColors, color)
+		end
+		table.insert(colorTable, color)
+	end
+
+	if missingFactionColors then
+		local colors = table.concat(missingFactionColors, ', ')
+		broadcastToAll('Warning: no faction for ' .. colors .. '. Please repeat button click afterward to enable their faction technologies', 'Red')
+	end
+
+	local layout = UI.getXmlTable()
+
+	-- save and reset visibility for default layout
+	if not _defaultLayoutBackup then
+		_defaultLayoutBackup = _deepcopy(layout)
+		for _,menu in ipairs(_defaultLayoutBackup) do
+			menu['attributes']['visibility'] = ""
+			menu['attributes']['active'] = "false"
+		end
+	end
+
+	-- adds the default "Primary, Secondary, Pass, Close" menu moves the research menu to technologyPopup
+	-- removes PoK Buttons from tech UI if not playing with PoK
+	layout = _addTechnologyPrimarySecondary(layout)
+
+	-- adds the faction tech Popup menu
+	layout = _addAutomationTechPopup(layout, factionColors)
+
+	-- adds on "Assign Speaker" button to Politics menu which opens the politics Popup
+	layout = _addAutomationPoliticsPopup(layout)
+
+	-- adds a choice between scoring mecatol rex and drawing a secret
+	layout = _addImperialPrimary(layout)
+
+	-- adds a Popup for alternative payment methods for secondaries
+	layout = _addSecondaryPopup(layout, factionColors)
+
+	-- adjusts the colors Table for the assign speaker politicsPopup
+	layout = _updateColorSelector(layout, "politicsPopup", colorTable)
+
+	-- adjusts the colors Table for the trade strategycard
+	layout = _updateColorSelector(layout, "trade", colorTable)
+
+	UI.setXmlTable(layout)
+	broadcastToAll("Updated strategy card menus for automator", "Yellow")
+end
+
+function _addTechnologyPrimarySecondary(layout)
+	-- Moves the default technology menu to technologyPopup and
+	-- replaces it with generic "Primary, Secondary, Pass, Close"
+	-- which opens the technologyPopup on demand.
+	-- If PoK not selected, remove PoK tech buttons from UI.
+	local technologyIndex = nil
+
+	for majorIndex,menu in ipairs(layout) do
+		if menu["attributes"]["id"] == "technology" then
+			technologyIndex = majorIndex
+		end
+	end
+	if not technologyIndex then
+		error("Add technology primary secondary: No technology item found in ui", 'Red')
+		return layout
+	end
+
+	for _,o in pairs(layout[technologyIndex]["children"]) do
+		if o["attributes"]["id"] == "technology_secondary" then
+			return layout
+		end
+	end
+
+	if not _setupHelper.getPoK() then
+		-- remove pok tech from ui
+		local _techSourceSet = _technologyHelper.getTechSourceSet()
+		local techlist = {["greenTechs"] = true, ["yellowTechs"] = true, ["redTechs"] = true, ["blueTechs"] = true}
+		for _,o in pairs(layout[technologyIndex]["children"]) do
+			local counter = 1
+			if o["tag"] == "HorizontalLayout" and techlist[o["attributes"]["id"]] then
+				local horizontalKeep = {}
+				for ibutton,button in ipairs(o["children"]) do
+					local techName = button['attributes']['onClick']
+					local source = _techSourceSet[string.sub(techName, 10, -2)]
+					if not (source == "PoK") then
+						horizontalKeep[counter] = button
+						counter = counter + 1
+					end
+				end
+				o["children"] = _deepcopy(horizontalKeep)
+			end
+		end
+	end
+
+
+	-- move the researchTechnology menu to technologyPopup
+	local techMenu = _deepcopy(layout[technologyIndex])
+	techMenu['attributes']['id'] = 'technologyPopup'
+
+	local counter = 1
+	local keepButtons = {}
+	-- remove the "Pass" option, as players may already have spent a strategy token to open this menu
+	-- also prevent "technologyPopup(close) from closing base window"
+	for _,child in ipairs(techMenu["children"]) do
+		if not (child["attributes"]["id"] == "technology_pass") then
+			if (child["attributes"]["id"] == "technology_close") then
+				child["attributes"]["id"] = "technologyPopup_close"
+				child["attributes"]["onClick"] = "genericSilent(close)"
+			end
+			keepButtons[counter] = child
+			counter = counter + 1
+		end
+
+	end
+	techMenu["children"] = keepButtons
+	-- default technology menu is replaced by simple "Primary, Secondary, Pass, Close" menu
+	layout[technologyIndex] = _customLayout["simpleTechnologyMenu"]
+	table.insert(layout, #layout - 1, techMenu)
+
+	return layout
+end
+
+-- adds a menu entry color..card..SecondaryPopup for each combination in game.
+-- each entry consists of all alternatives that could possibly be available to the color,
+-- based on faction, factions in game and PoK.
+function _addSecondaryPopup(layout, colorTable)
+	assert(type(colorTable) == 'table')
+
+	local function _getPopupButton(color, card, option)
+		local secondaryPopupButton = _deepcopy(_customLayout['secondaryPopupButton'])
+		for key,attr in pairs(secondaryPopupButton["attributes"]) do
+			secondaryPopupButton["attributes"][key] = string.gsub(attr, "COLORPLACEHOLDER", color)
+			secondaryPopupButton["attributes"][key] = string.gsub(secondaryPopupButton["attributes"][key], "CARDPLACEHOLDER", card)
+			secondaryPopupButton["attributes"][key] = string.gsub(secondaryPopupButton["attributes"][key], "OPTIONPLACEHOLDER", option)
+		end
+		return _deepcopy(secondaryPopupButton)
+	end
+
+	local function _buildPopupTable(params)
+		local color = params['color']
+		local card = params['card']
+		local secondaryPopup = _deepcopy(_customLayout["secondaryPopupTable"])
+		secondaryPopup["attributes"].id = string.gsub(secondaryPopup["attributes"].id, "COLORPLACEHOLDER", color)
+		secondaryPopup["attributes"].id = string.gsub(secondaryPopup["attributes"].id, "CARDPLACEHOLDER", card)
+		for _,menu in ipairs(secondaryPopup["children"]) do
+			for key,attr in pairs(menu["attributes"]) do
+				attr = string.gsub(attr, "COLORPLACEHOLDER", color)
+				if key == 'text' then
+					attr = string.gsub(attr, "CARDPLACEHOLDER", string.gsub(card, "^%l", string.upper))
+				else
+					attr = string.gsub(attr, "CARDPLACEHOLDER", card)
+				end
+				menu["attributes"][key] = attr
+			end
+		end
+
+		for option,val in pairs(params["options"]) do
+			if val then
+				local secondaryPopupButton = {}
+
+				-- add two rows of buttons for construction to choose PDS or Space Dock.
+				-- choice is sent as option onClick("Jae Mir Kan (PDS)").
+				-- This is separated in onStrategyCardButtonClicked into localoption "Jae Mir Kan" and option "A PDS" for secondary activation.
+				if card == 'construction' then
+					local horizontalLayout = {
+						tag = "HorizontalLayout",
+						attributes = { id = "constructionSecondaryPopup" },
+						children = {}
+					}
+					for _,addoption in ipairs({" [PDS]"," [Space Dock]"}) do
+						table.insert(horizontalLayout['children'], _deepcopy(_getPopupButton(color,card,option..addoption)))
+					end
+					secondaryPopupButton = _deepcopy(horizontalLayout)
+
+					-- otherwise only the payment alternative "Jae Mir Kan" is passed as option
+				else
+					secondaryPopupButton = _deepcopy(_getPopupButton(color,card,option))
+				end
+
+				-- pairs() does not guarantee order. pos sets 'Strategy Token' option to top, others below
+				local pos = #secondaryPopup["children"]
+				if (option == "Strategy Token") then
+					pos = 2
+				end
+				table.insert(secondaryPopup["children"],pos,secondaryPopupButton)
+			end
+		end
+		return secondaryPopup
+	end
+
+	local function insertAll(option, optionTable)
+		for _,color in ipairs(colorTable) do
+			optionTable[color][option] = true
+		end
+	end
+
+	local optionsForColor = {}
+	for _,color in ipairs(colorTable) do
+		optionsForColor[color] = {["Strategy Token"] = true}
+	end
+	if _setupHelper.getPoK() then
+		insertAll('Scepter of Emelpar', optionsForColor)
+	end
+
+	local cardOptions = {["Jae Mir Kan"]= {}, ["Ssruu"]= {}}
+	local promissories = {['Acquiescence Ω'] = {}}
+	local JaeMirKanFound = false
+
+	-- search for all possible options availabe to a color and add them to optionsForColor
+	for _, object in ipairs(getAllObjects()) do
+		local name = object.getName()
+		-- add winnu promissory note
+		if (object.tag == 'Deck') and (string.match(name, "Notes")) then
+			for _,cardObject in ipairs(object.getObjects()) do
+				if promissories[cardObject.name] then
+					insertAll(cardObject.name, optionsForColor)
+				end
+			end
+		end
+		if (object.tag == "Card") then
+			if (cardOptions[name]) then
+				JaeMirKanFound = JaeMirKanFound or (name == "Jae Mir Kan")
+				local owner = _zoneHelper.zoneFromPosition(object.getPosition())
+				if owner then
+					optionsForColor[owner][name] = true
+				end
+			end
+			if promissories[object.getName()] then
+				insertAll(object.getName(), optionsForColor)
+			end
+		end
+	end
+	for _,options in ipairs(optionsForColor) do
+		options["Ssruu"] = JaeMirKanFound and options["Ssruu"]
+	end
+
+	local cards = {"diplomacy","politics","construction","trade","warfare","technology","imperial"}
+
+	-- for each card and color add the respective popup
+	for _,card in ipairs(cards) do
+		for _,color in ipairs(colorTable) do
+			local params = {['color']= color, ['card']= card, ['options']= {}}
+			for option, value in pairs(optionsForColor[color]) do
+				if value then
+					params['options'][option] = true
+				end
+			end
+
+			local popupLayout = _buildPopupTable(params)
+
+			local inserted = false
+			for index,menu in ipairs(layout) do
+				if menu["attributes"]["id"] == (color..card.."SecondaryPopup") then
+					inserted = true
+					-- updates existing COLORtechnologyPopup table in case of changed faction? Just to be sure...
+					layout[index] = _deepcopy(popupLayout)
+					break
+				end
+			end
+			if not inserted then
+				table.insert(layout, _deepcopy(popupLayout))
+			end
+		end
+	end
+	return layout
+end
+
+function _addAutomationTechPopup(layout, colorTable)
+	-- finds the faction technology from faction.factionTech and adds a popup that opens on click of "Faction Tech" button.
+	-- the popup has the id color.."technologyPopup", so that each faction has its own factiontech popup
+	assert(type(colorTable) == "table")
+
+	local function _buildPopupTable(color)
+		local factionPopup = {}
+		factionPopup = _deepcopy(_customLayout["technologyPopupTable"])
+		factionPopup["attributes"].id = string.gsub(factionPopup["attributes"].id, "COLORPLACEHOLDER", color)
+		for i,entry in ipairs(factionPopup["children"]) do
+			if entry["attributes"].text == "Close Menu" then
+				entry["attributes"].id = string.gsub(entry["attributes"].id, "COLORPLACEHOLDER", color)
+			end
+		end
+		local faction = _factionHelper.fromColor(color)
+		if not faction then
+			broadcastToAll("_addAutomationTechPopup: no faction found for " .. color, "Red")
+			return factionPopup
+		end
+
+		if not faction.factionTech then
+			broadcastToAll("_addAutomationTechPopup: no factionTechnology found for " .. color, "Red")
+			return factionPopup
+		end
+
+		for _,factionTech in ipairs(faction.factionTech) do
+			local techPopupButton = _deepcopy(_customLayout["technologyPopupButton"])
+			for key,attr in pairs(techPopupButton["attributes"]) do
+				techPopupButton["attributes"][key] = string.gsub(attr, "TECHPLACEHOLDER", factionTech)
+			end
+			table.insert(factionPopup["children"],2,techPopupButton)
+		end
+
+		return factionPopup
+	end
+
+	for _,color in ipairs(colorTable) do
+		local inserted = false
+		for index,menu in ipairs(layout) do
+			if menu["attributes"]["id"] == (color.."technologyPopup") then
+				inserted = true
+				-- updates existing COLORtechnologyPopup table in case of changed faction? Just to be sure...
+				layout[index] = _buildPopupTable(color)
+				break
+			end
+		end
+		if not inserted then
+			table.insert(layout, _buildPopupTable(color))
+		end
+	end
+
+	return layout
+end
+
+
+-- adds a "Assign Speaker" Button. This opens the politicsPopup.
+function _addAutomationPoliticsPopup(layout)
+	local politicsIndex = nil
+
+	for majorIndex,menu in ipairs(layout) do
+		if menu["attributes"]["id"] == "politicsPopup" then
+			return layout
+		end
+		if menu["attributes"]["id"] == "politics" then
+			politicsIndex = majorIndex
+		end
+	end
+
+	if not politicsIndex then
+		error("Add politics popup: No politics item found in ui", 'Red')
+		return layout
+	end
+
+	-- add the Assign Speaker Button which opens the Popup
+	table.insert(layout[politicsIndex]["children"], 2, _customLayout["assignSpeakerButton"])
+	-- add the Popup itself
+	table.insert(layout, #layout+1, _customLayout["politicsPopupTable"])
+
+	return layout
+end
+
+
+function _addImperialPrimary(layout)
+	-- adds the option to either score a point for mecatol rex (does nothing) or draw a secret
+	local imperialIndex
+	for majorIndex,menu in ipairs(layout) do
+		if menu["attributes"]["id"] == "imperial" then
+			imperialIndex = majorIndex
+			break
+		end
+	end
+
+	if not imperialIndex then
+		error("Add imperial primary : No imperial item found in ui", 'Red')
+		return layout
+	end
+
+	local insertIndex = nil
+	local keepTable = {}
+	for minorIndex,menu in ipairs(layout[imperialIndex]["children"]) do
+		if not (menu["attributes"]["id"] == "imperial_primary") then
+			table.insert(keepTable, menu)
+		else
+			insertIndex = minorIndex
+		end
+	end
+
+	if not insertIndex then
+		error("Add imperial primary: imperial_primary not found. No Substitution possible")
+	end
+
+	table.insert(keepTable, insertIndex, _customLayout["imperial"])
+	layout[imperialIndex]["children"] = keepTable
+	return layout
+end
+
+function _updateColorSelector(layout, element, colorTable)
+	assert(type(element) == "string")
+	local keepTable = {}
+	local elementIndex = 0
+
+	-- find the table to modify and copy all retained elements to keepTable.
+	-- keepTable replaces the old table by selectively not selecting colorSelector elements
+	for index,menu in ipairs(layout) do
+		if menu["attributes"]["id"] == element then
+			elementIndex = index
+			for minorIndex,child in ipairs(layout[elementIndex]["children"]) do
+				-- keep these entries
+				if not (child["attributes"]["id"] == "colorSelector") then
+					table.insert(keepTable, #keepTable+1, child)
+				end
+			end
+			break
+		end
+	end
+
+	local function _getColorButton(element, color)
+		local yourbutton = _deepcopy(_customLayout["colorButton"])
+		local attributes = _deepcopy(_customLayout[element.."Attributes"])
+		for key,value in pairs(attributes) do
+			yourbutton["attributes"][key] = value
+		end
+		for key,value in pairs(yourbutton["attributes"]) do
+			yourbutton["attributes"][key] = string.gsub(value, "COLORPLACEHOLDER", color)
+		end
+		return yourbutton
+	end
+
+	local newColorSelector = {}
+	local tempSelector = _deepcopy(_customLayout["colorSelector"])
+
+	-- do 3 items per row, except for 4 players. There build 2x2
+	local maxButtonsPerRow = 2
+	if #colorTable == 4 then
+		maxButtonsPerRow = 1
+	end
+
+	local colCounter = 1
+
+	for icolor,color in ipairs(colorTable) do
+		local mybutton = _getColorButton(element, color)
+
+		tempSelector["children"][colCounter] = _deepcopy(mybutton, {})
+		colCounter = colCounter + 1
+		--if in last row or row full
+		if (icolor == #colorTable) or ((icolor-1)%3 == maxButtonsPerRow) then
+			table.insert(newColorSelector, #newColorSelector+1, _deepcopy(tempSelector))
+			colCounter = 1
+			tempSelector =  _deepcopy(_customLayout["colorSelector"])
+		end
+	end
+
+	-- position 3 is hardcoded!!! if this were to change somehow we have a problem!
+	for _,newColumn in pairs(newColorSelector) do
+		table.insert(keepTable, 3, newColumn)
+	end
+	layout[elementIndex]["children"] = keepTable
+
+	return layout
+end
+
+function onObjectEnterContainer(bag, enter_object)
+	--restore the default UI layout
+	if enter_object.getName() == self.getName() then
+		if _defaultLayoutBackup then
+			UI.setXmlTable(_defaultLayoutBackup)
+		end
+	end
+end
+
+----------------------------- Leadership ---------------------------------------
+
+function _dealLeadershipCommandTokens(color, count, dpos, strategyCardName)
+	-- count is the number of command tokens to allocate,
+	-- dz is a global offset, so that primary and secondary command tokens are not stacked (for the primary player)
+	assert(type(dpos)=="table")
+
+	local faction = _factionHelper.fromColor(color)
+	if not faction then
+		broadcastToAll('Allocate command tokens: no faction for ' .. color, 'Red')
+		return
+	end
+
+	local commandTokensBag = _getByName(faction.tokenName.." Command Tokens Bag", "Bag")
+
+	if not commandTokensBag then
+		broadcastToAll('Allocate command tokens: missing ' .. faction.tokenName .. ' Command Tokens Bag', 'Red')
+		return
+	end
+
+	local commandSheet = getObjectFromGUID(faction.commandSheetGuid)
+	if not commandSheet then
+		broadcastToAll('Allocate command tokens: missing ' .. color .. ' Command Sheet', 'Red')
+		return
+	end
+
+	local pos = { x = -0.1, y = 1, z = -5 }
+	local dx = -0.4
+
+	-- Do the alloation.  Watch out for an empty bag!
+	local gained = 0
+	for i = 1, count do
+		if commandTokensBag.getQuantity() == 0 then
+			_safeBroadcastToColor((strategyCardName or '') .. ': ' .. color .. ' out of Command Tokens. Only able to gain ' .. i .. ' tokens. ', color, "Red")
+			break
+		end
+		local token = commandTokensBag.takeObject({
+			position = commandSheet.positionToWorld({
+				x = pos.x + (i * dx) + dpos.x,
+				y = pos.y + 1 + (i * 0.25) + dpos.y,
+				z = pos.z + dpos.z
+			})
+		})
+		_strategyCardHelper._addUnallocatedCommandToken(token, color)
+		gained = gained + 1
+	end
+
+	if strategyCardName then
+		_safeBroadcastToColor(strategyCardName .. ': ' .. color .. ' gained ' .. gained .. ' Command Tokens.', color, color)
+	end
+end
+
+------------------------------ secondary ---------------------------------------
+
+function _getStrategytokenAlternative(color)
+	assert((type(color) == 'string'))
+
+	local faction = _factionHelper.fromColor(color)
+	if not faction then
+		broadcastToAll('Consume Strategy tokens: no faction for ' .. color, 'Red')
+		return
+	end
+
+	-- Find the command tokens bag and alternate payment methods.
+	local cardToObjects = {
+		['Jae Mir Kan'] = {},
+		['Scepter of Emelpar'] = {},
+		['Ssruu'] = {},
+		['Acquiescence Ω'] = {},
+	}
+	for _, object in ipairs(getAllObjects()) do
+		local name = object.getName()
+		local searchList = (object.tag == 'Card') and cardToObjects[name]
+		if searchList then
+			table.insert(searchList, object)
+		end
+	end
+	-- Is a payment alternative available?  If so, tell the player about it
+	-- but go ahead and pay the strategy token normally.  If the player chooses
+	-- they can remove the spent token and use the alternative instead.
+	local altPayment = {}
+	for _, card in ipairs(cardToObjects['Scepter of Emelpar']) do
+		local zoneColor = _zoneHelper.zoneFromPosition(card.getPosition())
+		if zoneColor == color and (not card.is_face_down) then
+			table.insert(altPayment, '"Scepter of Emelpar"')
+			break
+		end
+	end
+	for _, card in ipairs(cardToObjects['Jae Mir Kan']) do
+		local zoneColor = _zoneHelper.zoneFromPosition(card.getPosition())
+		if zoneColor == color and (not card.is_face_down) then
+			table.insert(altPayment, '"Jae Mir Kan"')
+			break
+		end
+	end
+	for _, card in ipairs(cardToObjects['Ssruu']) do
+		local zoneColor = _zoneHelper.zoneFromPosition(card.getPosition())
+		local jaeMirKanAvailable = #cardToObjects['Jae Mir Kan'] > 0  -- does not need to be face up
+		if zoneColor == color and (not card.is_face_down) and jaeMirKanAvailable then
+			table.insert(altPayment, '"Ssruu" + "Jae Mir Kan"')
+			break
+		end
+	end
+	local ownerSelf = false
+	for _, factionNote in ipairs(faction.promissoryNotes) do
+		if "Acquiescence Ω" == factionNote then
+			ownerSelf = true
+		end
+	end
+	if not ownerSelf then
+		for _, card in ipairs(cardToObjects['Acquiescence Ω']) do
+			local zoneColor = _zoneHelper.closestZone(card.getPosition())
+			if (zoneColor == color) and (not string.match(card.getName(), color)) and (not card.is_face_down) then
+				table.insert(altPayment, '"Acquiescence  Ω"')
+				break
+			end
+		end
+	end
+	if #altPayment > 0 then
+		return altPayment
+	else
+		return false
+	end
+end
+
+
+function _consumeStrategyToken(color, strategyCard)
+	assert(type(color) == 'string' and type(strategyCard) == 'string')
+
+	local faction = _factionHelper.fromColor(color)
+	if not faction then
+		broadcastToAll('Consume Strategy tokens: no faction for ' .. color, 'Red')
+		return
+	end
+
+	-- Dont consume a strategy token for Trade with the "Master of Trade" ability
+	if strategyCard == "Trade" then
+		local abilitiesSet = {}
+		for _, ability in ipairs(faction.abilities) do
+			abilitiesSet[ability] = true
+		end
+		if abilitiesSet['Masters of Trade'] then
+			_safeBroadcastToColor(strategyCard .. ": ".. color .. " has the Master of Trade ability. Not using a strategy token." , color, color)
+			return true
+		end
+	end
+
+	-- Find the command tokens bag.
+	local commandTokensBagName = faction.tokenName .. ' Command Tokens Bag'
+	local commandTokensBag = _getByName(commandTokensBagName, 'Bag')
+
+	if not commandTokensBag then
+		broadcastToAll('Consume Strategy tokens: missing ' .. faction.tokenName .. ' Command Tokens Bag', 'Red')
+		return false
+	end
+
+	local commandSheet = getObjectFromGUID(faction.commandSheetGuid)
+	if not commandSheet then
+		broadcastToAll('Consume Strategy tokens: missing ' .. color .. ' Command Sheet', 'Red')
+		return false
+	end
+
+	-- todo: change cast and use sheet.positionToLocal instead. check if z > 0 or < 0 or something.
+	local commandTokenName = faction.tokenName .. " Command Token"
+	for _,object in ipairs(getAllObjects()) do
+		local name = object.getName()
+		if name == commandTokenName then
+			local rot = object.getRotation().z
+			if rot < 90 or rot > 270 then
+				local pos = commandSheet.positionToLocal(object.getPosition())
+				if pos.x < 2 and pos.x > -4 and pos.z > -0.3 and pos.z < 3.5 then
+					commandTokensBag.putObject(object)
+					_safeBroadcastToColor(strategyCard .. ": removed one Command Token from " .. color .. "'s strategy pool.", color, color)
+					return true
+				end
+			end
+		end
+	end
+
+	_safeBroadcastToColor(strategyCard .. ": no command token in " .. color .. "'s strategy pool.", color, "Red")
+	return false
+end
+
+function _useStrategytokenAlternative(color, strategyCard, option)
+	assert(type(color) == "string")
+	assert(type(strategyCard) == "string")
+	assert(type(option) == "string")
+
+	local legaloptions = {"Jae Mir Kan", "Ssruu", "Acquiescence Ω", "Scepter of Emelpar", "Strategy Token"}
+	if option == "Strategy Token" then
+		return _consumeStrategyToken(color, strategyCard)
+	elseif option == "Acquiescence Ω" then
+		local success = _returnPromissoryNote(color, option)
+		if success then
+			broadcastToAll(color .. " resolved and returned ".. option..".", color)
+		end
+		return success
+	else
+		local object = _getByName(option, 'Card')
+		if (object ~= nil) and(not object.is_face_down) then
+			object.highlightOn("Yellow" , 3)
+			_safeBroadcastToColor(strategyCard .. ": " .. color .. " used " .. option .. " instead of a strategy Token.", color, color)
+			object.flip()
+			return true
+		else
+			_safeBroadcastToColor(strategyCard .. ": " .. option .. " is not available to you.", color, "Red")
+			return false
+		end
+	end
+	return false
+end
+
+-- Blindly return promissory note. Handle checking and messaging by caller.
+function _returnPromissoryNote(color, promissoryName)
+	assert(type(color) == "string")
+	assert(type(promissoryName) == "string")
+	local object = _getByName(promissoryName, 'Card')
+	if object then
+		object.setPosition(object.getPosition() + vector(0, 20, 0))
+		local discardParams = {
+			guid = object.getGUID(),
+			name = object.getName(),
+		}
+		_deckHelper.discardCard(discardParams)
+		return true
+	end
+	return false
+end
+
+-------------------------------- Politics --------------------------------------
+
+function _moveSpeakerToken(color)
+	local speakerToken = nil
+	speakerToken = _getByName("Speaker Token")
+	if not speakerToken then
+		broadcastToAll('Assign speaker token: missing Speaker Token', 'Red')
+		return
+	end
+
+	local zone = _zoneHelper.zoneAttributes(color)
+	if not zone then
+		broadcastToAll('Assign speaker token: missing ' .. color .. ' player area', 'Red')
+		return
+	end
+
+	local loc = _getSpeakerLoc(zone)
+	local rot = zone.rotation
+
+	speakerToken.setPositionSmooth(loc, false, true)
+	speakerToken.setRotationSmooth(rot, false, true)
+
+	broadcastToAll(color .. " is the new speaker.", color)
+	return true
+end
+
+-- Get corner of zone closest to the system.
+-- also tested for 7 and 8 players
+function _getSpeakerLoc(zone)
+	local polygons = zone.polygon
+
+	-- get any z value closest to the system map.
+	local minz = math.abs(polygons[1][2])
+	local i_minz = 1
+	for k,poly in ipairs(polygons) do
+		if math.abs(poly[2]) < minz then
+			minz = math.abs(poly[2])
+			i_minz = k
+		end
+	end
+	local z = polygons[i_minz][2]
+
+
+	-- get the x value closest to the system map, with the matching z value.
+	local minx = math.abs(polygons[i_minz][1])
+	local i_minx = 1
+	for k,poly in ipairs(polygons) do
+		if (z == poly[2]) and (math.abs(poly[1]) <= minx) then
+			minx = math.abs(poly[1])
+			i_minx = k
+		end
+	end
+	local x = polygons[i_minx][1]
+
+	-- shift the token slightly into the zone.
+	if z > 0 then z = z + 3 else z = z - 3 end
+	if x > 0 then x = x + 4 else x = x - 4 end
+
+	return {x=x ,y=2, z=z}
+end
+
+-- option can be "self" or target "COLOR".
+function _assignSpeaker(color, option)
+	local res
+	if option=="self" then
+		res = _moveSpeakerToken(color)
+	else
+		res = _moveSpeakerToken(option)
+	end
+	return res
+end
+
+function _dealPoliticsActionCards(color)
+	local counter = 2
+
+	local faction = _factionHelper.fromColor(color)
+	if not faction then
+		broadcastToAll('Deal Action Cards: no faction for ' .. color, 'Red')
+		return
+	end
+
+	local abilitiesSet = {}
+	for _, ability in ipairs(faction.abilities) do
+
+		abilitiesSet[ability] = true
+	end
+	if abilitiesSet['Scheming'] then
+		broadcastToAll("Scheming.", color)
+		counter = counter + 1
+	end
+
+	_deckHelper.deal({
+		deck = 'Actions',
+		count = counter,
+		color = color,
+	})
+end
+
+function _dealPoliticsAgendas(color)
+	_deckHelper.deal({
+		deck = 'Agenda',
+		count = 2,
+		color = color,
+	})
+end
+
+-------------------------------- Construction ----------------------------------
+
+function _allocateConstructionUnits(color, tokenTable)
+	-- takes selected units from bags and places them right of token containers
+	-- if a secondary action is taken, a command token is placed next to the allocated unit
+
+	assert(type(color) == "string")
+	assert(type(tokenTable) == "table")
+
+	local faction = _factionHelper.fromColor(color)
+	if not faction then
+		broadcastToAll('Allocate Construction tokens: no faction for ' .. color, 'Red')
+		return
+	end
+
+	local commandSheet = getObjectFromGUID(faction.commandSheetGuid)
+	if not commandSheet then
+		broadcastToAll('Allocate Construction tokens: missing ' .. color .. ' Command Sheet', 'Red')
+		return
+	end
+
+	local pos = { x = 15.5, y = 2, z = -9.7 }
+	local dx = 1
+	local posCommandToken = _deepcopy(pos)
+	posCommandToken.x = pos.x + 1.5
+	posCommandToken.z = pos.z + 5
+
+	for i,unitName in ipairs(tokenTable) do
+		if unitName == "Command Token" then
+			_dealLeadershipCommandTokens(color, 1, posCommandToken, false)
+		else
+			local tokensBag = _getByName(color.." " .. unitName, "Bag")
+			if not tokensBag then
+				broadcastToAll('Allocate Construction tokens: missing ' .. faction.tokenName .. ' Command Tokens Bag', 'Red')
+				return
+			end
+			-- Do the alloation.  Watch out for an empty bag!
+			if tokensBag.getQuantity() == 0 then
+				_safeBroadcastToColor(color .. ' has no strategy token to construct a ' .. unitName .. '. ', color, "Red")
+				return false
+			end
+			local token = tokensBag.takeObject({
+				position = commandSheet.positionToWorld({
+					x = pos.x + (i * dx),
+					y = 2,
+					z = pos.z
+				})
+			})
+			token.highlightOn("Yellow" , 3)
+		end
+	end
+
+	_safeBroadcastToColor("Allocated " .. color .. "'s constructed units", color, color)
+	return true
+end
+
+------------------------------------ Trade -------------------------------------
+
+function _gain3Tradegoods(color)
+	-- deals one 3xTradegoods token to color. Position on commandsheet is hardcoded.
+	local commoditiesBag = false
+	commoditiesBag = _getByName("x3 Commodities/Tradegoods Bag", "Infinite")
+
+	if not commoditiesBag then
+		broadcastToAll('Dealing Tradegoods: missing x1 Commodities/Tradegoods Bag', 'Red')
+		return
+	end
+
+	local faction = _factionHelper.fromColor(color)
+	if not faction then
+		broadcastToAll('Dealing Tradegoods: no faction for ' .. color, 'Red')
+		return
+	end
+
+	local commandSheet = getObjectFromGUID(faction.commandSheetGuid)
+	if not commandSheet then
+		broadcastToAll('Dealing Tradegoods: missing ' .. color .. ' Command Sheet', 'Red')
+		return
+	end
+
+	local rot = commandSheet.getRotation()
+	local token = commoditiesBag.takeObject({
+		position = commandSheet.positionToWorld({
+			--x = 0.57,
+			x = 1.2,
+			y = 2,
+			z = 1.7
+			--z = 2.13
+		}),
+		rotation= {x=rot.x, y=rot.y, z=180}
+	})
+	_safeBroadcastToColor(color .. " gained 3 Tradegoods", color, color)
+end
+
+function _refreshCommodities(color)
+	-- gets the number of commodities from the faction.commodities value
+	-- cache commodities bag. and while we're at it, maybe cache command token bags. and while we're at it, maybe cache everything else aswell.
+
+	local commoditiesBags = {
+		["x1 Commodities/Tradegoods"] = _getByName("x1 Commodities/Tradegoods Bag", "Infinite"),
+		["x3 Commodities/Tradegoods"] = _getByName("x3 Commodities/Tradegoods Bag", "Infinite")
+	}
+
+	for key,v in pairs(commoditiesBags) do
+		if not v then
+			broadcastToAll('Refresh commodities: missing ' .. key .. ' Bag.', 'Red')
+			return
+		end
+	end
+
+	local faction = _factionHelper.fromColor(color)
+	if not faction then
+		broadcastToAll('Refresh commodities: no faction for ' .. color, 'Red')
+		return
+	end
+
+	if not faction.commodities then
+		broadcastToAll("Refresh commodities: commodities not implemented for " .. color, "Red")
+		return
+	end
+
+	local factionSheet = getObjectFromGUID(faction.factionSheetGuid)
+	if not factionSheet then
+		broadcastToAll('Allocate command tokens: missing ' .. color .. ' Command Sheet', 'Red')
+		return
+	end
+
+	-- physics cast makes a table of all objects it hits. type=3 is a rectangle, shape to fit the commodities box.
+	local hitlist = Physics.cast({
+		origin = factionSheet.positionToWorld({x = -1.07, y = -1, z=0.3}),
+		direction = {0, 1, 0},
+		type = 3,
+		size = {3, 1, 1.8},
+		maxdistance = 0,
+		debug = false
+	})
+	-- remove all commodities hit.
+	for _, v in pairs(hitlist) do
+		local name = v.hit_object.getName()
+		if name == string.match(name, ".*Commodities/Tradegoods$") then
+			commoditiesBags[name].putObject(v.hit_object)
+		end
+	end
+
+	--callback for commodities.takeObject. Send to "promissedCommandSheet."
+	local promissedCommandSheet = false
+	local function sendToNewColor(obj)
+		local function doMove()
+			local pos = promissedCommandSheet.positionToWorld({
+				x = 0.5,
+				y = 4,
+				z = 2.0
+			})
+			pos = {
+				x = pos.x, -- + (math.random() - 0.5) * 2,
+				y = pos.y + math.random() * 2,
+				z = pos.z -- + (math.random() - 0.5) * 2
+			}
+			local rot = {
+				x = 0,
+				y = promissedCommandSheet.getRotation().y,
+				z = 180  -- trade good side
+			}
+			local collide = false
+			local fast = false
+			obj.setRotationSmooth(rot, collide, fast)
+			obj.setPositionSmooth(pos, collide, fast)
+		end
+		Wait.condition(
+			doMove,
+			function() return obj.resting end,
+			5,
+			doMove
+		)
+		return true
+	end
+
+	-- empty callback for commodities.takeObject
+	local localCallback = function() end
+
+	-- if someone has color's tradeagreement set callback to send commodities to promissoryNoteColor instead
+	local promissoryNoteColor = _getTradeAgreement(color)
+	if promissoryNoteColor then
+		local promissoryFaction = _factionHelper.fromColor(promissoryNoteColor)
+		if not promissoryFaction then
+			broadcastToAll('Dealing Tradegoods: no faction for promissory note holder ' .. promissoryNoteColor, 'Red')
+			return
+		end
+		promissedCommandSheet = getObjectFromGUID(promissoryFaction.commandSheetGuid)
+		localCallback = sendToNewColor
+	end
+
+	-- positions are relative to faction sheet
+	for i = 1,faction.commodities do
+		commoditiesBags["x1 Commodities/Tradegoods"].takeObject({
+			position = factionSheet.positionToWorld({
+				x = -0.8-(0.15*math.ceil(i/2)),
+				y = 2 + (i*0.01),
+				z = 0.25 + ((i+1)%2)*0.16
+			}),
+			rotation = factionSheet.getRotation(),
+			callback_function = localCallback
+		})
+	end
+
+	if promissoryNoteColor then
+		-- could have passed the guid of promissory note here,
+		-- but returnPromissoryNote uses _getByName() so lookup shouldn't be too bad
+		broadcastToAll(promissoryNoteColor .. " resolved and returned ".. color.."'s Trade Agreement.", color)
+		Wait.time(function() _returnPromissoryNote(color, "Trade Agreement ("..color..")") end, 1)
+	end
+	_safeBroadcastToColor("Refreshed " .. color .. "'s commodities", color, color)
+end
+
+-- find Trade Agreement (color), and if faceup return holding players color to resolve and return it
+function _getTradeAgreement(color)
+	local tradeAgreementObj = _getByName("Trade Agreement ("..color..")" , "Card")
+
+	-- The card *should* be present somewhere.  Fail quietly if not.
+	if not tradeAgreementObj then
+		return false
+	end
+
+	-- Require card face up on the table (not in hand).
+	local inHandGuidSet = _zoneHelper.inHand()
+	if tradeAgreementObj.is_face_down or inHandGuidSet[tradeAgreementObj.getGUID()] then
+		return false
+	end
+
+	-- Require card be in a zone other than the connected player.
+	local zoneColor = _zoneHelper.zoneFromPosition(tradeAgreementObj.getPosition())
+	if (not zoneColor) or zoneColor == color then
+		return false
+	end
+
+	-- Found card face up on the table in a different player's zone.
+	return zoneColor
+end
+
+--------------------------------- Technology -----------------------------------
+
+-- Research pulling techs to a tech board checks what techs are already there.
+-- If there is a tech card currently moving delay second research until resting.
+local _colorToPendingTech = {}
+
+function queueResearchTech(color, cardName)
+	-- If a queue exists, add to queue and let chain callbacks handle it.
+	local techQueue = _colorToPendingTech[color]
+	if techQueue then
+		table.insert(techQueue, cardName)
+		return
+	end
+
+	-- Otherwise make a queue and kick off a callback driven service.
+	techQueue = {}
+	_colorToPendingTech[color] = techQueue
+	table.insert(techQueue, cardName)
+
+	local function servicePendingTechQueue()
+		local cardName = (#techQueue > 0) and table.remove(techQueue, 1)
+		if not cardName then
+			-- Queue is empty and AFTER last card finished, remove queue.
+			_colorToPendingTech[color] = nil
+			return
+		end
+		-- Take the next tech, chain self when take finishes.
+		local guid = researchTech(color, cardName, servicePendingTechQueue)
+		if not guid then
+			-- If guid then use chain callback to get next, otherwise no take
+			-- happened so move on to the next right away.
+			servicePendingTechQueue()
+		end
+	end
+	servicePendingTechQueue()
+end
+
+function researchTech(color, cardName, chainCallback)
+	assert(type(color) == 'string')
+	assert(type(cardName) == 'string')
+
+	-- Chain callback is ONLY called if take succeeds, as part of the take
+	-- callback.  Otherwise return false so the caller knows it will not chain.
+	assert(not chainCallback or type(chainCallback) == 'function')
+
+	local faction = _factionHelper.fromColor(color)
+	if not faction then
+		broadcastToAll('Research Technology: no faction selected for ' .. color, 'Red')
+		return false
+	end
+
+	-- "Faction Tech" handled by onStrategyCardButtonClicked.
+	if cardName == "Faction Tech" then
+		return false
+
+		-- gain command tokens only available to necro
+	elseif cardName == "Command Tokens" then
+		local abilitiesSet = {}
+		for _, ability in ipairs(faction.abilities) do
+			abilitiesSet[ability] = true
+		end
+		if abilitiesSet['Technological Singularity'] then
+			_dealLeadershipCommandTokens(color, 3, {x=0,y=0,z=0}, 'Technology')
+			return false
+		else
+			_safeBroadcastToColor("Can only gain command tokens as Nekro", color, "Red")
+			return false
+		end
+	end
+
+	-- get technology deck
+	local deckName = 'Technology Cards'
+	local techDeck = false
+	local techBoard = false
+	local guidToPosTechOnTable = {}
+	local techType = _technologyHelper.getTechType(cardName)
+	if not techType then
+		log('_technologyHelper did not find "' .. cardName .. '"')
+		return false
+	end
+
+	local techNameSet = _technologyHelper.getTechNameSet()
+	if not techNameSet then
+		log("_technologyHelper returned empty techNameSet")
+		return false
+	end
+
+	for _,object in ipairs(getAllObjects()) do
+		local name = object.getName()
+		if techNameSet[string.gsub(name, " Ω$","")]then
+			guidToPosTechOnTable[object.getGUID()] = object.getPosition()
+		end
+		if (object.getName() == "Technology Board") and (color == _zoneHelper.zoneFromPosition(object.getPosition())) then
+			techBoard = object
+		end
+		if (object.getName() == deckName) and (object.tag == 'Deck') and (color == _zoneHelper.zoneFromPosition(object.getPosition())) then
+			techDeck = object
+		end
+	end
+
+	local techCardPositionsOnTable = {}
+	local zonesForTechOnTable = _zoneHelper.zonesFromPositions(guidToPosTechOnTable)
+	if zonesForTechOnTable then
+		for guid,zoneColor in pairs(zonesForTechOnTable) do
+			if zoneColor == color then
+				table.insert(techCardPositionsOnTable, 1, guidToPosTechOnTable[guid])
+			end
+		end
+	end
+
+	if not techDeck then
+		broadcastToAll('Research Technology: missing deckname ' .. deckName, color)
+		broadcastToAll("If you have researched all your available technologies: Congratulations to you " .. color .."!", color)
+		broadcastToAll("If not, please name your deck of remaining technology cards 'Technology Cards' and leave them in your zone.", color)
+		return false
+	end
+
+	local factionSheet = getObjectFromGUID(faction.factionSheetGuid)
+	if not factionSheet then
+		broadcastToAll('Research Technology: missing ' .. color .. ' Faction Sheet', 'Red')
+		return false
+	end
+
+	local guid = _getEntryGuid(techDeck, cardName) or _getEntryGuid(techDeck, cardName .. ' Ω')
+	if not guid then
+		_safeBroadcastToColor('Research Technology: ' .. cardName .. " not found in " .. techDeck.getName() .. " deck", color, "Red")
+		return false
+	end
+
+	local function _getPosToTechDeck(cardName, techDeck)
+		-- place cards next to tech deck (take care on which side of the table)
+		local p0 = techDeck.getPosition()
+		local rot = techDeck.getRotation()
+		local dz = 2
+		local dx = 4
+		if p0.z > 0 then
+			p0.x = p0.x + dx
+			dz = -2
+		else
+			p0.x = p0.x - dx
+		end
+
+		local dpos = { ['dx'] = dx, ['dy'] = 0, ['dz'] = dz }
+		local pos = _technologyHelper.getFirstVacantPosition({
+			['p0'] = p0,
+			['dpos'] = dpos,
+			['occupiedPositions'] = techCardPositionsOnTable
+		})
+
+		return {position = pos, rotation = rot}
+	end
+
+	local function _getPosToFactionSheet(cardName, factionSheet, techDeck)
+		local rot = factionSheet.getRotation()
+
+		local _overrides = _unitHelper.getUnitOverrides()
+		local snapPoints = factionSheet.getSnapPoints()
+
+		local pos = snapPoints[_pointorder[_overrides[cardName]["upgrade"]]].position
+		pos.y = pos.y + 0.2
+
+		return {position=factionSheet.positionToWorld(pos), rotation=rot}
+	end
+
+	local function _copyUnitUpgradeTechToFactionSheet(cardObject)
+		-- copy unitUpgrade technology card and send it to respective position on faction sheet.
+		local positionTable = {}
+		positionTable.position = _getPosToFactionSheet(cardName, factionSheet, techDeck).position
+		local clone = cardObject.clone(positionTable)
+		clone.setRotation(factionSheet.getRotation())
+		clone.highlightOn(color, 1)
+	end
+
+	local function takeCallback(obj)
+		obj.highlightOn(color, 1)
+		if chainCallback then
+			chainCallback(obj)
+		end
+	end
+
+	local params = {
+		guid = guid,
+		smooth = true,
+		callback_function = takeCallback
+	}
+
+	local posRot
+	if techBoard then
+		posRot = _technologyHelper.getVacantPosOnTechBoard({
+			['cardName'] = cardName,
+			['color'] = color,
+			['techBoard'] = techBoard,
+			['occupiedPositions'] = techCardPositionsOnTable
+		})
+		if techType == "unitUpgrade" then
+			local function newCallback(obj)
+				_copyUnitUpgradeTechToFactionSheet(obj)
+				takeCallback(obj)
+			end
+			params.callback_function = newCallback
+		end
+	else	-- unit upgades are sent to factionSheet, other tech just put left of deck.
+		if techType == "unitUpgrade" then
+			params.smooth = true
+			posRot = _getPosToFactionSheet(cardName, factionSheet, techDeck)
+		else
+			posRot = _getPosToTechDeck(cardName, techDeck)
+		end
+	end
+
+	params.position = posRot.position
+	params.rotation = posRot.rotation
+
+	techDeck.takeObject(params)
+	_sendOnNewTechnologyResearched(color, cardName)
+
+	-- Return the guid in case caller wants to wait for resting, etc.
+	-- This also means a take is in progress, will do the chain callback.
+	return params.guid
+end
+
+-- searches through container for an item with name matching namePattern and returns its guid
+function _getEntryGuid(container, namePattern)
+	assert(type(container) == 'userdata' and type(namePattern) == 'string')
+	for _, entry in ipairs(container.getObjects()) do
+		if entry.name == namePattern or entry.name == namePattern.." Ω" then
+			return entry.guid
+		end
+	end
+	return false
+end
+
+function _sendOnNewTechnologyResearched(playerColor, cardName)
+local handler = 'onNewTechnologyResearched'
+local listeners = {}
+for _, object in ipairs(getAllObjects()) do
+	if object.getVar(handler) then
+		table.insert(listeners, object.getGUID())
+	end
+end
+if #listeners > 0 then
+	local params = {player = playerColor,
+	technology = cardName}
+	for i, guid in ipairs(listeners) do
+		local function callHandler()
+			local listener = getObjectFromGUID(guid)
+			if listener then
+				listener.call(handler, params)
+			end
+		end
+		Wait.frames(callHandler, i)
+	end
+end
+end
+
+----------------------------- Imperial ----------------------------------
+
+function _dealImperialSecret(color)
+	-- quiet not implemented yet.
+	_deckHelper.deal({
+		deck = 'Secret Objectives',
+		count = 1,
+		color = color
+	})
+
+	--	broadcastToColor("You have gained a new secret objective.", color)
+end
+
+---------------------------- Utility -------------------------------------
+
+function _isObjectOwner(color, objectName)
+	assert(type(color) == "string")
+	assert(type(objectName) == "string")
+
+	local objectPosition = false
+
+	for _, o in ipairs(getAllObjects()) do
+		local name = o.getName()
+		local guid = o.getGUID()
+		if name == objectName then
+			objectPosition = o.getPosition()
+			break
+		end
+	end
+
+	if not objectPosition then
+		return false
+	end
+
+	if color == _zoneHelper.zoneFromPosition(objectPosition) then
+		return true
+	else
+		return false
+	end
+end
+
+function _safeBroadcastToColor(message, playerColor, messageColor)
+	for _, player in ipairs(Player.getPlayers()) do
+		if player.color == playerColor then
+			broadcastToColor(message, playerColor, messageColor)
+			return
+		end
+	end
+	broadcastToAll(message, messageColor)
+end
+
+function _getPlayerFromColor(color)
+	assert(type(color) == "string")
+	for _,player in ipairs(Player.getPlayers()) do
+		if player.color == color then
+			return player
+		end
+	end
+	error(color.. " is not a current playercolor.")
+end
+
+-- full deep copy of table o
+function _deepcopy(o, seen)
+	seen = seen or {}
+	if o == nil then return nil end
+	if seen[o] then return seen[o] end
+
+	local no
+	if type(o) == 'table' then
+		no = {}
+		seen[o] = no
+
+		for k, v in next, o, nil do
+			no[_deepcopy(k, seen)] = _deepcopy(v, seen)
+		end
+		setmetatable(no, _deepcopy(getmetatable(o), seen))
+	else -- number, string, boolean, etc
+		no = o
+	end
+	return no
+end
+
+-- cache function for bags and stuff
+local _getByNameCache = {}
+function _getByName(name, tag)
+	local guid = _getByNameCache[name]
+	local object = guid and getObjectFromGUID(guid)
+	if object then
+		return object
+	end
+	if not tag then
+		for _, object in ipairs(getAllObjects()) do
+			if object.getName() == name then
+				_getByNameCache[name] = object.getGUID()
+				return object
+			end
+		end
+	else
+		for _, object in ipairs(getAllObjects()) do
+			if object.tag == tag then
+				if object.getName() == name then
+					_getByNameCache[name] = object.getGUID()
+					return object
+				end
+			end
+		end
+	end
+end
+
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+	error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+	error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

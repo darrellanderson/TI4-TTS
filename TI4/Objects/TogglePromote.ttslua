@@ -1,0 +1,47 @@
+function onLoad(saveState)
+    self.createButton({
+        click_function = 'onClickEnable',
+        function_owner = self,
+        label          = 'Enable\nToggle\nPromoted',
+        position       = {x=0, y=0.2, z=0},
+        width          = 1400,
+        height         = 800,
+        font_size      = 200,
+        tooltip        = 'Host must click this to switch to Toggle Promoted mode'
+    })
+end
+
+function onClickEnable(clickObject, clickerColor, altClick)
+    if Player[clickerColor].host then
+        self.editButton({
+            index          = 0,
+            click_function = 'onClickTogglePromoted',
+            label          = 'Toggle\nPromoted',
+            tooltip        = 'Toggle clicking player’s promoted status'
+        })
+    else
+        printToColor('Toggle Promoted: only the host can enable toggle promoted', clickerColor, 'Red')
+    end
+end
+
+function onClickTogglePromoted(clickObject, clickerColor, altClick)
+    local player = Player[clickerColor]
+    if not player.host then
+        local action = player.promoted and 'demoting' or 'promoting'
+        printToAll('Toggle Promoted: ' .. action .. ' ' .. clickerColor, clickerColor)
+        player.promote()
+    else
+        printToColor('Toggle Promoted: cannot toggle host', clickerColor, 'Red')
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

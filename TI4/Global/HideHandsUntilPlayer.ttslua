@@ -1,0 +1,71 @@
+--- Draw hidden zones over hands area until a player takes a seat.
+local function _hideHands()
+    local exclude = {}
+    for _, color in ipairs(getSeatedPlayers()) do
+        exclude[color] = true
+    end
+
+    -- This excludes empty hands BUT the whole problem is the cards are on the
+    -- table after load and not in hand, so skip this part.
+    -- for _, color in ipairs(Player.getColors()) do
+    --     if color ~= 'Grey' and color ~= 'Black' then
+    --         local player = Player[color]
+    --         if player and player.getHandCount() > 0 then
+    --             if #(player.getHandObjects(1) or {}) == 0 then
+    --                 exclude[color] = true
+    --             end
+    --         end
+    --     end
+    -- end
+
+    -- Get existing, remove any that should not be there.
+    for _, object in ipairs(getAllObjects()) do
+        color = object.tag == 'Fog' and string.match(object.getName(), '^HIDE_HAND_(.*)$')
+        if color then
+            if exclude[color] then
+                destroyObject(object)
+            else
+                exclude[color] = true
+            end
+        end
+    end
+
+    -- Add missing.
+    for _, color in ipairs(_zoneHelper.zones()) do
+        if not exclude[color] then
+            local player = Player[color]
+            if player and player.getHandCount() > 0 then
+                local transform = player.getHandTransform(1)
+                local hiddenZone = spawnObject({
+                    type              = 'FogOfWarTrigger',
+                    position          = transform.position,
+                    rotation          = transform.rotation,
+                    scale             = transform.scale,
+                    callback_fucntion = nil,
+                    sound             = false,
+                    params            = {},
+                    snap_to_grid      = false,
+                })
+                hiddenZone.setValue(color)
+                hiddenZone.setName('HIDE_HAND_' .. color)
+            end
+        end
+    end
+end
+
+local originalOnLoad = onLoad
+function onLoad(saveState)
+    if originalOnLoad then
+        originalOnLoad(saveState)
+    end
+    -- Not safe to call immediately, let TTS setup finish.
+    Wait.frames(_hideHands, 6)
+end
+
+local originalOnPlayerChangeColor = onPlayerChangeColor
+function onPlayerChangeColor(playerColor)
+    if originalOnPlayerChangeColor then
+        originalOnPlayerChangeColor(playerColor)
+    end
+    Wait.frames(_hideHands, 6)
+end

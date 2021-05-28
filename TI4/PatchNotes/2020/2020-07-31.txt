@@ -1,0 +1,21 @@
+Darrell:
+Faction helper:
+- New method to get faction from (owner, command) token name.
+
+System helper:
+- Expose tile thickness (ghosts home is shorter).
+
+Map tool:
+- Delay locking map tiles to give them a chance to lay flat and snap into place.
+
+Zone borders:
+- Decrease default line thickness.
+- Switch to system helper for systems.
+- Throttle on-turn updates when passed.
+
+Milty:
+Graveyard:
+- Support for Prophecy of Kings cards.
+
+MultiRoller:
+- Support for Codex Nekro destroyer.

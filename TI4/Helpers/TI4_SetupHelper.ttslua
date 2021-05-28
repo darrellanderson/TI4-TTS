@@ -1,0 +1,2481 @@
+--- Table setup.
+-- @author the_mantis (original TI4 tokensweeper unpack)
+-- @author Milty (per-color unpack, player-count zones)
+-- @author Darrell (gathered code into this shared helper)
+-- #include <~/CrLua/Objects/TI4_Helpers/TI4_SetupHelper>
+
+-- Users should copy this getHelperClient function, and use via:
+--
+-- local setupHelper = getHelperClient('TI4_SETUP_HELPER')
+--
+-- Where one can call any main function in this file via the helper.
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    -- Nested tables are considered cross script.  Make a local copy.
+    local function copyTable(t)
+        if t and type(t) == 'table' then
+            local copy = {}
+            for k, v in pairs(t) do
+                copy[k] = type(v) == 'table' and copyTable(v) or v
+            end
+            t = copy
+        end
+        return t
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return copyTable(helperObject.call(functionName, parameters)) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _technologyHelper = getHelperClient('TI4_TECHNOLOGY_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local PRINT_DEBUG_LOG_MESSAGES = false
+
+local SetupGeneric = {
+    NAME_TO_PLAYER_ZONE_OFFSET = {
+        ['^Technology Cards$'] = { x = 10, z = 2 },
+        ['Faction Selector'] = { x = 2.5, z = 11, lock = true },
+        ['^Here/AFK$'] = { x = 1, z = 2 },
+
+        ['^TI4 MultiRoller'] = { x = 0, z = 37, lock = true },  -- was z=42
+    },
+    NAME_TO_PLAYER_AGENDA_ZONE_OFFSET = {
+        ['^Any Whens%?$'] = { x = 0.6, z = 3 },
+        ['^Any Afters%?$'] = { x = -0.6, z = 3 },
+    },
+    NAME_TO_AGENDA_ZONE_OFFSET = {
+        ['^For:$'] = { x = -4.25, y = 0.3, lock = true },
+        ['^Against:$'] = { x = 4.25, y = 0.3, lock = true },
+        ['^Votes$'] = { x = 9 },
+        ['^Speaker Token %- Agenda$'] = { x = 0, y = 0.3, yRot = 180 },
+    },
+    NAME_TO_TABLE_POSITIONS = {
+        ['^TI4 Graveyard'] = {
+            { x = -26.50, y = -0.19, z = -9, lock = true, dx = -1.5, dz = -7.5 },
+            { x = -26.50, y = -0.19, z = 9, lock = true, dx = -1.5, dz = 7.5 },
+            { x = 26.50, y = -0.19, z = -9, lock = true, dx = 1.5, dz = -7.5 },
+            { x = 26.50, y = -0.19, z = 9, lock = true, dx = 1.5, dz = 7.5 }
+        },
+        ['^x3 Commodities/Tradegoods$'] = {
+            { x = -29.50, y = -0.19, z = -1.5, lock = true, dx = -5, dz = 6 },
+            { x = 29.50, y = -0.19, z = 3, lock = true, dx = 5 },
+            bagName = 'x3 Commodities/Tradegoods Bag', -- create bag around token
+            bagColor = 'E6E42B',
+        },
+        ['^x1 Commodities/Tradegoods$'] = {
+            { x = -29.50, y = -0.19, z = 1.5, lock = true, dx = -5, dz = 6 },
+            { x = 29.50, y = -0.19, z = 6, lock = true, dx = 5 },
+            bagName = 'x1 Commodities/Tradegoods Bag', -- create bag around token
+            bagColor = 'E6E42B',
+        },
+        ['^x3 Fighter Token$'] = {
+            { x = -26.50, y = -0.19, z = -1.5, lock = true, dx = -5, dz = 6 },
+            { x = 26.50, y = -0.19, z = 3, lock = true, dx = 5 },
+            bagName = 'x3 Fighter Tokens Bag', -- create bag around token
+            bagColor = '1E87FF',
+        },
+        ['^x1 Fighter Token$'] = {
+            { x = -26.50, y = -0.19, z = 1.5, lock = true, dx = -5, dz = 6 },
+            { x = 26.50, y = -0.19, z = 6, lock = true, dx = 5 },
+            bagName = 'x1 Fighter Tokens Bag', -- create bag around token
+            bagColor = '1E87FF',
+        },
+        ['^x3 Infantry Token$'] = {
+            { x = -23.50, y = -0.19, z = -1.5, lock = true, dx = -5, dz = 6 },
+            { x = 23.50, y = -0.19, z = 3, lock = true, dx = 5 },
+            bagName = 'x3 Infantry Tokens Bag', -- create bag around token
+            bagColor = 'F3631C',
+        },
+        ['^x1 Infantry Token$'] = {
+            { x = -23.50, y = -0.19, z = 1.5, lock = true, dx = -5, dz = 6 },
+            { x = 23.50, y = -0.19, z = 6, lock = true, dx = 5 },
+            bagName = 'x1 Infantry Tokens Bag', -- create bag around token
+            bagColor = 'F3631C',
+        },
+    },
+}
+
+local SetupColor = {
+    DEFAULT_COLOR_LIST = { 'White', 'Blue', 'Purple', 'Yellow', 'Red', 'Green', 'Orange', 'Pink', 'Brown' },
+
+    HAND = {
+        ACTIVE = {
+            OFFSET = { x = 0, y = 4, z = 21, dzMiddle = 5, yRot = 180 },
+            -- Max SCALE.x is 22.  10 cards need 15.5, start overlapping at 11.
+            SCALE = { x = 15.5, y = 8, z = 4 }
+        },
+        INACTIVE = {
+            POSITION = { x = 150, y = 4, z = 100, dx = 0, dz = -30 },
+            SCALE = { x = 1, y = 4, z = 1 }
+        },
+    },
+
+    -- The box with per-color items, hover above the player area.
+    COLOR_BOX_OFFSET = { x = 0, y = 5, z = 0, lock = true },
+
+    NAME_TO_PLAYER_ZONE_OFFSET = {
+        ['Notes %($COLOR%)'] = { x = 7, z = 2 },
+        ['Active/Passed %($COLOR%)'] = { x = 4, y = 1, z = 2, flip = false },  -- do not flip, changing setup can lead to unflipped tokens
+        ['Command Sheet %($COLOR%)'] = { x = -8.2, z = 11, lock = true },
+        ['Directionaliser %($COLOR%)'] = { x = 0, y = 0, z = -2, yRot = 270, lock = true },
+        ['Leader Sheet %($COLOR%)'] = { x = 8.45, z = 11, lock = true },
+    },
+    NAME_TO_PLAYER_AGENDA_ZONE_OFFSET = {
+        ['$COLOR Player Votes'] = { x = 0, y = 1, z = 1, yRot = 180 },
+    },
+    NAME_TO_DIRECTIONALISER_OFFSET = {
+        -- These are in Directionaliser local coordinate space.
+        ['$COLOR Mech'] = { x = 0, y = 1, z = -13.2, yRot = 180 },
+        ['$COLOR Infantry'] = { x = 0, y = 1, z = -11 },
+        ['$COLOR Fighter'] = { x = 0, y = 1, z = -9, yRot = 180 },
+        ['$COLOR Space Dock'] = { x = 0, y = 1, z = -7 },
+        ['$COLOR PDS'] = { x = 0, y = 1, z = -5 },
+        ['$COLOR Carrier'] = { x = 0, y = 1, z = -2.15 },
+        ['$COLOR Destroyer'] = { x = 0, y = 1, z = 0.35 },
+        ['$COLOR Cruiser'] = { x = 0, y = 1, z = 3.17 },
+        ['$COLOR Dreadnought'] = { x = 0, y = 1, z = 6.21 },
+        ['$COLOR Flagship'] = { x = 0, y = 1, z = 10.19 },
+        ['$COLOR War Sun'] = { x = 0, y = 1, z = 13 },
+    },
+
+    HOME_SYSTEM_TILE = 'Home System Location %($COLOR%)',
+}
+
+function getSetupColors()
+    return SetupColor.DEFAULT_COLOR_LIST
+end
+
+local SetupFaction = {
+    NAME_TO_PLAYER_ZONE_OFFSET = {
+        -- For squeezed overlaping command sheet reference (8 players), x = 1.8.
+        ['$FACTION_NAME Sheet'] = { x = 1.3, z = 11, lock = true, franken = true },
+        ['$TOKEN_NAME Command Tokens Bag'] = { x = -8, z = 11, lock = true, franken = true },
+        ['$TOKEN_NAME Owner Tokens Bag'] = { x = -5, z = 4.5, lock = true, franken = true },
+        ['$TOKEN_NAME Tech Bag'] = { x = 10, y = 3, z = 2, unpack = true },
+        ['$TOKEN_NAME Promissory Bag'] = { x = 7, y = 3, z = 2, unpack = true },
+        ['$TOKEN_NAME Planets Bag'] = { x = 6, y = 3, z = -6, unpack = true, dx = 2.5, snap = true },
+    },
+    COMMAND_TOKENS_XZ_AND_FLIP = {
+        -- In command sheet local space
+        { x = 0.64, z = -2.8 },
+        { x = -0.9, z = -2.8 },
+        { x = -0.1, z = -1.9 },
+        { x = -1.6, z = -1.1, flip=true },
+        { x = -2.6, z = -1.1, flip=true },
+        { x = -2.2, z = -2.2, flip=true },
+        { x = -1.6, z = 0.8 },
+        { x = -2.8, z = 0.8 }
+    },
+    STARTING_TECH_OFFSET = {
+        x = 10, z = -5, dz = -2.1
+    },
+    OTHER_OFFSET = {
+        x = -2, z = 2, dx = -2
+    },
+    LEADER_OFFSET = {
+        -- In leader sheet local space
+        agent = { x = 1.45, z = -3.36 },
+        commander = { x = 1.45, z = -1.11 },
+        hero = { x = 1.45, z = 1.14 },
+        mech = { x = 1.45, z = 3.38 },
+    }
+}
+
+local SetupPlayerTools = {
+    NAME_TO_PLAYER_ZONE_OFFSET = {
+        ['Technology Board'] = { x = 0, y = 3, z = 11 },
+        ['Planet Board'] = { x = 0, y = 4, z = 11 },
+        ['Build Area'] = { x = 0, y = 5, z = 11, flip = true },
+    }
+}
+
+local SetupFranken = {}
+local SetupCards = {}
+
+local _setupTime = false  -- use os.time() for a durable epoch-based timestamp, Time.time resets on TTS load
+local _includePoK = false
+local _putPendingGuidSet = {}
+local _deletedItemsBagGuid = false
+
+-------------------------------------------------------------------------------
+
+function setPoK(value)
+    assert(type(value) == 'boolean')
+    _includePoK = value
+end
+
+function getPoK()
+    return _includePoK
+end
+
+function getGameLengthSeconds()
+    return _setupTime and math.max(os.time() - _setupTime, 0)
+end
+
+-------------------------------------------------------------------------------
+
+local function putPending(object)
+    assert(type(object) == 'userdata')
+    _putPendingGuidSet[object.getGUID()] = true
+end
+
+local function isPutPending()
+    for _, _ in pairs(_putPendingGuidSet) do
+        return true
+    end
+end
+
+function onObjectDestroy(dyingObject)
+    local guid = dyingObject.getGUID()
+    if guid and _putPendingGuidSet[guid] then
+        _putPendingGuidSet[guid] = nil
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function _safeDestroyObject(object)
+    assert(type(object) == 'userdata')
+    local deletedItems = _deletedItemsBagGuid and getObjectFromGUID(_deletedItemsBagGuid)
+    if not deletedItems then
+        for _, object in ipairs(getAllObjects()) do
+            if object.tag == 'Bag' and object.getName() == 'TI4 Deleted Items' then
+                _deletedItemsBagGuid = object.getGUID()
+                deletedItems = object
+                break
+            end
+        end
+    end
+    if deletedItems then
+        deletedItems.call('ignoreGuid', object.getGUID())
+    end
+    destroyObject(object)
+end
+
+--- Normal broadcastToColor throws an error if the color is not seated.
+function _safeBroadcastToColor(message, playerColor, messageColor)
+    for _, player in ipairs(Player.getPlayers()) do
+        if player.color == playerColor then
+            broadcastToColor(message, playerColor, messageColor)
+            return
+        end
+    end
+    broadcastToAll(message, messageColor)
+end
+
+--- Normal broadcastToColor throws an error if the color is not seated.
+function _safePrintToColor(message, playerColor, messageColor)
+    for _, player in ipairs(Player.getPlayers()) do
+        if player.color == playerColor then
+            printToColor(message, playerColor, messageColor)
+            return
+        end
+    end
+    printToAll(message, messageColor)
+end
+
+--- Toggle'able debug messages.
+-- @param message string
+local function debugLog(message)
+    assert(type(message) == 'string')
+    if PRINT_DEBUG_LOG_MESSAGES then
+        print(message)
+    end
+end
+
+--- Find the guid of an object inside a container from a matching name pattern.
+-- @param contiainer object : either a bag or deck.
+-- @param namePattern string : for string.match on entry names.
+-- @return string : guid, or nil if not found.
+local function getEntryGuid(container, namePattern)
+    assert(type(container) == 'userdata' and type(namePattern) == 'string')
+    for _, entry in ipairs(container.getObjects()) do
+        if string.match(entry.name, namePattern) then
+            return entry.guid
+        end
+    end
+end
+
+--- Compute position from a zone center and offset.
+-- Flip offset Z when position has negative Z (scale out from middle).
+-- @param position table : {x,y,z}.
+-- @param offset table : {x,y,z}, all keys are optional.
+-- @return table : {x,y,z}.
+local function offsetPosition(position, offset)
+    assert(type(position) == 'table' and type(offset) == 'table')
+    local dir = position.z > 0 and 1 or -1
+    if math.abs(position.z) < 1 then
+        dir = 1 -- close enough to center, use "natural" direction
+    end
+    return {
+        x = position.x + (offset.x or 0) * dir,
+        y = position.y + (offset.y or 0),
+        z = position.z + (offset.z or 0) * dir
+    }
+end
+
+--- Compute a rotation from zone center and offset.
+-- Uses "natural" offset for the seat, apply offset.yRot if given.
+-- @param position table : {x,y,z}.
+-- @param offset table : {x,y,z,yRot}, all keys are optional.
+-- @return table : {x,y,z}.
+local function offsetRotation(position, offset)
+    local result = { x = 0, y = 0, z = 0 }
+
+    local z = offsetPosition(position, offset).z
+    if math.abs(z) < 0.1 then
+        result.y = 270
+    else
+        result.y = z > 0 and 0 or 180
+    end
+    result.y = result.y + (offset.yRot or 0)
+    if offset.flip then
+        result.z = result.z + 180
+    end
+    return result
+end
+
+local function zoneRotation(zone, offset)
+    return {
+        x = zone.rotation.x,
+        y = zone.rotation.y + (offset.yRot or 0),
+        z = zone.rotation.z + (offset.flip and 180 or 0)
+    }
+end
+
+--- Get the agenda zone for the given player count.
+local function agendaCenter(extraRings)
+    local function getAgendaPhaseMat()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == 'Agenda Phase Mat' then
+                return object
+            end
+        end
+        error('missing Agenda Phase Mat')
+    end
+    local agendaPhaseMat = getAgendaPhaseMat()
+
+    assert(type(extraRings) == 'number')
+    return agendaPhaseMat.getPosition()
+end
+
+--- Get the per-player player agenda zone for the player/player count.
+local function agendaCenterPlayer(agendaZoneCenter, playerZoneCenter)
+    assert(type(agendaZoneCenter) == 'table' and type(playerZoneCenter) == 'table')
+    return {
+        x = agendaZoneCenter.x + playerZoneCenter.x / 10,
+        y = agendaZoneCenter.y,
+        z = agendaZoneCenter.z + 4 * (playerZoneCenter.z > 0 and 1 or -1)
+    }
+end
+
+--- Get all "NAME_TO_" sub-table keys.
+-- Setup tables have "NAME_TO_" sub-tables from name pattern to attributes.
+local function allNamePatterns(t)
+    local result = {}
+    for k, v in pairs(t) do
+        if type(k) == 'string' and type(v) == 'table' and string.match(k, '^NAME_TO_') then
+            for namePattern, _ in pairs(v) do
+                table.insert(result, namePattern)
+            end
+        end
+    end
+    return result
+end
+
+local function yieldForSeconds(seconds)
+    local now = Time.time
+    while Time.time < now + seconds do
+        coroutine.yield(0)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+--- Find the "Setup Bag".
+function SetupGeneric.getSetupBag()
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == 'Setup Bag' then
+            return object
+        end
+    end
+end
+
+--- Pack non-color objects into the setup bag.
+function SetupGeneric.pack(setupBag)
+    assert(setupBag.tag == 'Bag')
+    debugLog('SetupGeneric.pack')
+
+    local nameToObjects = {}
+    for _, namePattern in ipairs(allNamePatterns(SetupGeneric)) do
+        nameToObjects[namePattern] = {}
+    end
+
+    -- Remove bags created for tokens.
+    local deleSet = {}
+    for _, rule in pairs(SetupGeneric.NAME_TO_TABLE_POSITIONS) do
+        if rule.bagName then
+            deleSet[rule.bagName] = true
+        end
+    end
+
+    local deleList = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        for namePattern, objects in pairs(nameToObjects) do
+            if string.match(name, namePattern) then
+                table.insert(objects, object)
+            end
+        end
+        if deleSet[name] then
+            table.insert(deleList, object)
+        end
+    end
+    coroutine.yield(0)
+
+    for _, object in ipairs(deleList) do
+        _safeDestroyObject(object)
+    end
+    coroutine.yield(0)
+
+    -- Pack only one copy of each object, delete the rest.
+    local delayedPutObjects = {}
+    for namePattern, objects in pairs(nameToObjects) do
+        for i, object in ipairs(objects) do
+            if i == 1 and not getEntryGuid(setupBag, namePattern) then
+                object.setLock(false)
+                table.insert(delayedPutObjects, object)
+            else
+                _safeDestroyObject(object)
+            end
+        end
+    end
+    coroutine.yield(0)  -- wait for unlock to finish
+    coroutine.yield(0)
+
+    for _, object in ipairs(delayedPutObjects) do
+        setupBag.putObject(object)
+        coroutine.yield(0)
+    end
+end
+
+--- Unpack non-color objects from the setup bag.
+function SetupGeneric.unpack(setupBag, extraRings)
+    assert(setupBag.tag == 'Bag' and type(extraRings) == 'number')
+    debugLog('SetupGeneric.unpack')
+
+    -- Move Mallice.
+    local wormholeNexus = _systemHelper.systemFromTile(82)
+    local wormholeNexusObj = wormholeNexus and getObjectFromGUID(wormholeNexus.guid)
+    if wormholeNexusObj then
+        -- Snap to grid.
+        local pos = {
+            x = 26.24 + 5 * extraRings,
+            y = 1.14,
+            z = -3
+        }
+        if (extraRings % 2) == 1 then
+            pos.z = -6  -- grid stagger
+        end
+        pos = _systemHelper.hexToPosition(_systemHelper.hexFromPosition(pos))
+        pos.y = 1.14 -- gets lost during hex to/from.
+        wormholeNexusObj.setPosition(pos)
+        wormholeNexusObj.setRotation({ x = 0, y = 180, z = 180 })  -- face down
+    end
+
+    -- Get per-object json.  Leave the "master" copies of the objects in the
+    -- setup bag, spawn new copies from the json.
+    local pos = setupBag.getPosition()
+    local nameToLockedObject = {}
+    for i, namePattern in ipairs(allNamePatterns(SetupGeneric)) do
+        local guid = assert(getEntryGuid(setupBag, namePattern), 'setup bag missing ' .. namePattern)
+        local object = setupBag.takeObject({
+            guid = guid,
+            position = { x = pos.x, y = pos.y + (5 * i), z = pos.z },
+            smooth = false,
+        })
+        coroutine.yield(0)
+        object.setLock(true)
+        nameToLockedObject[namePattern] = object
+    end
+    local function isBusy()
+        for _, object in pairs(nameToLockedObject) do
+            if object.spawning then
+                return true
+            end
+        end
+    end
+    while isBusy() do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    local nameToJson = {}
+    for namePattern, object in pairs(nameToLockedObject) do
+        object.setLock(false)
+        nameToJson[namePattern] = object.getJSON()
+        setupBag.putObject(object)
+        coroutine.yield(0)
+    end
+
+    local zonesAttributes = _zoneHelper.zonesAttributes()
+    local agendaZoneCenter = agendaCenter(extraRings)
+
+    -- Per player objects.
+    for _, zone in ipairs(zonesAttributes) do
+        for namePattern, offset in pairs(SetupGeneric.NAME_TO_PLAYER_ZONE_OFFSET) do
+            local json = assert(nameToJson[namePattern], 'no json for ' .. namePattern)
+            spawnObjectJSON({
+                json              = json,
+                position          = offsetPosition(zone.center, offset),
+                rotation          = zoneRotation(zone, offset),
+                callback_function = function(object) object.setLock(offset.lock or false) end,
+                sound             = false,
+            })
+        end
+        local agendaPosPlayer = agendaCenterPlayer(agendaZoneCenter, zone.center)
+        for namePattern, offset in pairs(SetupGeneric.NAME_TO_PLAYER_AGENDA_ZONE_OFFSET) do
+            local json = assert(nameToJson[namePattern], 'no json for ' .. namePattern)
+            spawnObjectJSON({
+                json              = json,
+                position          = offsetPosition(agendaPosPlayer, offset),
+                rotation          = zoneRotation(zone, offset),
+                callback_function = function(object) object.setLock(offset.lock or false) end,
+                sound             = false,
+            })
+        end
+    end
+
+    -- Singleton agenda zone objects.
+    for namePattern, offset in pairs(SetupGeneric.NAME_TO_AGENDA_ZONE_OFFSET) do
+        local json = assert(nameToJson[namePattern], 'no json for ' .. namePattern)
+        spawnObjectJSON({
+            json              = json,
+            position          = offsetPosition(agendaZoneCenter, offset),
+            rotation          = offsetRotation(agendaZoneCenter, offset),
+            callback_function = function(object) object.setLock(offset.lock or false) end,
+            sound             = false,
+        })
+    end
+
+    -- Table objects.
+    local tableY = _zoneHelper.getTableY()
+    for namePattern, offsets in pairs(SetupGeneric.NAME_TO_TABLE_POSITIONS) do
+        for _, offset in ipairs(offsets) do
+            local position = {
+                x = offset.x + (offset.dx or 0) * extraRings,
+                y = offset.y + tableY,
+                z = offset.z + (offset.dz or 0) * extraRings
+            }
+            local callback = function(object) object.setLock(offset.lock or false) end
+
+            if offsets.bagName then
+                -- Special case for creating an infinite bag using this token.
+                -- First create an infinite bag.
+                local bag = spawnObject({
+                    type              = 'Infinite_Bag',
+                    position          = position,
+                    rotation          = { x = 0, y = 0, z = 0 },
+                    sound             = false,
+                })
+                bag.setName(offsets.bagName)
+                bag.setColorTint(Color.fromHex('#' .. offsets.bagColor .. 'FF'))
+
+                -- Adjust the token spawn to be above the bag, then add.
+                local function newCallback(object)
+                    bag.putObject(object)
+                    bag.setLock(offset.lock or false)
+                end
+                position.y = position.y + 3
+                callback = newCallback
+            end
+
+            local json = assert(nameToJson[namePattern], 'no json for ' .. namePattern)
+            spawnObjectJSON({
+                json              = json,
+                position          = position,
+                rotation          = { x = 0, y = 0, z = 0 },
+                callback_function = callback,
+                sound             = false,
+            })
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+--- Move hands to zone
+function SetupColor.transformHands()
+    debugLog('SetupColor.transformHands')
+
+    local zonesAttributes = _zoneHelper.zonesAttributes()
+    local playerCount = #zonesAttributes
+
+    for i, color in ipairs(SetupColor.DEFAULT_COLOR_LIST) do
+        if i <= playerCount then
+            local zoneCenter = zonesAttributes[i].center
+            local position = offsetPosition(zoneCenter, SetupColor.HAND.ACTIVE.OFFSET)
+            local rotation = offsetRotation(zoneCenter, SetupColor.HAND.ACTIVE.OFFSET)
+
+            -- If this zone is between two like-center-z zones, move hand to
+            -- avoid cards flying between left/right neighbors from hitting
+            -- this hand.  NOTE: this fails if there are 5 players on a side!
+            -- Give a little wiggle room in case zones are built programatically
+            -- and could have floating point error differences for "same".
+            local thisZ = zoneCenter.z
+            local prevZ = zonesAttributes[i - 1] and zonesAttributes[i - 1].center.z or math.huge
+            local nextZ = zonesAttributes[i + 1] and zonesAttributes[i + 1].center.z or math.huge
+            local epsilon = 0.1
+            if math.abs(thisZ - prevZ) < epsilon and math.abs(thisZ - nextZ) < epsilon then
+                local dz = SetupColor.HAND.ACTIVE.OFFSET.dzMiddle
+                position.z = position.z + dz * (position.z > 0 and 1 or -1)
+            end
+
+            Player[color].setHandTransform({
+                position = position,
+                rotation = rotation,
+                scale    = SetupColor.HAND.ACTIVE.SCALE
+            })
+        else
+            local nonPlayerIndex = (i - playerCount) - 1
+            Player[color].setHandTransform({
+                position = {
+                    x = SetupColor.HAND.INACTIVE.POSITION.x + nonPlayerIndex * (SetupColor.HAND.INACTIVE.POSITION.dx or 0),
+                    y = SetupColor.HAND.INACTIVE.POSITION.y,
+                    z = SetupColor.HAND.INACTIVE.POSITION.z + nonPlayerIndex * (SetupColor.HAND.INACTIVE.POSITION.dz or 0)
+                },
+                rotation = { 0, 0, 0 },
+                scale = SetupColor.HAND.INACTIVE.SCALE
+            })
+        end
+    end
+end
+
+--- Keep per-player pack/unpack independent so color change can use it too!
+
+--- Pack per-color box into setup bag.
+function SetupColor.packColorBoxIntoSetupBag(setupBag, box)
+    assert(setupBag.tag == 'Bag' and box.tag == 'Bag')
+    debugLog('SetupColor.packColorBox ' .. box.getName())
+
+    box.setLock(false)
+    coroutine.yield(0)
+    setupBag.putObject(box)
+end
+
+--- Unpack per-color box from setup bag, place over player area.
+function SetupColor.unpackColorBoxFromSetupBag(setupBag, color, zone)
+    debugLog('SetupColor.unpackColorBoxFromSetupBag ' .. color)
+    assert(setupBag.tag == 'Bag' and type(color) == 'string' and type(zone) == 'table')
+
+    local offset = SetupColor.COLOR_BOX_OFFSET
+    local guid = assert(getEntryGuid(setupBag, '^' .. color .. ' Box$'), ' missing box for ' .. color)
+    local box = setupBag.takeObject({
+        guid              = guid,
+        position          = offsetPosition(zone.center, offset),
+        rotation          = zoneRotation(zone, offset),
+        callback_function = function(object) object.setLock(offset.lock or false) end,
+        smooth            = false,
+    })
+    return box
+end
+
+--- Pack per-color items into color box.
+function SetupColor.pack(color, colorBox)
+    assert(type(color) == 'string' and colorBox.tag == 'Bag')
+    debugLog('SetupColor.pack ' .. color)
+
+    local namePatterns = {}
+    for namePattern, offset in pairs(SetupColor.NAME_TO_PLAYER_ZONE_OFFSET) do
+        table.insert(namePatterns, namePattern)
+    end
+    for namePattern, offset in pairs(SetupColor.NAME_TO_PLAYER_AGENDA_ZONE_OFFSET) do
+        table.insert(namePatterns, namePattern)
+    end
+    table.insert(namePatterns, SetupColor.HOME_SYSTEM_TILE)
+
+    for i, namePattern in ipairs(namePatterns) do
+        namePatterns[i] = string.gsub(namePattern, '$COLOR', '(.*)')
+    end
+
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        for _, namePattern in ipairs(namePatterns) do
+            if string.match(name, namePattern) == color then
+                putPending(object)
+                object.setLock(false)
+                colorBox.putObject(object)
+            end
+        end
+    end
+end
+
+--- Unpack per-color items from color box.
+function SetupColor.unpack(color, colorBox, zone, agendaZoneCenter)
+    assert(type(color) == 'string' and colorBox.tag == 'Bag' and type(zone) == 'table' and type(agendaZoneCenter) == 'table')
+    assert(zone.center)
+    debugLog('SetupColor.unpack ' .. color)
+
+    local nameToObject = {}
+    for namePattern, offset in pairs(SetupColor.NAME_TO_PLAYER_ZONE_OFFSET) do
+        namePattern = string.gsub(namePattern, '$COLOR', color)
+        local guid = assert(getEntryGuid(colorBox, namePattern), 'missing ' .. namePattern)
+        local object = colorBox.takeObject({
+            guid              = guid,
+            position          = offsetPosition(zone.center, offset),
+            rotation          = zoneRotation(zone, offset),
+            callback_function = function(object) object.setLock(offset.lock or false) end,
+            smooth            = false,
+        })
+        nameToObject[object.getName()] = object
+    end
+    local agendaPosPlayer = agendaCenterPlayer(agendaZoneCenter, zone.center)
+    for namePattern, offset in pairs(SetupColor.NAME_TO_PLAYER_AGENDA_ZONE_OFFSET) do
+        namePattern = string.gsub(namePattern, '$COLOR', color)
+        local guid = assert(getEntryGuid(colorBox, namePattern), 'missing ' .. namePattern)
+        local object = colorBox.takeObject({
+            guid              = guid,
+            position          = offsetPosition(agendaPosPlayer, offset),
+            rotation          = zoneRotation(zone, offset),
+            callback_function = function(object) object.setLock(offset.lock or false) end,
+            smooth            = false,
+        })
+        nameToObject[object.getName()] = object
+    end
+
+    local namePattern = string.gsub(SetupColor.HOME_SYSTEM_TILE, '$COLOR', color)
+    local guid = assert(getEntryGuid(colorBox, namePattern), 'missing ' .. namePattern)
+    local object = colorBox.takeObject({
+        guid              = guid,
+        position          = zone.homeSystemPosition,
+        rotation          = { x = 0, y = 180, z = 0 },
+        smooth            = false,
+    })
+    nameToObject[object.getName()] = object
+
+    return nameToObject
+end
+
+--- Pack per-color units into color box.
+function SetupColor.packUnits(color, colorBox)
+    assert(type(color) == 'string' and colorBox.tag == 'Bag')
+    debugLog('SetupColor.packUnits ' .. color)
+
+    local unitBagSet = {}
+    for namePattern, offset in pairs(SetupColor.NAME_TO_DIRECTIONALISER_OFFSET) do
+        namePattern = string.gsub(namePattern, '$COLOR', color)
+        unitBagSet[namePattern] = true
+    end
+
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' and unitBagSet[object.getName()] then
+            putPending(object)
+            object.setLock(false)
+            object.jointTo() -- break joints
+            colorBox.putObject(object)
+        end
+    end
+end
+
+--- Unpack per-color units from color box.  Units get placed on directionaliser.
+function SetupColor.unpackUnits(color, colorBox, directionaliser)
+    assert(type(color) == 'string' and colorBox.tag == 'Bag' and type(directionaliser) == 'userdata')
+    debugLog('SetupColor.unpackUnits ' .. color)
+
+    -- Remove any snap points, just adds to TTS overhead.
+    directionaliser.setSnapPoints({})
+
+    local unitBags = {}
+    for namePattern, offset in pairs(SetupColor.NAME_TO_DIRECTIONALISER_OFFSET) do
+        namePattern = string.gsub(namePattern, '$COLOR', color)
+        local rotation = directionaliser.getRotation()
+        rotation.y = rotation.y + (offset.yRot or 0)
+        local guid = assert(getEntryGuid(colorBox, namePattern), 'missing ' .. namePattern)
+        local object = colorBox.takeObject({
+            guid              = guid,
+            position          = directionaliser.positionToWorld(offset),
+            rotation          = rotation,
+            callback_function = function(object) object.setLock(offset.lock or false) end,
+            smooth            = false,
+        })
+        object.use_grid = false
+        table.insert(unitBags, object)
+    end
+    return unitBags
+end
+
+-------------------------------------------------------------------------------
+
+--- Do color and generic packing, leaving an empty table.  THIS IS INTENDED FOR
+-- RESETTING A STARTER TABLE TO A DIFFERENT PLAYER COUNT.  DOES NOT DO FACTIONS!
+-- Gets zone count from zone helper.  Do not change zone count until after this!
+function SetupColor.packOld(setupBag)
+    assert(setupBag.tag == 'Bag')
+    debugLog('packOld')
+
+    -- Zone helper gets current zones / colors.
+    _zoneHelper.updateZoneColors()
+    coroutine.yield(0)
+
+    debugLog('packOld: unpacking color boxes')
+    local colorToBox = {}
+    for _, zone in ipairs(_zoneHelper.zonesAttributes()) do
+        if zone.color then
+            colorToBox[zone.color] = SetupColor.unpackColorBoxFromSetupBag(setupBag, zone.color, zone)
+            assert(colorToBox[zone.color], 'missing box for ' .. zone.color)
+        end
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    debugLog('packOld: packing unit bags')
+    for color, box in pairs(colorToBox) do
+        SetupColor.packUnits(color, box)
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    debugLog('packOld: packing per-color items')
+    for color, box in pairs(colorToBox) do
+        SetupColor.pack(color, box)
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    -- Wait for pending puts, TTS may still be adding items to color boxes.
+    while isPutPending() do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    debugLog('packOld: repacking color boxes')
+    for color, box in pairs(colorToBox) do
+        SetupColor.packColorBoxIntoSetupBag(setupBag, box)
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+
+    SetupGeneric.pack(setupBag)
+    coroutine.yield(0)
+
+    debugLog('packOld: finished')
+end
+
+--- Color unpacking, for an N-player table.  THIS IS INTENDED FOR
+-- RESETTING A STARTER TABLE TO A DIFFERENT PLAYER COUNT.  DOES NOT DO FACTIONS!
+-- Gets zone count from zone helper.  Make sure to set zone count before this!
+function SetupColor.unpackNew(setupBag, extraRings)
+    assert(setupBag.tag == 'Bag' and type(extraRings) == 'number')
+    debugLog('unpackNew')
+
+    -- Zone helper gets current zones but they do not have colors yet.
+    local zonesAttributes = _zoneHelper.zonesAttributes()
+    local agendaZoneCenter = agendaCenter(extraRings)
+    local colorToState = {}
+
+    debugLog('unpackNew: unpacking color boxes')
+    for i, zone in ipairs(zonesAttributes) do
+        local color = assert(SetupColor.DEFAULT_COLOR_LIST[i])
+        colorToState[color] = {
+            box = SetupColor.unpackColorBoxFromSetupBag(setupBag, color, zone),
+            zone = zone,
+            directionaliser = false,
+            unitBags = false
+        }
+        assert(colorToState[color].box, 'missing box for ' .. color)
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+    for color, state in pairs(colorToState) do
+        while state.box.spawning do
+            coroutine.yield(0)
+        end
+    end
+    coroutine.yield(0)
+
+    debugLog('unpackNew: unpacking per-color items from color boxes')
+    for color, state in pairs(colorToState) do
+        local nameToObject = SetupColor.unpack(color, state.box, state.zone, agendaZoneCenter)
+        local name = 'Directionaliser (' .. color .. ')'
+        state.directionaliser = nameToObject[name]
+        assert(state.directionaliser, 'missing ' .. name)
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+    for color, state in pairs(colorToState) do
+        while state.directionaliser.spawning do
+            coroutine.yield(0)
+        end
+    end
+    coroutine.yield(0)
+
+    debugLog('unpackNew: unpacking per-color unit bags')
+    for color, state in pairs(colorToState) do
+        state.unitBags = SetupColor.unpackUnits(color, state.box, state.directionaliser)
+        assert(state.unitBags, 'missing unit bags')
+        assert(#state.unitBags > 0, 'empty unit bags')
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+    for color, state in pairs(colorToState) do
+        for _, bag in ipairs(state.unitBags) do
+            while bag.spawning do
+                coroutine.yield(0)
+            end
+        end
+    end
+    coroutine.yield(0)
+
+    -- Help gravity move the bag down to the stand. (Does not work if still spawning)
+    for color, state in pairs(colorToState) do
+        for _, bag in ipairs(state.unitBags) do
+            bag.addForce({ x = 0, y = -5, z = 0 }, 4)
+        end
+    end
+    coroutine.yield(0)
+
+    debugLog('unpackNew: repacking color boxes')
+    for color, state in pairs(colorToState) do
+        SetupColor.packColorBoxIntoSetupBag(setupBag, state.box)
+        coroutine.yield(0)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    -- About to wait for resting, give a little extra time for gravity.
+    yieldForSeconds(1.5)
+
+    -- Units were unpacked ABOVE directionaliser.  Wait for them to fall.
+    debugLog('unpackNew: waiting for units')
+    for color, state in pairs(colorToState) do
+        for _, bag in ipairs(state.unitBags) do
+            while not bag.resting do
+                coroutine.yield(0)
+            end
+        end
+    end
+    coroutine.yield(0)
+
+    -- Instead of `unitBag.setLock(true)`, create a joint.  Can pick up and
+    -- move directionaliser by dragging a unit bag on it.
+    debugLog('unpackNew: attaching unit bags to stand')
+    for color, state in pairs(colorToState) do
+        for _, unitBag in ipairs(state.unitBags) do
+            unitBag.jointTo(state.directionaliser, {
+                type = 'Fixed',
+                collision = false,
+                break_force = 1000000,  -- max is 1000000
+                break_torque = 1000000
+            })
+        end
+    end
+
+    debugLog('unpackNew: finished')
+end
+
+-------------------------------------------------------------------------------
+
+function SetupPlayerTools.unpack()
+    -- Find the tools bag and any tools already on the table.
+    local toolsBag = false
+    local nameToJson = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if object.tag == 'Bag' and name == 'Tools and Helpers' then
+            toolsBag = object
+        end
+        if SetupPlayerTools.NAME_TO_PLAYER_ZONE_OFFSET[name] then
+            nameToJson[name] = object.getJSON()
+        end
+    end
+
+    -- Get JSON for tools in the tools bag.
+    for _, entry in ipairs(toolsBag and toolsBag.getObjects() or {}) do
+        if SetupPlayerTools.NAME_TO_PLAYER_ZONE_OFFSET[entry.name] and not nameToJson[entry.name] then
+            local object = toolsBag.takeObject({
+                position          = toolsBag.getPosition() + vector(0, 5, 0),
+                smooth            = false,
+                guid              = entry.guid
+            })
+            while object.spawning do
+                coroutine.yield(0)
+            end
+            nameToJson[entry.name] = object.getJSON()
+            toolsBag.putObject(object)
+            coroutine.yield(0)
+        end
+    end
+
+    -- Spawn for each player.
+    local zonesAttributes = _zoneHelper.zonesAttributes()
+    for _, zone in ipairs(zonesAttributes) do
+        for name, json in pairs(nameToJson) do
+            local offset = SetupPlayerTools.NAME_TO_PLAYER_ZONE_OFFSET[name]
+            spawnObjectJSON({
+                json              = json,
+                position          = offsetPosition(zone.center, offset),
+                rotation          = zoneRotation(zone, offset),
+                callback_function = function(object) object.setLock(offset.lock or false) end,
+                sound             = false,
+            })
+            coroutine.yield(0)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+-- Do NOT do this as part of normal setup, leaving cards out is sus af.
+-- Jefferson has seen some shit and doesn't trust people
+function dealObjectives()
+    debugLog('SetupCards.dealObjectivesWithYields')
+
+    local stage1Mat = false
+    local stage2Mat = false
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if name == 'Public Objectives I Mat' then
+            stage1Mat = object
+        elseif name == 'Public Objectives II Mat' then
+            stage2Mat = object
+        end
+    end
+
+    local stage1Guid = _deckHelper.getDeck('Public Objectives I')
+    local stage1Deck = stage1Guid and getObjectFromGUID(stage1Guid)
+
+    local stage2Guid = _deckHelper.getDeck('Public Objectives II')
+    local stage2Deck = stage2Guid and getObjectFromGUID(stage2Guid)
+
+    local function isCardAlreadyThere(position)
+        local hits = Physics.cast({
+            origin       = position,
+            direction    = { x = 0, y = -1, z = 0 },
+            type         = 3,  -- box
+            size         = { x = 0.1, y = 4, z = 0.1 },
+        })
+        for _, hit in ipairs(hits or {}) do
+            if hit.hit_object.tag == 'Card' or hit.hit_object.tag == 'Deck' then
+                return true
+            end
+        end
+    end
+
+    local function deal(deck, mat)
+        assert(deck.tag == 'Deck')
+        local p1 = deck.getPosition()
+        for _, snapPoint in ipairs(mat.getSnapPoints()) do
+            local p2 = mat.positionToWorld(snapPoint.position)
+            p2.y = p2.y + 3
+            local dSq = (p1.x - p2.x) ^ 2 + (p1.z - p2.z) ^ 2
+            if dSq > 1 and not isCardAlreadyThere(p2) then
+                deck.takeObject({
+                    position          = p2,
+                    smooth            = true
+                })
+            end
+        end
+    end
+
+    deal(stage1Deck, stage1Mat)
+    deal(stage2Deck, stage2Mat)
+end
+
+-------------------------------------------------------------------------------
+
+local _setupQueue = {}
+
+--- This is the primary entry point for using the helper object.  Packs up the
+-- current (no factions unpacked) table the unpacks for new player count.
+function setup(params)
+    assert(type(params) == 'table')
+    assert(type(params.playerCount) == 'number')
+    assert(not params.extraRings or type(params.extraRings) == 'number')
+    assert(not params.includePoK or type(params.includePoK) == 'boolean')
+    assert(not params.playerTools or type(params.playerTools) == 'boolean')
+
+    _setupTime = os.time()
+    setPoK(params.includePoK or false)
+
+    table.insert(_setupQueue, params)
+    startLuaCoroutine(self, 'setupCoroutine')
+
+    UI.setAttribute('startup', 'active', false)
+end
+
+function setupCoroutine()
+    debugLog('setupCoroutine')
+
+    local params = assert(table.remove(_setupQueue))
+    local playerCount = assert(params.playerCount)
+    local extraRings = params.extraRings or 0
+    local isRightClick = params.isRightClick
+    local playerTools = params.playerTools
+
+    _zoneHelper.clearBordersVectorLines()
+
+    -- If player or extra ring count changes reconfigure table.
+    if _zoneHelper.getPlayerCount() ~= playerCount or _zoneHelper.getExtraRings() ~= extraRings then
+        local setupBag = assert(SetupGeneric.getSetupBag())
+        coroutine.yield(0)
+
+        SetupColor.packOld(setupBag)
+        coroutine.yield(0)
+
+        _zoneHelper.setPlayerCount({
+            playerCount = playerCount,
+            extraRings = extraRings
+        })
+
+        SetupColor.transformHands()
+        coroutine.yield(0)
+
+        SetupGeneric.unpack(setupBag, extraRings)
+        coroutine.yield(0)
+
+        SetupColor.unpackNew(setupBag, extraRings)
+        coroutine.yield(0)
+
+        _zoneHelper.updateZoneColors()
+        coroutine.yield(0)
+
+        -- Tell any other listeners about the change.
+        local listeners = {}
+        for _, object in ipairs(getAllObjects()) do
+            if object.getVar('onSetupHelperPlayerCountChanged') then
+                table.insert(listeners, object)
+            end
+        end
+        for i, listener in ipairs(listeners) do
+            Wait.frames(function() listener.call('onSetupHelperPlayerCountChanged') end, i)
+        end
+        coroutine.yield(0)
+    end
+
+    _zoneHelper.drawBordersVectorLines()
+    coroutine.yield(0)
+
+    if playerTools then
+        SetupPlayerTools.unpack()
+        coroutine.yield(0)
+    end
+
+    print('Setup finished')  -- always print when done
+
+    -- Tell any other listeners setup is done (in case further external setup).
+    local listeners = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.getVar('onSetupHelperSetupFinished') then
+            table.insert(listeners, object)
+        end
+    end
+    for i, listener in ipairs(listeners) do
+        Wait.frames(function() listener.call('onSetupHelperSetupFinished', params) end, i)
+    end
+
+    return 1 -- REQUIRED!  MUST RETURN 1 TO STOP COROUTINE!
+end
+
+function hideSetupButton()
+    debugLog('hideSetupButton')
+    local setupBag = false
+    local setupButton = false
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if object.tag == 'Bag' and name == 'Setup Bag' then
+            setupBag = object
+        elseif name == 'Game Setup Options' then
+            setupButton = object
+        end
+    end
+    if setupBag and setupButton then
+        setupBag.putObject(setupButton)
+    end
+end
+
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+
+--- Find "pick a faction to play" or other token.
+function SetupFaction.getFactionAndTokenObjects(zoneColor)
+    assert(type(zoneColor) == 'string')
+    debugLog('SetupFaction.getFactionTokenObject: ' .. zoneColor)
+
+    -- Filter to only not-in-hand, yes-in-zone.
+    local inHandGuidSet = _zoneHelper.inHand()
+    local function isCandidate(object)
+        if inHandGuidSet[object.getGUID()] then
+            return false
+        end
+        return _zoneHelper.zoneFromPosition(object.getPosition()) == zoneColor
+    end
+
+    local factionAndTokenObjects = false
+    for _, object in ipairs(getAllObjects()) do
+        local faction = _factionHelper.fromTokenName(object.getName())
+        if faction and isCandidate(object) then
+            factionAndTokenObjects = factionAndTokenObjects or {}
+            table.insert(factionAndTokenObjects, {
+                faction = faction,
+                object = object
+            })
+        end
+    end
+
+    return factionAndTokenObjects
+end
+
+--- Pack faction box into the container where it was found.
+function SetupFaction.packFactionBox(factionBox, factionBoxSrc)
+    assert(factionBox.tag == 'Bag' and (not factionBoxSrc or factionBoxSrc.tag == 'Bag'))
+    debugLog('SetupFaction.packFactionBox: ' .. factionBox.getName())
+
+    if factionBoxSrc then
+        factionBox.setLock(false)
+        factionBoxSrc.putObject(factionBox)
+    end
+end
+
+--- Get faction box and where we found it.
+function SetupFaction.unpackFactionBox(faction, zone)
+    assert(type(faction) == 'table' and type(zone) == 'table')
+    assert(zone.center)
+    debugLog('SetupFaction.unpackFactionBox: ' .. faction.name)
+
+    local factionBoxNamePattern = '^' .. faction.tokenName:gsub('-', '%%-') .. ' Box$'
+    local unpackPosition = { x = zone.center.x, y = zone.center.y + 10, z = zone.center.z }
+
+    -- First see if the box is already on the table, if so leave it where it is.
+    local otherBoxes = {}
+    local otherBoxNameSet = {
+        ['Factions'] = true,
+        ['Blue Space Faction Pack'] = true,
+        ['DS Factions'] = true,  -- Discordant Stars
+        ['Discordant Stars Faction Pack'] = true,  -- Discordant Stars
+    }
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' then
+            local name = object.getName()
+            if string.match(name, factionBoxNamePattern) then
+                return object, false
+            elseif otherBoxNameSet[name] then
+                table.insert(otherBoxes, object)  -- remember for later, if needed
+            end
+        end
+    end
+
+    -- Did not find box on the table.  Look in other boxes for it.
+    for _, otherBox in ipairs(otherBoxes) do
+        local guid = getEntryGuid(otherBox, factionBoxNamePattern)
+        if guid then
+            local factionBox = otherBox.takeObject({
+                guid              = guid,
+                position          = unpackPosition,
+                callback_function = function(object) object.setLock(true) end,
+                smooth            = false,
+            })
+            debugLog('SetupFaction.unpackFactionBox inside ' .. otherBox.getName())
+            return factionBox, otherBox
+        end
+    end
+end
+
+function SetupFaction.unpack(faction, factionBox, zone, isFranken)
+    assert(type(faction) == 'table' and factionBox.tag == 'Bag' and type(zone) == 'table')
+    debugLog('SetupFaction.unpack ' .. faction.name)
+
+    local function nestedUnpack(bag, offset)
+        bag.translate({ x = 0, y = 5, z = 0 })
+        local p = offsetPosition(zone.center, offset)
+        for _, entry in ipairs(bag.getObjects()) do
+            debugLog('nestedUnpack ' .. bag.getName() .. ' -> ' .. entry.name)
+            local object = bag.takeObject({
+                position          = p,
+                rotation          = bag.getRotation(),
+                smooth            = false,
+            })
+            if offset.snap then
+                object.use_snap_points = true
+            end
+            p.x = p.x + (offset.dx or 0) * (p.z > 1 and -1 or 1)
+            p.z = p.z + (offset.dz or 0)
+        end
+        Wait.frames(function() factionBox.putObject(bag) end, 1)
+    end
+
+    local nameToObject = {}
+    for namePattern, offset in pairs(SetupFaction.NAME_TO_PLAYER_ZONE_OFFSET) do
+        if (not isFranken) or offset.franken then
+            namePattern = string.gsub(namePattern, '$FACTION_NAME', faction.name)
+            namePattern = string.gsub(namePattern, '$TOKEN_NAME', faction.tokenName)
+            namePattern = namePattern:gsub('-', '%%-')
+            local guid = assert(getEntryGuid(factionBox, namePattern), 'missing ' .. namePattern)
+            local function takeCallback(object)
+                if offset.unpack then
+                    nameToObject[object.getName()] = nil
+                    nestedUnpack(object, offset)
+                else
+                    -- Do not lock too soon, infinite bag may still be getting set up.
+                    if offset.lock then
+                        Wait.time(function() object.setLock(true) end, 5)
+                    end
+                end
+            end
+            local object = factionBox.takeObject({
+                guid              = guid,
+                position          = offsetPosition(zone.center, offset),
+                rotation          = zoneRotation(zone, offset),
+                callback_function = takeCallback,
+                smooth            = false,  -- if true infinite bags can glitch where hovering object is not above bag
+            })
+            nameToObject[object.getName()] = object
+        end
+    end
+    return nameToObject
+end
+
+function SetupFaction.addLeaderSnapPoints(color)
+    assert(type(color) == 'string')
+
+    local function getLeaderSheet()
+        local leaderSheetName = 'Leader Sheet (' .. color .. ')'
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == leaderSheetName then
+                return object
+            end
+        end
+        error('unpack leaders: missing ' .. leaderSheetName)
+    end
+    local leaderSheet = getLeaderSheet()
+    coroutine.yield(0)
+
+    -- Add snap points.
+    local snapPoints = {}
+    for _, offset in pairs(SetupFaction.LEADER_OFFSET) do
+        table.insert(snapPoints, {
+            position = { x = offset.x or 0, y = offset.y or 0, z = offset.z or 0 },
+            rotation = { x = 0, y = 0, z = 0},
+            rotation_snap = true
+        })
+    end
+    leaderSheet.setSnapPoints(snapPoints)
+end
+
+function SetupFaction.unpackLeaders(color, faction, factionBox)
+    assert(type(color) == 'string' and type(faction) == 'table' and type(factionBox) == 'userdata')
+    if not _includePoK then
+        return
+    end
+    debugLog('SetupFaction.unpackLeaders ' .. faction.name)
+
+    local function getLeaderSheet()
+        local leaderSheetName = 'Leader Sheet (' .. color .. ')'
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == leaderSheetName then
+                return object
+            end
+        end
+        error('unpack leaders: missing ' .. leaderSheetName)
+    end
+    local leaderSheet = getLeaderSheet()
+    coroutine.yield(0)
+
+    local function getLeaderBag()
+        local leaderBagName = faction.tokenName .. ' Leaders Bag'
+        for _, entry in ipairs(factionBox.getObjects()) do
+            if entry.name == leaderBagName then
+                local pos = factionBox.getPosition()
+                pos.y = pos.y + 5
+                return factionBox.takeObject({
+                    position          = { x = pos.x, y = pos.y + 5, z = pos.z },
+                    smooth            = false,
+                    guid              = entry.guid
+                })
+            end
+        end
+        error('unpack leaders: missing ' .. leaderBagName)
+    end
+    local leaderBag = getLeaderBag()
+    while leaderBag.spawning do
+        coroutine.yield(0)
+    end
+    leaderBag.setLock(true)
+
+    -- Unpack commander, hero, mech.
+    local factionUnitSet = {}
+    for _, unit in ipairs(faction.units or {}) do
+        factionUnitSet[unit] = true
+    end
+    local agentCount = 0
+    for _, entry in ipairs(leaderBag.getObjects()) do
+        local position = false
+        local rotation = { x = 0, y = leaderSheet.getRotation().y, z = 0 }
+        local isAgent = false
+        if entry.name == faction.commander then
+            position = SetupFaction.LEADER_OFFSET.commander
+            rotation.z = 180
+        elseif entry.name == faction.hero then
+            position = SetupFaction.LEADER_OFFSET.hero
+            rotation.z = 180
+        elseif factionUnitSet[entry.name] then
+            position = SetupFaction.LEADER_OFFSET.mech
+        else
+            position = SetupFaction.LEADER_OFFSET.agent
+            isAgent = true
+        end
+        position = {
+            x = position.x or 0,
+            y = position.y or 0,
+            z = position.z or 0
+        }
+        position = leaderSheet.positionToWorld(position) -- return value mutable
+
+        if isAgent then
+            local dx = 2
+            position.x = position.x + agentCount * dx * ((position.z < 0) and -1 or 1)
+            agentCount = agentCount + 1
+        end
+        position.y = position.y + 3
+
+        leaderBag.takeObject({
+            position          = position,
+            rotation          = rotation,
+            smooth            = true,
+            guid              = entry.guid
+        })
+        coroutine.yield(0)
+    end
+
+    leaderBag.setLock(false)
+    factionBox.putObject(leaderBag)
+end
+
+function SetupFaction.unpackCommandTokens(color, commandTokensBag)
+    if not commandTokensBag then
+        error('unpack command tokens: no command tokens bag')
+    end
+    assert(type(color) == 'string' and commandTokensBag.tag == 'Bag')
+    assert(commandTokensBag.getQuantity() >= #SetupFaction.COMMAND_TOKENS_XZ_AND_FLIP)
+    debugLog('SetupColor.unpackCommandTokens ' .. color)
+
+    -- Faction was not found the "normal" way, does not have command sheet guid.
+    -- Instead, find it the hard way.
+    local function getCommandSheet()
+        local commandSheetName = 'Command Sheet (' .. color .. ')'
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == commandSheetName then
+                return object
+            end
+        end
+        error('unpack faction command counters: missing ' .. commandSheetName)
+    end
+    local commandSheet = getCommandSheet()
+
+    for _, xzAndFlip in ipairs(SetupFaction.COMMAND_TOKENS_XZ_AND_FLIP) do
+        commandTokensBag.takeObject({
+            position          = commandSheet.positionToWorld({
+                x = xzAndFlip.x,
+                y = 1,
+                z = xzAndFlip.z
+            }),
+            rotation          = {
+                x = (xzAndFlip.flip and 180 or 0),
+                y = commandSheet.getRotation().y,
+                z = 0
+            },
+            smooth            = true,
+        })
+    end
+end
+
+function SetupFaction.unpackHomeSystemTile(faction, factionBox, homeSystemPosition, zone)
+    assert(type(faction) == 'table' and factionBox.tag == 'Bag' and type(homeSystemPosition) == 'table')
+    assert(zone.center)
+    debugLog('SetupColor.unpackHomeSystemTile ' .. faction.tokenName)
+
+    -- Put away any home system location tile.
+    local homeSystemLocationTileName = 'Home System Location (' .. zone.color .. ')'
+    local setupBag = false
+    local homeSystemLocationTile = false
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if object.tag == 'Bag' and name == 'Setup Bag' then
+            setupBag = object
+        elseif name == homeSystemLocationTileName then
+            homeSystemLocationTile = object
+        end
+    end
+    if setupBag and homeSystemLocationTile then
+        setupBag.putObject(homeSystemLocationTile)
+    end
+
+    local tileName = faction.tokenName:gsub('-', '%%-') .. ' Tile'
+    if tileName == 'Ghosts of Creuss Tile' then
+        tileName = 'Creuss Gate Tile'
+    end
+
+    local rotation = {
+        x = 0,
+        y = homeSystemPosition.z > 0 and 0 or 180,
+        z = 0
+    }
+
+    local guid = assert(getEntryGuid(factionBox, tileName), 'missing ' .. tileName)
+    local tile = factionBox.takeObject({
+        guid              = guid,
+        position          = homeSystemPosition,
+        rotation          = rotation,
+        smooth            = true,
+        callback_function = function() _systemHelper.lockSystemTile(guid) end,
+    })
+
+    local extraTile = false
+    if faction.tokenName == 'Ghosts of Creuss' then
+        extraTile = tile
+        tileName = 'Ghosts of Creuss Tile'
+        local guid = assert(getEntryGuid(factionBox, tileName), 'missing ' .. tileName)
+
+        -- Get custom off-map position, apply extra rings.
+        local position = {
+            x = assert(zone.ghostHomePosition.x),
+            y = homeSystemPosition.y,
+            z = assert(zone.ghostHomePosition.z)
+        }
+
+        -- Apply extra rings.
+        position.z = position.z + _zoneHelper.getExtraRings() * 6 * (position.z > 0 and 1 or -1)
+
+        -- Position should already be grid aligned, but make sure.
+        local hex = _systemHelper.hexFromPosition(position)
+        position = _systemHelper.hexToPosition(hex)
+        position.y = homeSystemPosition.y
+
+        tile = factionBox.takeObject({
+            guid              = guid,
+            position          = position,
+            rotation          = rotation,
+            smooth            = true,
+            callback_function = function() _systemHelper.lockSystemTile(guid) end
+        })
+    end
+
+    return tile, extraTile
+end
+
+--- Unpack any non-faction bags still in the faction box.
+function SetupFaction.unpackOther(faction, factionBox, zone)
+    assert(factionBox.tag == 'Bag' and type(zone) == 'table')
+    debugLog('SetupFaction.unpackOther ' .. faction.name)
+
+    local function shouldUnpack(name)
+        if string.match(name, 'Alliance$') and (not _includePoK) then
+            return false
+        end
+        if string.match(name, '^' .. faction.tokenName:gsub('-', '%%-') .. ' .* Bag$') then
+            return false
+        end
+        return true
+    end
+    local offset = {
+        x = SetupFaction.OTHER_OFFSET.x or 0,
+        y = SetupFaction.OTHER_OFFSET.y or 0,
+        z = SetupFaction.OTHER_OFFSET.z or 0,
+    }
+    for _, entry in ipairs(factionBox.getObjects()) do
+        if shouldUnpack(entry.name) then
+            local rotation = zoneRotation(zone, offset)
+            if string.match(entry.name, 'Alliance$') then
+                rotation.y = (rotation.y + 270) % 360
+            end
+            local object = factionBox.takeObject({
+                guid              = entry.guid,
+                position          = offsetPosition(zone.center, offset),
+                rotation          = rotation,
+                smooth            = false,
+            })
+            offset.x = offset.x + (SetupFaction.OTHER_OFFSET.dx or 0)
+            offset.y = offset.y + 0.2
+            offset.z = offset.z + (SetupFaction.OTHER_OFFSET.dz or 0)
+        end
+    end
+end
+
+function SetupFaction.renameFlagship(color, faction)
+    assert(type(color) == 'string' and type(faction) == 'table')
+    debugLog('SetupColor.renameFlagship ' .. color)
+
+    local function getFlagshipBag()
+        local flagshipBagName = color .. ' Flagship'
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == flagshipBagName then
+                return object
+            end
+        end
+        error('unpack rename flagship: missing ' .. flagshipBagName)
+    end
+    local flagshipBag = getFlagshipBag()
+
+    flagshipBag.setName(faction.flagship)
+    flagshipBag.setDescription(faction.flagshipDescription)
+
+    local pos = flagshipBag.getPosition()
+    for i, entry in ipairs(flagshipBag.getObjects()) do
+        local flagship = flagshipBag.takeObject({
+            guid = entry.guid,
+            position = { x = pos.x, y = pos.y + 4 + i, z = pos.z },
+            smooth = false,
+            callback_function = function(object) flagshipBag.putObject(object) end
+        })
+        flagship.setName(faction.flagship)
+        flagship.setDescription(faction.flagshipDescription)
+    end
+end
+
+function SetupFaction.unpackUnits(color, faction, homeSystemTile)
+    assert(type(color) == 'string' and type(faction) == 'table' and type(homeSystemTile) == 'userdata')
+    debugLog('SetupColor.unpackUnits ' .. color)
+
+    local unitNameToBagName = {}
+    local bagNameSet = {}
+    local totalCount = 0
+    for unitName, count in pairs(faction.startingUnits) do
+        unitName = string.gsub(unitName, '_', ' ')
+        local bagName = unitName == 'Flagship' and faction.flagship or (color .. ' ' .. unitName)
+        unitNameToBagName[unitName] = bagName
+        bagNameSet[bagName] = true
+        totalCount = totalCount + count
+    end
+
+    local bagNameToBag = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        if object.tag == 'Bag' and bagNameSet[name] then
+            bagNameToBag[name] = object
+        end
+    end
+
+    if totalCount > 0 then
+        local dPhi = math.pi * 2.0 / totalCount
+        local phi = 0
+        local r = 1.5
+        for unitName, count in pairs(faction.startingUnits) do
+            unitName = string.gsub(unitName, '_', ' ')
+            local bagName = assert(unitNameToBagName[unitName], 'no bag name for ' .. unitName)
+            local unitBag = assert(bagNameToBag[bagName], 'no bag for ' .. bagName)
+            for _ = 1, count do
+                unitBag.takeObject({
+                    position = homeSystemTile.positionToWorld({
+                        x = math.cos(phi) * r,
+                        y = 1,
+                        z = math.sin(phi) * r
+                    }),
+                    smooth = true,
+                })
+                phi = phi + dPhi
+            end
+        end
+    end
+end
+
+function SetupFaction.unpackStartingTech(color, faction, zone)
+    assert(type(color) == 'string' and type(faction) == 'table' and type(zone) == 'table')
+    debugLog('SetupFaction.unpackStartingTech ' .. color)
+
+    local function getTechDeck()
+        local deckName = 'Technology Cards'
+        for _, object in ipairs(getAllObjects()) do
+            if object.tag == 'Deck' and object.getName() == deckName and _zoneHelper.zoneFromPosition(object.getPosition()) == color then
+                return object
+            end
+        end
+        error('unpack faction starting tech: missing ' .. deckName)
+    end
+    local techDeck = getTechDeck()
+
+    -- Find cards in deck, do not move them yet.
+    local techCards = {}
+    for i, name in ipairs(faction.startingTech) do
+        local namePattern = string.gsub(name, '-', '%%-')
+        local guid = getEntryGuid(techDeck, namePattern)
+        if guid then
+            table.insert(techCards, {
+                name = name,
+                guid = guid,
+                position = false,  -- fill in later
+                rotation = false,  -- fill in later
+            })
+        else
+            _safePrintToColor('unpackStartingTech: missing starting technology ' .. name, color, 'Red')
+        end
+    end
+
+    -- Find where cards should unpack, use tech board if present.
+    local techBoardAndCards = _technologyHelper.getTechBoardAndCards(color)
+    local techBoard = techBoardAndCards and techBoardAndCards.techBoard
+    if techBoard then
+        local params = {
+            cardName = false, -- set this for each card
+            color = color,
+            techBoard = techBoard,
+            occupiedPositions = techBoardAndCards.cardPositionsInZone
+        }
+        for _, techCard in ipairs(techCards) do
+            params.cardName = techCard.name
+            local posRot = _technologyHelper.getVacantPosOnTechBoard(params)
+            if posRot then
+                techCard.position = posRot.position
+                techCard.rotation = posRot.rotation
+            end
+        end
+        -- Watch out for collisions.
+        local usedSet = {}
+        local dz = 2.04 * ((techDeck.getPosition().z < 0) and 1 or -1)
+        for _, techCard in ipairs(techCards) do
+            if techCard.position then
+                while true do
+                    local usedKey = techCard.position.x .. ',' .. techCard.position.z
+                    if not usedSet[usedKey] then
+                        usedSet[usedKey] = true
+                        break
+                    end
+                    -- Would be safer to use local positions and/or snap points.
+                    techCard.position.z = techCard.position.z + dz
+                end
+            end
+        end
+    end
+
+    -- Assign positions for any tech cards without them (e.g. all if no tech
+    -- board, or nekro techs that don't belong there, etc).
+    local offset = {
+        x = SetupFaction.STARTING_TECH_OFFSET.x,
+        y = SetupFaction.STARTING_TECH_OFFSET.y,
+        z = SetupFaction.STARTING_TECH_OFFSET.z
+    }
+    for _, techCard in ipairs(techCards) do
+        if not techCard.position then
+            techCard.position = offsetPosition(zone.center, offset)
+            techCard.rotation = zoneRotation(zone, offset)
+            offset.z = offset.z + SetupFaction.STARTING_TECH_OFFSET.dz
+        end
+    end
+
+    -- Draw the cards.
+    for _, techCard in ipairs(techCards) do
+        techDeck.takeObject({
+            guid              = techCard.guid,
+            position          = techCard.position,
+            rotation          = techCard.rotation,
+            smooth            = true,
+        })
+    end
+end
+
+function SetupFaction.placeScoreCounters(ownerTokensBag, zone, zoneIndex, color)
+    assert(ownerTokensBag.tag == 'Infinite' and type(zone) == 'table' and type(color) == 'string')
+    debugLog('SetupFaction.placeScoreCounters')
+
+    local function getScoreboard()
+        local scoreboardName = 'Scoreboard'
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == scoreboardName then
+                return object
+            end
+        end
+        error('unpack faction place score counters: missing ' .. scoreboardName)
+    end
+    local scoreboard = getScoreboard()
+    coroutine.yield(0)
+
+    -- Place token stack near scoreboard.  Follow board positioning similar
+    -- to the mini-board layout agenda stuff users.
+    local factionOrigin = scoreboard.positionToWorld({
+        x = 4.25 * (scoreboard.is_face_down and -1 or 1),
+        y = 0.5 * (scoreboard.is_face_down and -1 or 1),
+        z = 0
+    })
+    local scale = {
+        x = 0.05,
+        z = 0.03
+    }
+    local p = {
+        x = factionOrigin.x + zone.center.x * scale.x,
+        y = ownerTokensBag.getPosition().y,
+        z = factionOrigin.z + zone.center.z * scale.z,
+    }
+
+    -- Actual clone has problems with the floating token above the bag.
+    -- Instead spawn a new one, and add a token.
+    local clone = spawnObject({
+        type              = 'Infinite_Bag',
+        position          = p,
+        scale             = ownerTokensBag.getScale(),
+        sound             = false,
+        callback_function = function(object) object.setLock(true) end,
+    })
+    clone.setName(ownerTokensBag.getName())
+    clone.setColorTint(Color.fromString(color))
+    p.y = p.y + 3
+    local token = ownerTokensBag.takeObject({
+        position          = p,
+        callback_function = function(object) clone.putObject(object) end,
+        smooth            = true,
+    })
+    coroutine.yield(0)
+
+    -- Place token on score zero.
+    local SPACING_X = 0.25
+    local SPACING_Z = 0.2
+    local dx = ((zoneIndex - 1) % 2) * SPACING_X
+    local dz = math.floor((zoneIndex - 1) / 2) * SPACING_Z
+    local p = scoreboard.positionToWorld({
+        x = (2.9 + dx) * (scoreboard.is_face_down and -1 or 1),
+        y = (0.5 + (zoneIndex * 0.2)) * (scoreboard.is_face_down and -1 or 1),
+        z = -0.4 + dz
+    })
+    ownerTokensBag.takeObject({
+        position = p,
+        rotation = { x = 0, y = scoreboard.getRotation().y + 90, z = 0 }
+    })
+
+    -- Place token above the secrets mat.
+    local function getSecretsMat()
+        local findName = 'Secrets Mat'
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == findName then
+                return object
+            end
+        end
+        error('unpack faction place score counters: missing ' .. findName)
+    end
+    local secretsMat = getSecretsMat()
+    coroutine.yield(0)
+    local p = secretsMat.call('suggestedOwnerTokenLocation', color)
+    if p then
+        local token = ownerTokensBag.takeObject({
+            position = { x = p.x, y = p.y + 1, z = p.z },
+            rotation = { x = 0, y = secretsMat.getRotation().y + 90, z = 0 },
+            smooth = false
+        })
+        local scale = token.getScale()
+        local m = 2.25
+        token.setScale({ x = scale.x * m, y = scale.y * m, z = scale.z * m })
+        Wait.time(function() token.setLock(true) end, 3)
+    end
+
+    -- Place token on vote counter.
+    local function getVoteCounter()
+        local findName = color .. ' Player Votes'
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == findName then
+                return object
+            end
+        end
+        error('unpack faction place score counters: missing ' .. findName)
+    end
+    local voteCounter = getVoteCounter()
+    coroutine.yield(0)
+    if voteCounter then
+        local p = voteCounter.positionToWorld({ x = 0, y = 1, z = -1 })
+        local token = ownerTokensBag.takeObject({
+            position = { x = p.x, y = p.y + 1, z = p.z },
+            rotation = { x = 0, y = voteCounter.getRotation().y, z = 0 },
+            smooth = false
+        })
+    end
+end
+
+function SetupFaction.addFactionSheetUnitUpgradeSnapPoints(factionSheet)
+    assert(type(factionSheet) == 'userdata')
+
+    local x0 = 1.100277662
+    local z0 = -0.73410183
+    local x3 = -1.07248139
+    local z3 = 0.734419465
+
+    local dx = (x3 - x0) / 3
+    local dz = (z3 - z0) / 3
+
+    local snapPoints = {}
+    for col = 0, 3 do
+        for row = 0, 3 do
+            if col <= row then
+                table.insert(snapPoints, {
+                    position = {
+                        x = x0 + col * dx,
+                        y = 0,
+                        z = z0 + row * dz
+                    },
+                    rotation = {
+                        x = 0,
+                        y = 0,
+                        z = 0
+                    },
+                    rotation_snap = true
+                })
+            end
+        end
+    end
+    factionSheet.setSnapPoints(snapPoints)
+end
+
+local _unpackFactionQueue = {}
+
+--- Entry point for faction unpack.
+-- Params:
+-- - params.unpackButtonGuid (optional) if set, delete this object after unpack.
+-- - params.factionTokenName (optional) if set, unpack this faction (otherwise look for a token in zone).
+-- - params.color (required) unpack into this zone.
+function unpackFaction(params)
+    assert(type(params) == 'table')
+    assert(not params.unpackButtonGuid or type(params.unpackButtonGuid) == 'string')
+    assert(not params.factionTokenName or type(params.factionTokenName) == 'string')
+    assert(type(params.color) == 'string')
+    table.insert(_unpackFactionQueue, params)
+    startLuaCoroutine(self, 'unpackFactionCoroutine')
+end
+
+function unpackFactionCoroutine()
+    local params = assert(table.remove(_unpackFactionQueue))
+    local color = params.color
+    local zoneAttributes = _zoneHelper.zoneAttributes(color)
+    assert(zoneAttributes, 'no zone for ' .. color)
+
+    local faction, tokenObject
+    if params.factionTokenName then
+        faction = _factionHelper.fromTokenName(params.factionTokenName)
+        if not faction then
+            printToAll('Unpack Faction: unknown faction "' .. params.factionTokenName .. '" for ' .. color .. '.', 'Red')
+            return 1
+        end
+    else
+        local factionAndTokenObjects = SetupFaction.getFactionAndTokenObjects(color)
+        if not factionAndTokenObjects then
+            printToAll('Unpack Faction: no faction token for ' .. color .. '.  Please pick one from the green "Pick a Faction to Play" bag and place it in the ' .. color .. ' play area.', 'Red')
+            return 1
+        elseif #factionAndTokenObjects > 1 then
+            printToAll('Unpack Faction: multiple faction tokens for ' .. color .. '.  Please have only one in the play area to unpack it.', 'Red')
+            return 1
+        end
+        faction = assert(factionAndTokenObjects[1].faction)
+        tokenObject = assert(factionAndTokenObjects[1].object)
+    end
+    coroutine.yield(0)
+
+    -- Hide the setup game button object (move to setup bag).
+    hideSetupButton()
+    coroutine.yield(0)
+
+    -- Move the token out of the way in case faction sheet, etc moves on top.
+    if tokenObject then
+        tokenObject.translate({ x = 0, y = 5, z = 0 })
+        coroutine.yield(0)
+        tokenObject.setLock(true)
+    end
+
+    local factionBox, factionBoxSrc = SetupFaction.unpackFactionBox(faction, zoneAttributes)
+    if not factionBox then
+        error('unpack faction: unable to find faction box for "' .. faction.name .. '"')
+        return 1
+    end
+    while factionBox.spawning do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    -- Delete the unpack button object AFTER we've found the box to unpack.
+    if params.unpackButtonGuid then
+        local unpackButton = assert(getObjectFromGUID(params.unpackButtonGuid))
+        _safeDestroyObject(unpackButton)
+        coroutine.yield(0)
+    end
+
+    SetupFaction.renameFlagship(color, faction)
+    coroutine.yield(0)
+
+    local nameToObject = SetupFaction.unpack(faction, factionBox, zoneAttributes)
+    local commandTokensBag = nameToObject[faction.tokenName .. ' Command Tokens Bag']
+    local ownerTokensBag = nameToObject[faction.tokenName .. ' Owner Tokens Bag']
+    local factionSheet = nameToObject[faction.name .. ' Sheet']
+    nameToObject = nil
+    while commandTokensBag.spawning or ownerTokensBag.spawning do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    if factionSheet then
+        SetupFaction.addFactionSheetUnitUpgradeSnapPoints(factionSheet)
+        coroutine.yield(0)
+    end
+
+    if _includePoK then
+        SetupFaction.addLeaderSnapPoints(color)
+        coroutine.yield(0)
+        SetupFaction.unpackLeaders(color, faction, factionBox)
+        coroutine.yield(0)
+    end
+
+    -- Make sure the faction helper knows about the faction before unpacking tokens.
+    _factionHelper.updateFactions()
+    local quantity = commandTokensBag.getQuantity()
+    _factionHelper.tintTokens({ color = color })
+    while commandTokensBag.getQuantity() < quantity do
+        coroutine.yield(0)
+    end
+    while ownerTokensBag.getQuantity() < 1 do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    SetupFaction.unpackCommandTokens(color, commandTokensBag)
+    coroutine.yield(0)
+
+    local homeSystemTile, extraTile = SetupFaction.unpackHomeSystemTile(faction, factionBox, zoneAttributes.homeSystemPosition, zoneAttributes)
+    coroutine.yield(0)
+
+    SetupFaction.unpackOther(faction, factionBox, zoneAttributes)
+    coroutine.yield(0)
+
+    -- Wait for home system to land before unpacking units.
+    -- Could wait for lock, but try to avoid non-time barriers.
+    local waitUntil = Time.time + 2
+    while Time.time < waitUntil or homeSystemTile.isSmoothMoving() do
+        coroutine.yield(0)
+    end
+
+    SetupFaction.unpackUnits(color, faction, homeSystemTile)
+    coroutine.yield(0)
+
+    -- Wait one more moment for tech cards to move.
+    yieldForSeconds(2)
+
+    SetupFaction.unpackStartingTech(color, faction, zoneAttributes)
+    coroutine.yield(0)
+
+    SetupFaction.placeScoreCounters(ownerTokensBag, zoneAttributes, zoneAttributes.index, color)
+    coroutine.yield(0)
+
+    if factionBoxSrc then
+        factionBoxSrc.putObject(factionBox)
+        coroutine.yield(0)
+    end
+    factionBox = nil
+
+    if tokenObject then
+        tokenObject.setLock(false)
+        coroutine.yield(0)
+        tokenObject.translate({ x = 0, y = 1, z = 0 })
+    end
+
+    if faction.startMessage then
+        _safeBroadcastToColor(faction.tokenName .. ': ' .. faction.startMessage, color, color)
+    end
+
+    -- Tell any other listeners about the change.
+    local listeners = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.getVar('onSetupHelperFactionUnpacked') then
+            table.insert(listeners, object)
+        end
+    end
+    for i, listener in ipairs(listeners) do
+        Wait.frames(function() listener.call('onSetupHelperFactionUnpacked') end, i)
+    end
+    coroutine.yield(0)
+
+    print('Unpack faction "' .. faction.name .. '" finished')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function SetupFranken.renameFlagship(color)
+    local flagshipNameToFaction = {}
+    for _, faction in pairs(_factionHelper.allFactions(true)) do
+        flagshipNameToFaction[faction.flagship] = faction
+    end
+
+    local faction = false
+    for _, object in ipairs(getAllObjects()) do
+        local candidate = flagshipNameToFaction[object.getName()]
+        if candidate and _zoneHelper.zoneFromPosition(object.getPosition()) == color then
+            if faction then
+                error('SetupFranken.renameFlagship: multiple flagships for ' .. color)
+            end
+            faction = candidate
+        end
+    end
+    if not faction then
+        _safePrintToColor('SetupFranken.renameFlagship: missing flagship for ' .. color, color, 'Red')
+        return
+    end
+
+    _safePrintToColor('SetupFranken.renameFlagship: ' .. faction.tokenName .. ' flagship "' .. faction.flagship .. '"', color, color)
+    SetupFaction.renameFlagship(color, faction)
+end
+
+function SetupFranken.unpackStartingTech(color)
+    local faction = false
+    local zoneAttributes = _zoneHelper.zoneAttributes(color)
+
+    for _, object in ipairs(getAllObjects()) do
+        local tokenName = string.match(object.getName(), '^(.*) Starting Tech')
+        if tokenName and _zoneHelper.zoneFromPosition(object.getPosition()) == color then
+            if faction then
+                error('SetupFranken.unpackStartingTech: multiple starting tech tokens for ' .. color)
+            end
+            faction = _factionHelper.fromTokenName(tokenName)
+        end
+    end
+    if not faction then
+        _safePrintToColor('SetupFranken.unpackStartingTech: missing starting tech for ' .. color, color, 'Red')
+        return
+    end
+
+    _safePrintToColor('SetupFranken.unpackStartingTech: ' .. faction.tokenName .. ' starting tech', color, color)
+    SetupFaction.unpackStartingTech(color, faction, zoneAttributes)
+end
+
+function SetupFranken.unpackStartingUnits(color)
+    local faction = false
+    local homeSystemTile = false
+
+    local guidToSystem = _systemHelper.systems()
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        local tokenName1 = string.match(name, '^(.*) Fleet$')
+        local tokenName2 = string.match(name, '^(.*) Starting Units$')
+        local tokenName = tokenName1 or tokenName2
+        if tokenName and _zoneHelper.zoneFromPosition(object.getPosition()) == color then
+            if faction then
+                error('SetupFranken.unpackStartingUnits: multiple starting unit tokens for ' .. color)
+            end
+            faction = _factionHelper.fromTokenName(tokenName)
+        end
+
+        local system = guidToSystem[object.getGUID()]
+        if system and system.home and _zoneHelper.zoneFromPosition(object.getPosition()) == color then
+            if homeSystemTile then
+                error('SetupFranken.unpackStartingUnits: multiple home system tiles for ' .. color)
+            end
+            homeSystemTile = object
+        end
+    end
+    if not faction then
+        _safePrintToColor('SetupFranken.unpackStartingUnits: missing starting units for ' .. color .. ', skipping starting units', color, 'Red')
+        return
+    end
+
+    -- If no HS in player zone look in the default on-map location.
+    if not homeSystemTile then
+        local zoneAttributes = _zoneHelper.zoneAttributes(color)
+        local pos = zoneAttributes and zoneAttributes.homeSystemPosition
+        local system = pos and _systemHelper.systemFromPosition(pos)
+        homeSystemTile = system and getObjectFromGUID(system.guid)
+    end
+    if not homeSystemTile then
+        -- Make this one non-fatal, HS may be ... somewhere else.
+        _safePrintToColor('SetupFranken.unpackStartingUnits: missing home system tile for ' .. color .. ', skipping starting units', color, 'Red')
+        return
+    end
+
+    _safePrintToColor('SetupFranken.unpackStartingUnits: ' .. faction.tokenName .. ' starting units', color, color)
+    SetupFaction.unpackUnits(color, faction, homeSystemTile)
+end
+
+local _unpackFrankenQueue = {}
+
+--- Entry point for faction unpack.
+-- Params:
+-- - params.unpackButtonGuid (optional) if set, delete this object after unpack.
+-- - params.factionTokenName (optional) if set, unpack this faction (otherwise look for a token in zone).
+-- - params.color (required) unpack into this zone.
+function unpackFranken(params)
+    assert(type(params) == 'table')
+    assert(not params.unpackButtonGuid or type(params.unpackButtonGuid) == 'string')
+    assert(not params.factionTokenName or type(params.factionTokenName) == 'string')
+    assert(type(params.color) == 'string')
+    table.insert(_unpackFrankenQueue, params)
+    startLuaCoroutine(self, 'unpackFrankenCoroutine')
+end
+
+function unpackFrankenCoroutine()
+    local params = table.remove(_unpackFrankenQueue)
+    local color = params.color
+    local zoneAttributes = _zoneHelper.zoneAttributes(color)
+
+    local factionSheet
+    if params.factionTokenName then
+        local faction = _factionHelper.fromTokenName(params.factionTokenName)
+        local factionBox, factionBoxSrc = SetupFaction.unpackFactionBox(faction, zoneAttributes)
+        if not factionBox then
+            error('unpack franken: unable to find faction box for "' .. faction.name .. '"')
+            return 1
+        end
+        while factionBox.spawning do
+            coroutine.yield(0)
+        end
+        coroutine.yield(0)
+
+        local nameToObject = SetupFaction.unpack(faction, factionBox, zoneAttributes, true)
+        local commandTokensBag = nameToObject[faction.tokenName .. ' Command Tokens Bag']
+        local ownerTokensBag = nameToObject[faction.tokenName .. ' Owner Tokens Bag']
+        factionSheet = nameToObject[faction.name .. ' Sheet']
+        nameToObject = nil
+        while commandTokensBag.spawning or ownerTokensBag.spawning do
+            coroutine.yield(0)
+        end
+        coroutine.yield(0)
+
+        if factionBoxSrc then
+            factionBoxSrc.putObject(factionBox)
+            coroutine.yield(0)
+        end
+        factionBox = nil
+    else
+        local faction = _factionHelper.fromColor(color)
+        factionSheet = faction and getObjectFromGUID(faction.factionSheetGuid)
+    end
+
+    if _includePoK then
+        SetupFaction.addLeaderSnapPoints(color)
+        coroutine.yield(0)
+    end
+    if factionSheet then
+        SetupFaction.addFactionSheetUnitUpgradeSnapPoints(factionSheet)
+        coroutine.yield(0)
+    end
+
+    local commandTokensBag = false
+    local ownerTokensBag = false
+    for _, object in ipairs(getAllObjects()) do
+        if string.match(object.getName(), 'Command Tokens Bag$') and _zoneHelper.zoneFromPosition(object.getPosition()) == color then
+            if commandTokensBag then
+                error('Unpack: multiple command tokens bags for ' .. color)
+            end
+            commandTokensBag = object
+        end
+        if string.match(object.getName(), 'Owner Tokens Bag$') and _zoneHelper.zoneFromPosition(object.getPosition()) == color then
+            if ownerTokensBag then
+                error('Unpack: multiple owner tokens bags for ' .. color)
+            end
+            ownerTokensBag = object
+        end
+    end
+    coroutine.yield(0)
+    if (not commandTokensBag) or (not ownerTokensBag) then
+        _safePrintToColor('UnpackFranken: unpack the faction sheet, command and owner tokens bags first.', color, 'Red')
+        return 1
+    end
+
+    if params.unpackButtonGuid then
+        local unpackButton = assert(getObjectFromGUID(params.unpackButtonGuid))
+        _safeDestroyObject(unpackButton)
+        coroutine.yield(0)
+    end
+
+    SetupFranken.renameFlagship(color)
+    coroutine.yield(0)
+
+    -- Make sure the faction helper knows about the faction before unpacking tokens.
+    _factionHelper.updateFactions()
+    local quantity = commandTokensBag.getQuantity()
+    _factionHelper.tintTokens({ color = color })
+    while commandTokensBag.getQuantity() < quantity do
+        coroutine.yield(0)
+    end
+    while ownerTokensBag.getQuantity() < 1 do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    if commandTokensBag.getQuantity() == 16 then
+        SetupFaction.unpackCommandTokens(color, commandTokensBag)
+        coroutine.yield(0)
+    end
+
+    SetupFranken.unpackStartingTech(color)
+    coroutine.yield(0)
+
+    SetupFaction.placeScoreCounters(ownerTokensBag, zoneAttributes, zoneAttributes.index, color)
+    coroutine.yield(0)
+
+    SetupFranken.unpackStartingUnits(color)
+    coroutine.yield(0)
+
+    -- Tell any other listeners about the change.
+    local listeners = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.getVar('onSetupHelperFactionUnpacked') then
+            table.insert(listeners, object)
+        end
+    end
+    for i, listener in ipairs(listeners) do
+        Wait.frames(function() listener.call('onSetupHelperFactionUnpacked') end, i)
+    end
+    coroutine.yield(0)
+
+    print('Unpack Franken for ' .. color .. ' finished')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+
+local UNIT_SCALE = {
+    ['Infantry'] = { unit = 0.7, bag = 0.8 },
+    ['Fighter'] = { unit = 0.7, bag = 0.8 },
+    ['Space Dock'] = { unit = 0.7, bag = 0.8 },
+    ['PDS'] = { unit = 1, bag = 1.1 },
+    ['Carrier'] = { unit = 0.6, bag = 0.7 },
+    ['Destroyer'] = { unit = 0.6, bag = 0.70 },
+    ['Cruiser'] = { unit = 0.6, bag = 0.70 },
+    ['Dreadnought'] = { unit = 0.6, bag = 0.70 },
+    ['War Sun'] = { unit = 0.7, bag = 0.8 },
+    ['Flagship'] = { unit = 0.7, bag = 0.8 },
+    ['Mech'] = { unit = 0.4, bag = 0.5 },
+}
+
+local DIRECTIONALISER_SCALE = 0.85
+
+function fixUnitScale()
+    startLuaCoroutine(self, 'fixUnitScaleCoroutine')
+end
+
+function fixUnitScaleCoroutine()
+    local unitBagNameSet = {}
+    for unitName, _ in pairs(UNIT_SCALE) do
+        for _, color in ipairs(Player.getColors()) do
+            unitBagNameSet[color .. ' ' .. unitName] = true
+        end
+    end
+
+    -- Bags need to be on the table, unpack any unused colors manually.
+    -- Assumes no faction unpack yet so can use generic flagship name.
+    local unitBags = {}
+    local directionalisers = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' and unitBagNameSet[object.getName()] then
+            table.insert(unitBags, object)
+        end
+        if string.match(object.getName(), '^Directionaliser (.*)$') then
+            table.insert(directionalisers, object)
+        end
+    end
+    coroutine.yield(0)
+
+    for _, unitBag in ipairs(unitBags) do
+        local unitName = string.match(unitBag.getName(), '^[^ ]* (.*)$')
+        local scales = assert(UNIT_SCALE[unitName])
+        local bagScale = scales.bag
+        local unitScale = scales.unit
+
+        unitBag.setScale({ x = bagScale, y = bagScale, z = bagScale })
+        unitBag.use_grid = false
+        unitBag.use_snap_points = true
+        unitBag.sticky = false
+
+        local pos = unitBag.getPosition()
+        for i, entry in ipairs(unitBag.getObjects()) do
+            local unit = unitBag.takeObject({
+                guid              = entry.guid,
+                position          = { x = pos.x, y = pos.y + 5 + i, z = pos.z },
+                rotation          = unitBag.getRotation(),
+                callback_function = function(object) unitBag.putObject(object) end,
+                smooth            = false,
+            })
+            unit.setScale({ x = unitScale, y = unitScale, z = unitScale })
+            unit.use_grid = false
+            unit.use_snap_points = false
+            unit.sticky = false
+        end
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    for _, directionaliser in ipairs(directionalisers) do
+        directionaliser.setScale({
+            x = DIRECTIONALISER_SCALE,
+            y = DIRECTIONALISER_SCALE,
+            z = DIRECTIONALISER_SCALE,
+        })
+    end
+
+    print('Fix unit scale finished.  If directionaliser scale changed please redo setup to reposition units.')
+
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    self.setColorTint({ r = 0.25, g = 0.25, b = 0.25 })
+    self.setScale({ x = 2, y = 0.01, z = 2 })
+    self.setName('TI4_SETUP_HELPER')
+    self.setDescription('Shared helper functions used by other objects, PLEASE LEAVE ON TABLE! This object is only visible to the black (GM) player.')
+
+    -- Only the GM/black player can see this object.  Others can still interact!
+    local invisibleTo = {}
+    for _, color in ipairs(Player.getColors()) do
+        if color ~= 'Black' then
+            table.insert(invisibleTo, color)
+        end
+    end
+    self.setInvisibleTo(invisibleTo)
+
+    local saveState = saveState and string.len(saveState) > 0 and JSON.decode(saveState)
+    if saveState then
+        _setupTime = saveState._setupTime
+        _includePoK = saveState._includePoK
+    end
+
+    self.addContextMenuItem('Fix unit scale', fixUnitScale, false)
+end
+
+function onSave()
+    return JSON.encode({
+        _setupTime = _setupTime,
+        _includePoK = _includePoK
+    })
+end
+
+-------------------------------------------------------------------------------
+--- Partially lock the _G global variable table.
+-- Include this AFTER creating any necessary globals to prevent new ones.
+--
+-- - Existing globals can still be read AND WRITTEN.
+-- - Cannot read non-existent globals.
+-- - Cannot write new globals.
+--
+-- This helps catch typos where what was meant to access a local instead
+-- references a (hopefully non-existent) global, as well as forgetting to use
+-- "local" when creating objects.
+--
+-- @author Darrell
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

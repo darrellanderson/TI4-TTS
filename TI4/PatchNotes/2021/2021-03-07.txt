@@ -1,0 +1,13 @@
+General:
+- Fix map tool "save" error when a system tile is far off the side.
+- "Place trade goods and set turns" now resets turn order to forward (if it had been reverse).
+- Fix strategy card automator using Mahact agent for construction secondary.
+SCPT draft tool:
+- If map tool is empty, set prelims map string when assigning draft order.
+- If map string matches prelim include slice names on slice tokens.
+- Fix moving speaker's player items slightly forward.
+- Added SCPT 2021 Prelims map to maps bag.
+Gamedata streamer updates:
+- Include abbreviated faction names (e.g. "Letnev").
+- Include strategy card(s) face up or down.
+- Reduce update delay from 60 to 30 seconds.

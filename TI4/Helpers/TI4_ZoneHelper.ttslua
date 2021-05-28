@@ -1,0 +1,1075 @@
+--- Player zones.
+-- @author Darrell
+-- #include <~/CrLua/Objects/TI4_Helpers/TI4_ZoneHelper2>
+
+-- Users should copy this getHelperClient function, and use via:
+--
+-- local zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+-- local zoneColor = zoneHelper.zoneFromPosition(object.getPosition())
+-- local guidToZoneColor = zoneHelper.zonesFromPositions(guidToPosition)
+--
+-- Where one can call any main function in this file via the helper.
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+
+-- ZONE ATTRIBUTES (for functions that return per-zone attributes).
+-- - index (number) starts at 1, winds clockwise from white seat.
+-- - color (string).
+-- - polygon (table) list of {xz} points in clockwise winding order about the zone.
+-- - boundingBox (table) min.{xz}, max.{xz} bounding box.
+-- - center (table) {xyz} position.
+-- - rotation (table) {xyz} rotation.
+-- - homeSystemPosition (table) {xyz} position.
+-- - ghostHomePosition (table) {xyz} position.
+-- - commandSheetGuid (string) command sheet defining zone color.
+
+-- Map from player count to zone attributes.
+local DEFAULT_ZONES = {
+    [2] = {
+        zones = {
+            [1] = {
+                {-64, -50}, {-64, -12.1},
+                {-17.25, -12.1}, {-1.5, -21.1}, {1.5, -21.1}, {17.25, -12.1},
+                {64, -12.1}, {64, -50}
+            },
+            [2] = {
+                {64, 50}, {64, 12.1},
+                {17.25, 12.1}, {1.5, 21.1}, {-1.5, 21.1}, {-17.25, 12.1},
+                {-64, 12.1}, {-64, 50}
+            },
+        },
+        homeSystemPositions = {
+            [1] = {0.00, -18.19},
+            [2] = {0.00, 18.19},
+        },
+        ghostHomePositions = {
+            [1] = {15.75, -21.22},
+            [2] = {-15.75, 21.22},
+        }
+    },
+    [3] = {
+        zones = {
+            [1] = {
+                {-64, -50}, {-64, -12.1},
+                {-17.25, -12.1}, {-1.5, -21.1}, {1.5, -21.1}, {17.25, -12.1},
+                {64, -12.1}, {64, -50}
+            },
+            [2] = {
+                {0, 50},
+                {0, 21.1}, {-1.5, 21.1}, {-17.5, 12.1},
+                {-64, 12.1}, {-64, 50}
+            },
+            [3] = {
+                {64, 50}, {64, 12.1},
+                {17.5, 12.1}, {1.5, 21.1}, {0, 21.1},
+                {0, 50}
+            },
+        },
+        homeSystemPositions = {
+            [1] = {0.00, -18.19},
+            [2] = {-15.75, 9.09},
+            [3] = {15.75, 9.09},
+        },
+        ghostHomePositions = {
+            [1] = {15.75, -21.22},
+            [2] = {-15.75, 21.22},
+            [3] = {15.75, 21.22},
+        }
+    },
+    [4] = {
+        zones = {
+            [1] = {
+                {0, -50},
+                {0, -21.1}, {1.5, -21.1}, {17.5, -12.1},
+                {64, -12.1}, {64, -50}
+            },
+            [2] = {
+                {-64, -50}, {-64, -12.1},
+                {-17.5, -12.1}, {-1.5, -21.1}, {0, -21.1},
+                {0, -50}
+            },
+            [3] = {
+                {0, 50},
+                {0, 21.1}, {-1.5, 21.1}, {-17.5, 12.1},
+                {-64, 12.1}, {-64, 50}
+            },
+            [4] = {
+                {64, 50}, {64, 12.1},
+                {17.5, 12.1}, {1.5, 21.1}, {0, 21.1},
+                {0, 50}
+            },
+        },
+        homeSystemPositions = {  -- home system positions in TI4 rulebook
+            [1] = {5.25, -15.16},
+            [2] = {-15.75, -3.03},
+            [3] = {-5.25, 15.16},
+            [4] = {15.75, 3.03},
+        },
+        ghostHomePositions = {
+            [1] = {15.75, -21.22},
+            [2] = {-15.75, -21.22},
+            [3] = {-15.75, 21.22},
+            [4] = {15.75, 21.22},
+        }
+    },
+    [5] = {
+        zones = {
+            [1] = {
+                {0, -50},
+                {0, -21.1}, {1.5, -21.1}, {17.5, -12.1},
+                {64, -12.1}, {64, -50}
+            },
+            [2] = {
+                {-64, -50}, {-64, -12.1},
+                {-17.5, -12.1}, {-1.5, -21.1}, {0, -21.1},
+                {0, -50}
+            },
+            [3] = {{-26.01, 50}, {-26.01, 12.1}, {-64, 12.1}, {-64, 50}},
+            [4] = {
+                {26.01, 50}, {26.01, 12.1},
+                {17.25, 12.1}, {1.5, 21.1}, {-1.5, 21.1}, {-17.25, 12.1},
+                {-26.01, 12.1}, {-26.01, 50}
+            },
+            [5] = {{64, 50}, {64, 12.1}, {26.01, 12.1}, {26.01, 50}},
+        },
+        homeSystemPositions = {
+            [1] = {15.75, -9.09},
+            [2] = {-15.75, -9.09},
+            [3] = {-15.75, 9.09},
+            [4] = {0.00, 18.19},
+            [5] = {15.75, 9.09},
+        },
+        ghostHomePositions = {
+            [1] = {15.75, -21.22},
+            [2] = {-15.75, -21.22},
+            [3] = {-31.5, 18.18},
+            [4] = {-15.75, 21.22},
+            [5] = {31.5, 18.18},
+        }
+    },
+    [6] = {
+        zones = {
+            [1] = {{26.01, -50}, {26.01, -12.1}, {64, -12.1}, {64, -50}},
+            [2] = {
+                {-26.01, -50}, {-26.01, -12.1},
+                {-17.25, -12.1}, {-1.5, -21.1}, {1.5, -21.1}, {17.25, -12.1},
+                {26.01, -12.1}, {26.01, -50}
+            },
+            [3] = {{-64, -50}, {-64, -12.1}, {-26.01, -12.1}, {-26.01, -50}},
+            [4] = {{-26.01, 50}, {-26.01, 12.1}, {-64, 12.1}, {-64, 50}},
+            [5] = {
+                {26.01, 50}, {26.01, 12.1},
+                {17.25, 12.1}, {1.5, 21.1}, {-1.5, 21.1}, {-17.25, 12.1},
+                {-26.01, 12.1}, {-26.01, 50}
+            },
+            [6] = {{64, 50}, {64, 12.1}, {26.01, 12.1}, {26.01, 50}},
+        },
+        homeSystemPositions = {
+            [1] = {15.75, -9.09},
+            [2] = {0.00, -18.19},
+            [3] = {-15.75, -9.09},
+            [4] = {-15.75, 9.09},
+            [5] = {0.00, 18.19},
+            [6] = {15.75, 9.09},
+        },
+        ghostHomePositions = {
+            [1] = {31.5, -18.18},
+            [2] = {15.75, -21.22},
+            [3] = {-31.5, -18.18},
+            [4] = {-31.5, 18.18},
+            [5] = {-15.75, 21.22},
+            [6] = {31.5, 18.18},
+        }
+    },
+    [7] = {
+        zones = {
+            [1] = {{26.01, -50}, {26.01, -12.1}, {64, -12.1}, {64, -50}},
+            [2] = {
+                {-26.01, -50}, {-26.01, -12.1},
+                {-17.25, -12.1}, {-1.5, -21.1}, {1.5, -21.1}, {17.25, -12.1},
+                {26.01, -12.1}, {26.01, -50}
+            },
+            [3] = {{-64, -50}, {-64, -12.1}, {-26.01, -12.1}, {-26.01, -50}},
+            [4] = {{-35.01, 50}, {-35.01, 12.1}, {-64, 12.1}, {-64, 50}},
+            [5] = {
+                {0, 50},
+                {0, 21.1}, {-1.5, 21.1}, {-17.5, 12.1},
+                {-35.01, 12.1}, {-35.01, 50}
+            },
+            [6] = {
+                {35.01, 50}, {35.01, 12.1},
+                {17.5, 12.1}, {1.5, 21.1}, {0, 21.1},
+                {0, 50}
+            },
+            [7] = {{64, 50}, {64, 12.1}, {35.01, 12.1}, {35.01, 50}},
+        },
+        extraRings = 1,
+        homeSystemPositions = {
+            [1] = {15.75, -9.1},
+            [2] = {0, -24.25},
+            [3] = {-15.75,-15.16},
+            [4] = {-21,0},
+            [5] = {-15.75,15.16},
+            [6] = {0,24.25},
+            [7] = {15.75, 9.1},
+        },
+        ghostHomePositions = {
+            [1] = {31.5, -18.18},
+            [2] = {15.75, -21.22},
+            [3] = {-31.5, -18.18},
+            [4] = {-42, 18.18},
+            [5] = {-26.25, 21.21},
+            [6] = {10.5, 24.24},
+            [7] = {42, 18.18},
+        }
+    },
+    [8] = {
+        zones = {
+            [1] = {{35.01, -50}, {35.01, -12.1}, {64, -12.1}, {64, -50}},
+            [2] = {
+                {0, -50},
+                {0, -21.1}, {1.5, -21.1}, {17.5, -12.1},
+                {35.01, -12.1}, {35.01, -50}
+            },
+            [3] = {
+                {-35.01, -50}, {-35.01, -12.1},
+                {-17.5, -12.1}, {-1.5, -21.1}, {0, -21.1},
+                {0, -50}
+            },
+            [4] = {{-64, -50}, {-64, -12.1}, {-35.01, -12.1}, {-35.01, -50}},
+            [5] = {{-35.01, 50}, {-35.01, 12.1}, {-64, 12.1}, {-64, 50}},
+            [6] = {
+                {0, 50},
+                {0, 21.1}, {-1.5, 21.1}, {-17.5, 12.1},
+                {-35.01, 12.1}, {-35.01, 50}
+            },
+            [7] = {
+                {35.01, 50}, {35.01, 12.1},
+                {17.5, 12.1}, {1.5, 21.1}, {0, 21.1},
+                {0, 50}
+            },
+            [8] = {{64, 50}, {64, 12.1}, {35.01, 12.1}, {35.01, 50}},
+        },
+        extraRings = 1,
+        homeSystemPositions = {
+            [1] = {21, 0},
+            [2] = {15.75, -15.16},
+            [3] = {0, -24.25},
+            [4] = {-15.75, -15.16},
+            [5] = {-21, 0},
+            [6] = {-15.75, 15.16},
+            [7] = {0.00, 24.25},
+            [8] = {15.75, 15.16},
+        },
+        ghostHomePositions = {
+            [1] = {42, -18.18},
+            [2] = {26.25, -21.21},
+            [3] = {-10.5, -24.25},
+            [4] = {-42, -18.18},
+            [5] = {-42, 18.18},
+            [6] = {-26.25, 21.21},
+            [7] = {10.5, 24.24},
+            [8] = {42, 18.18},
+        }
+    },
+}
+
+local DEFAULT_VECTOR_LINE_THICKNESS = 0.15
+local DEFAULT_TABLE_Y = 1
+
+-- Current zones.
+local _zones = {}
+local _table = {}
+local _lastUpdateZoneColorTime = false
+local _extraRings = 0
+
+-------------------------------------------------------------------------------
+
+function getPlayerCount()
+    _maybeUpdateZoneColors()
+    return #_zones
+end
+
+function getExtraRings()
+    return _extraRings
+end
+
+function getTableY()
+    return _table.y or DEFAULT_TABLE_Y
+end
+
+-------------------------------------------------------------------------------
+
+--- Reset the number of zones.
+-- @param playerCount number : player count.
+-- @param extraRings number : push zones out to make room for extra map rings.
+function setPlayerCount(params)
+    assert(type(params.playerCount) == 'number' and (not params.extraRings or type(params.extraRings) == 'number'))
+    --print('Setting up for ' .. params.playerCount .. ' players with ' .. params.extraRings .. ' extra map rings')
+
+    _table = {
+        y = DEFAULT_TABLE_Y,
+    }
+
+    local zoneAttributes = assert(DEFAULT_ZONES[params.playerCount], 'invalid player count')
+    _extraRings = params.extraRings or zoneAttributes.extraRings or 0
+    _zones = {}
+    local homeSystemPositionsXZ = zoneAttributes.homeSystemPositions
+    for i = 1, params.playerCount do
+        local polygon = assert(zoneAttributes.zones[i])
+        if _extraRings then
+            local mutated = {}
+            for _, xz in ipairs(polygon) do
+                table.insert(mutated, {
+                    xz[1],
+                    xz[2] + 7 * (xz[2] > 0 and 1 or -1) * _extraRings
+                })
+            end
+            polygon = mutated
+        end
+        local bb = _boundingBox(polygon)
+        local homeXZ = assert(homeSystemPositionsXZ[i])
+        local ghostXZ = assert(zoneAttributes.ghostHomePositions[i])
+        ghostXZ = {
+            ghostXZ[1],
+            ghostXZ[2] + 7 * (ghostXZ[2] > 0 and 1 or -1) * _extraRings
+        }
+        table.insert(_zones, {
+            index = i,
+            color = false,
+            polygon = polygon,
+            boundingBox = bb,
+            center = {
+                x = (bb.min.x + bb.max.x) / 2,
+                y = _table.y,
+                z = (bb.min.z + bb.max.z) / 2
+            },
+            rotation = {
+                x = 0,
+                y = (bb.min.z + bb.max.z) / 2 > 0 and 0 or 180,
+                z = 0
+            },
+            homeSystemPosition = {
+                x = assert(homeXZ[1]),
+                y = assert(_table.y),
+                z = assert(homeXZ[2])
+            },
+            ghostHomePosition = {
+                x = assert(ghostXZ[1]),
+                y = assert(_table.y),
+                z = assert(ghostXZ[2])
+            }
+        })
+    end
+    updateZoneColors()
+end
+
+--- Get home system positions, possibly alt positions if set.
+-- @param playerCount (number): home system positions for given player count.
+-- @return (table): list of {xyz} tables.
+function getHomeSystemPositions(playerCount)
+    if not playerCount then
+        playerCount = #_zones
+    end
+    local positionsXZ = DEFAULT_ZONES[playerCount].homeSystemPositions
+    local result = {}
+    for _, positionXZ in ipairs(positionsXZ) do
+        table.insert(result, {
+            x = positionXZ[1],
+            y = _table.y,
+            z = positionXZ[2]
+        })
+    end
+    return result
+end
+
+-------------------------------------------------------------------------------
+
+--- Update zone colors by scanning for command sheets.
+function updateZoneColors()
+    _lastUpdateZoneColorTime = Time.time
+
+    for _, zone in ipairs(_zones) do
+        zone.color = false
+    end
+
+    local colorToHomeSystemPosition = {}
+    for _, object in ipairs(getAllObjects()) do
+        local color = string.match(object.getName(), '^Command Sheet %((%a+)%)$')
+        if color then
+            local p = object.getPosition()
+            for _, zone in ipairs(_zones) do
+                if _boundingBoxContains(zone.boundingBox, p) and _polygonContains(zone.polygon, p) then
+                    if zone.color then
+                        broadcastToAll('Warning: more than one command sheet in zone ("' .. object.getName() .. '")')
+                    end
+                    zone.color = color
+                    zone.commandSheetGuid = object.getGUID()
+                end
+            end
+        end
+        local color = string.match(object.getName(), '^Home System Location %((.*)%)$')
+        if color then
+            local hex = _systemHelper.hexFromPosition(object.getPosition())
+            local pos = _systemHelper.hexToPosition(hex)
+            colorToHomeSystemPosition[color] = {
+                x = pos.x,
+                y = getTableY(),
+                z = pos.z
+            }
+        end
+    end
+
+    for _, zone in ipairs(_zones) do
+        local position = colorToHomeSystemPosition[zone]
+        if position then
+            zone.homeSystemPosition = position
+        end
+    end
+end
+
+function _maybeUpdateZoneColors()
+    if not _lastUpdateZoneColorTime or (Time.time - _lastUpdateZoneColorTime > 10) then
+        updateZoneColors()
+    end
+end
+
+-------------------------------------------------------------------------------
+
+--- Get all zones' attributes.
+-- @return table : list of zone attribute tables in zone index order.
+function zonesAttributes()
+    _maybeUpdateZoneColors()
+    return _zones
+end
+
+--- Get a single zone's attributes.
+-- @see zoneAttributes for a list of attributes.
+-- @param color string : command sheet color.
+-- @return table : zone attributes.
+function zoneAttributes(color)
+    assert(type(color) == 'string')
+    _maybeUpdateZoneColors()
+    for _, zone in ipairs(_zones) do
+        if zone.color == color then
+            return zone
+        end
+    end
+end
+
+--- Get all zone colors.
+-- @return table : list of color strings in zone index order.
+function zones()
+    _maybeUpdateZoneColors()
+    local result = {}
+    for _, zone in ipairs(_zones) do
+        if zone.color then
+            table.insert(result, zone.color)
+        end
+    end
+    return result
+end
+
+--- Get zone color from position.
+-- @param position table : {xyz} position.
+-- @return string : zone color, or nil if not in zone.
+function zoneFromPosition(position)
+    assert(type(position) == 'table' and type(position.x) == 'number')
+    _maybeUpdateZoneColors()
+    for _, zone in ipairs(_zones) do
+        if _boundingBoxContains(zone.boundingBox, position) and _polygonContains(zone.polygon, position) then
+            return zone.color
+        end
+    end
+end
+
+--- Given map from guids to positions, return map from guids to zone.
+-- This is a bulk operation to reduce call overhead.
+-- @param guidToPosition table : guid to {xyz} tables.
+-- @return table : map from guid to zone color string.
+function zonesFromPositions(guidToPosition)
+    assert(type(guidToPosition) == 'table')
+    _maybeUpdateZoneColors()
+    local result = {}
+    for guid, position in pairs(guidToPosition) do
+        result[guid] = zoneFromPosition(position)
+    end
+    return result
+end
+
+--- Get guids for objects in any player's hand.
+-- @param playerColor string.
+-- @return table : set from guid string to true.
+function inHand()
+    local result = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        for i = 1, player.getHandCount() do
+            for _, object in ipairs(player.getHandObjects(i)) do
+                result[object.guid] = true
+            end
+        end
+    end
+    return result
+end
+
+--- Get zone closest to position (hands are outside zone areas).
+-- @param position table : {xyz} table.
+-- @return color string
+function closestZone(position)
+    assert(type(position) == 'table' and type(position.x) == 'number')
+    _maybeUpdateZoneColors()
+    local best = false
+    local bestDSq = false
+    local a = position
+    for _, zone in ipairs(_zones) do
+        local b = zone.center
+        local dSq = (a.x - b.x) ^ 2 + (a.z - b.z) ^ 2
+        if not bestDSq or dSq < bestDSq then
+            best = zone.color
+            bestDSq = dSq
+        end
+    end
+    return best
+end
+
+-------------------------------------------------------------------------------
+
+--- Get setVectorLines compatible lines from zone borders.
+-- @param parameters table : { inset, clipToTable, thickness, colors, borderOnly }
+-- None are required.  If colors list is emtpy get all colors.
+function getBordersVectorLines(parameters)
+    assert(type(parameters) == 'table')
+    assert(_table.y)
+
+    local thickness = parameters.thickness or DEFAULT_VECTOR_LINE_THICKNESS
+    local homeSystemThickness = parameters.homeSystemThickness or thickness * 2
+    local inset = parameters.inset or (thickness / 2)
+    local elevateY = 0.02
+
+    local function polygonToPointsXYZ(polygon)
+        local pointsXYZ = {}
+        for _, xz in ipairs(polygon) do
+            table.insert(pointsXYZ, {
+                x = xz[1], y = _table.y + elevateY, z = xz[2]
+            })
+        end
+        return pointsXYZ
+    end
+    local function homeSystemXYZ(centerXYZ)
+        local pointsXYZ = {}
+        for i = 1, 16 do
+            local phi = i / 16 * math.pi * 2
+            local r = 2
+            table.insert(pointsXYZ, {
+                x = centerXYZ.x + math.sin(phi) * r,
+                y = _table.y + elevateY,
+                z = centerXYZ.z + math.cos(phi) * r
+            })
+        end
+        return pointsXYZ
+    end
+
+    local colorSet = false
+    for _, color in ipairs(parameters.colors or {}) do
+        colorSet = colorSet or {}
+        colorSet[color] = true
+    end
+
+    local lines = {}
+    for _, zone in ipairs(_zones) do
+        if not colorSet or colorSet[zone.color] then
+            local polygon = assert(zone.polygon)
+            polygon = _inset(polygon, inset)
+            table.insert(lines, {
+                points = polygonToPointsXYZ(polygon),
+                thickness = thickness,
+                color = zone.color or 'Grey',
+                loop = true,
+                square = true,
+            })
+            if not parameters.borderOnly then
+                table.insert(lines, {
+                    points = homeSystemXYZ(zone.homeSystemPosition),
+                    thickness = homeSystemThickness,
+                    color = zone.color or 'Grey',
+                    loop = true,
+                    square = true,
+                })
+            end
+            if parameters.ghostHomePositions then
+                table.insert(lines, {
+                    points = homeSystemXYZ(zone.ghostHomePosition),
+                    thickness = homeSystemThickness / 2,
+                    color = zone.color or 'Grey',
+                    loop = true,
+                    square = true,
+                })
+            end
+        end
+    end
+    return lines
+end
+
+function getMapRingsVectorLines()
+    local tileRadius = math.sqrt((Grid.sizeX/2)^2 - (Grid.sizeX/4)^2)
+
+    local elevateY = 0.02
+    local y = _table.y + elevateY
+    local function polygonToPoints(polygon)
+        local points = {}
+        for _, p in ipairs(polygon) do
+            table.insert(points, { x = p[1], y = y, z = p[2] })
+        end
+        return points
+    end
+
+    local thickness = 0.1
+    local ringColors = {
+        'Teal',
+        'Orange',
+        'Pink',
+        'Blue',
+        'White',
+    }
+
+    local lines = {}
+    local edgeLength = 1
+    for ringIndex = 1, 3 + _extraRings do
+        local p0 = { x = 0, y = y, z = tileRadius * 2 * ringIndex }
+        local hex = _systemHelper.hexFromPosition(p0)
+        local dir = 2
+        local ringPoints = {}
+        for edge = 1, 6 do
+            for i = 1, edgeLength do
+                local hexCenter = _systemHelper.hexToPosition(hex)
+                if i == 1 then
+                    table.insert(ringPoints, {
+                        x = hexCenter.x,
+                        y = y,
+                        z = hexCenter.z
+                    })
+                end
+                local points = {}
+                for angle = 0, 300, 60 do
+                    table.insert(points, {
+                        x = hexCenter.x + math.cos(math.rad(angle)) * tileRadius / 6,
+                        y = y,
+                        z = hexCenter.z + math.sin(math.rad(angle)) * tileRadius / 6
+                    })
+                end
+                table.insert(lines, {
+                    points = points,
+                    thickness = thickness,
+                    color = ringColors[ringIndex] or 'Grey',
+                    loop = true,
+                    square = true
+                })
+                hex = _systemHelper.hexNeighbors(hex)[dir]
+            end
+            dir = dir == 6 and 1 or (dir + 1)
+        end
+        table.insert(lines, {
+            points = ringPoints,
+            thickness = 2,
+            color = Color.fromString(ringColors[ringIndex] or 'Grey'):setAt('a', 0.2),
+            loop = true,
+            square = true
+        })
+        edgeLength = edgeLength + 1
+    end
+    return lines
+end
+
+-------------------------------------------------------------------------------
+
+function _boundingBox(polygonXZ)
+    assert(type(polygonXZ) == 'table')
+
+    local min, max
+    for i, vertex in ipairs(polygonXZ) do
+        local x, z = vertex[1], vertex[2]
+        if i == 1 then
+            min = { x = x, z = z }
+            max = { x = x, z = z }
+        else
+            min.x = math.min(min.x, x)
+            min.z = math.min(min.z, z)
+            max.x = math.max(max.x, x)
+            max.z = math.max(max.z, z)
+        end
+    end
+    return { min = min, max = max }
+end
+
+function _testBoundingBox()
+    local polygon = { {0, 0}, {-1, 2}, {1, 0}, {0, -2} }
+    local box = _boundingBox(polygon)
+    assert(box.min.x == -1 and box.min.z == -2)
+    assert(box.max.x == 1 and box.max.z == 2)
+end
+
+function _boundingBoxContains(boxXZ, position)
+    assert(type(boxXZ) == 'table' and boxXZ.min and type(position) == 'table' and position.x)
+    local gteMin = position.x >= boxXZ.min.x and position.z >= boxXZ.min.z
+    local lteMax = position.x <= boxXZ.max.x and position.z <= boxXZ.max.z
+    return gteMin and lteMax
+end
+
+function _testBoundingBoxContains()
+    local box = _boundingBox({ {0, 0}, {2, 2} })
+    assert(_boundingBoxContains(box, { x = 1, z = 1 }))
+    assert(not _boundingBoxContains(box, { x = 3, z = 3 }))
+end
+
+--- Is the point inside the polygon (2D)?
+-- Uses the "ray casting method".
+-- @see https://love2d.org/wiki/PointWithinShape
+--
+-- @param polygonXZ table : list of 2d points, each point is a list of two numbers.
+-- @param position table : {xz} table (y too problably, not used).
+-- @return boolean : true if point is inside polygon.
+function _polygonContains(polygonXZ, position)
+    assert(type(polygonXZ) == 'table' and type(position) == 'table' and position.x)
+
+    local x, z = 1, 2
+    local numverts = #polygonXZ
+    local tx, tz = position.x, position.z
+    local p0 = polygonXZ[numverts]
+
+    -- get test bit for above/below X axis
+    local zflag0 = p0[z] >= tz
+    local insideFlag = false
+
+    for _, p1 in ipairs(polygonXZ) do
+        local zflag1 = p1[z] >= tz
+
+        -- Check if endpoints straddle (are on opposite sides) of X axis
+        -- (i.e. the Zs differ); if so, +X ray could intersect this edge.
+        if zflag0 ~= zflag1 then
+            -- Check intersection of pgon segment with +X ray.
+            -- Note if >= point's X; if so, the ray hits it.
+            if ((p1[z] - tz) * (p0[x] - p1[x]) >= (p1[x] - tx) * (p0[z] - p1[z])) == zflag1 then
+                insideFlag = not insideFlag
+            end
+        end
+
+        -- Move to the next pair of vertices, retaining info as possible.
+        zflag0 = zflag1
+        p0 = p1
+    end
+
+    return insideFlag
+end
+
+function _testPolygonContains()
+    local polygon = { {0,0}, {0,2}, {2,2}, {2,0} }
+    assert(_polygonContains(polygon, {x=1,z=1}))
+    assert(not _polygonContains(polygon, {x=3,z=3}))
+end
+
+--- Inset polygon by fixed perpendicular distance.
+-- Requires polygon vertices be given in clockwise order, otherwise will outset!
+-- @see http://alienryderflex.com/polygon_inset/
+-- @see http://alienryderflex.com/intersect/
+-- @param polygon table : list of 2d points, each point is a list of two numbers.
+-- @param inset number : inset distance (negative to outset).
+-- @return inset polygon table : new inset polygon, original left as-is.
+function _inset(polygon, inset)
+    assert(type(polygon) == 'table' and type(inset) == 'number')
+    assert(#polygon > 2)
+
+    local x = 1
+    local y = 2
+
+    local function lineIntersection(a, b, c, d)
+        assert(not(a[x] == b[x] and a[y] == b[y]))
+        assert(not(c[x] == d[x] and c[y] == d[y]))
+
+        -- Translate so A is at the origin.
+        --local A = { [x] = 0, [y] = 0 }
+        local B = { [x] = b[x] - a[x], [y] = b[y] - a[y] }
+        local C = { [x] = c[x] - a[x], [y] = c[y] - a[y] }
+        local D = { [x] = d[x] - a[x], [y] = d[y] - a[y] }
+
+        local distAB = math.sqrt((B[x] * B[x]) + (B[y] * B[y]))
+        assert(distAB > 0)
+
+        -- Rotate so B is on the positive X axis.
+        local cos = B[x] / distAB
+        local sin = B[y] / distAB
+        --B = { [x] = distAB, [y] = 0 }
+        C = { [x] = (C[x] * cos) + (C[y] * sin), [y] = (C[y] * cos) - (C[x] * sin) }
+        D = { [x] = (D[x] * cos) + (D[y] * sin), [y] = (D[y] * cos) - (D[x] * sin) }
+        assert(C[y] ~= D[y])  -- parallel lines
+
+        -- Get intersection on the AB x axis line.
+        local ABx = D[x] + ((C[x] - D[x]) * D[y] / (D[y] - C[y]))
+
+        -- Reverse rotation, translation.
+        return { [x] = a[x] + (ABx * cos), [y] = a[y] + (ABx * sin) }
+    end
+
+    local function insetCorner(prev, cur, next)
+        -- Get line segments (preserve winding direction) and distances.
+        local d1 = { [x] = cur[x] - prev[x], [y] = cur[y] - prev[y] }
+        local dist1 = math.sqrt((d1[x] * d1[x]) + (d1[y] * d1[y]))
+        local d2 = { [x] = next[x] - cur[x], [y] = next[y] - cur[y] }
+        local dist2 = math.sqrt((d2[x] * d2[x]) + (d2[y] * d2[y]))
+        assert(dist1 > 0 and dist2 > 0)
+
+        -- Inset line segments prev->cur and cur->next.
+        local inset1 = { [x] = d1[y] * inset / dist1, [y] = -d1[x] * inset / dist1 }
+        local prev1 = { [x] = prev[x] + inset1[x], [y] = prev[y] + inset1[y] }
+        local prev2 = { [x] = cur[x] + inset1[x], [y] = cur[y] + inset1[y] }
+        local inset2 = { [x] = d2[y] * inset / dist2, [y] = -d2[x] * inset / dist2 }
+        local next1 = { [x] = cur[x] + inset2[x], [y] = cur[y] + inset2[y] }
+        local next2 = { [x] = next[x] + inset2[x], [y] = next[y] + inset2[y] }
+
+        -- If both inset line segments share an endpoint, lines are colinear.
+        if prev2[x] == next1[x] and prev2[y] == next1[y] then
+            return next1
+        end
+
+        -- Otherwise get intersection point.
+        return lineIntersection(prev1, prev2, next1, next2)
+    end
+
+    local insetPolygon = {}
+    local numVertices = #polygon
+    for i = 1, #polygon do
+        local prevPt = polygon[((i - 2) % numVertices) + 1]
+        local curPt = polygon[i]
+        local nextPt = polygon[(i % numVertices) + 1]
+        table.insert(insetPolygon, insetCorner(prevPt, curPt, nextPt))
+    end
+
+    return insetPolygon
+end
+
+function _testInset()
+    local polygon = { {0, 0}, {1, 1}, {2, 0} }
+    local inset = CrLua.Polygon.inset(polygon, 0.1)
+    assert(#inset == 3)
+    local function almost(point, x, y)
+        return math.abs(point[1] - x) < 0.01 and math.abs(point[2] - y) < 0.01
+    end
+    assert(almost(inset[1], 0.24, 0.1), '1: ' .. inset[1][1] .. ', ' .. inset[1][2])
+    assert(almost(inset[2], 1, 0.85), '2: ' .. inset[2][1] .. ', ' .. inset[2][2])
+    assert(almost(inset[3], 1.76, 0.1), '3: ' .. inset[3][1] .. ', ' .. inset[3][2])
+end
+
+-------------------------------------------------------------------------------
+
+local _viewTypeToStaticViewObject = {}
+local _drawBordersWaitId = false
+
+function _getOrCreateViewObject(viewType)
+    assert(type(viewType) == 'string')
+
+    -- Use a second object with unrestricted visibility.
+    local object = _viewTypeToStaticViewObject[viewType]
+    if object then
+        return object
+    end
+
+    -- Not in cache.  Look for it on table.
+    local voName = self.getName() .. ' view object (' .. viewType .. ')'
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == voName then
+            _viewTypeToStaticViewObject[viewType] = object
+            return object
+        end
+    end
+
+    -- Not on table, create it.
+    local pos = self.getPosition()
+    local dy = {
+        static = -5,
+        dynamic = -6
+    }
+    object = spawnObject({
+        type              = 'BlockSquare',
+        position          = { x = pos.x, y = pos.y + assert(dy[viewType]), z = pos.z },
+        sound             = false,
+        snap_to_grid      = false,
+    })
+    object.setName(voName)
+    object.setDescription('Draw faction border lines on this, not global')
+    object.setLock(true)
+    object.interactable = false
+
+    _viewTypeToStaticViewObject[viewType] = object
+    return object
+end
+
+function clearBordersVectorLines()
+    local viewObject = assert(_getOrCreateViewObject('static'))
+    viewObject.setVectorLines({})
+    local viewObject = assert(_getOrCreateViewObject('dynamic'))
+    viewObject.setVectorLines({})
+end
+
+--- Draw borders using self local space.  This leaves any global lines in place.
+function drawBordersVectorLines(highlightCurrentPlayer)
+    _drawStaticVectorLines()
+    if highlightCurrentPlayer and Turns.enable and Turns.turn_color then
+        _drawDynamicVectorLines()
+    end
+end
+
+function _drawStaticVectorLines()
+    local lines = getBordersVectorLines({
+        ghostHomePositions = false
+    })
+    -- Add system rings.
+    for _, line in ipairs(getMapRingsVectorLines()) do
+        table.insert(lines, line)
+    end
+
+    -- Move to local space.
+    local viewObject = assert(_getOrCreateViewObject('static'))
+    for _, line in ipairs(lines) do
+        for i, point in ipairs(line.points) do
+            line.points[i] = viewObject.positionToLocal(point)
+        end
+    end
+    viewObject.setVectorLines(lines)
+end
+
+function _drawDynamicVectorLines()
+    local lines = {}
+    if Turns.enable and Turns.turn_color then
+        lines = getBordersVectorLines({
+            inset = DEFAULT_VECTOR_LINE_THICKNESS * 3,
+            thickness = DEFAULT_VECTOR_LINE_THICKNESS * 2,
+            colors = { Turns.turn_color },
+            borderOnly = true,
+        })
+    end
+    local viewObject = assert(_getOrCreateViewObject('dynamic'))
+    for _, line in ipairs(lines) do
+        for i, point in ipairs(line.points) do
+            line.points[i] = viewObject.positionToLocal(point)
+        end
+    end
+    viewObject.setVectorLines(lines)
+end
+
+function onPlayerTurnStart(player_color_start, player_color_previous)
+    Wait.frames(function() _drawDynamicVectorLines() end, 4)
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    self.setColorTint({ r = 0.25, g = 0.25, b = 0.25 })
+    self.setScale({ x = 2, y = 0.01, z = 2 })
+    self.setName('TI4_ZONE_HELPER')
+    self.setDescription('Shared helper functions used by other objects, PLEASE LEAVE ON TABLE! This object is only visible to the black (GM) player.')
+
+    -- Only the GM/black player can see this object.  Others can still interact!
+    local invisibleTo = {}
+    for _, color in ipairs(Player.getColors()) do
+        if color ~= 'Black' then
+            table.insert(invisibleTo, color)
+        end
+    end
+    self.setInvisibleTo(invisibleTo)
+
+    -- Set initial player count based on command sheets.
+    local numCommandSheets = 0
+    for _, object in ipairs(getAllObjects()) do
+        if string.match(object.getName(), '^Command Sheet %((%a+)%)$') then
+            numCommandSheets = numCommandSheets + 1
+        end
+    end
+    setPlayerCount({
+        playerCount = numCommandSheets,
+        extraRings = 0
+    })
+
+    -- Now that a "reasonable" setup is in place, attempt to restore correct one.
+    local json = saveState and string.len(saveState) and JSON.decode(saveState)
+    if json then
+        --print('Zone helper: restoring ' .. json.playerCount .. ' players with ' .. json.extraRings .. ' extra map rings')
+        setPlayerCount({
+            playerCount = json.playerCount,
+            extraRings = json.extraRings
+        })
+        for color, position in pairs(json.homeSystemPositions or {}) do
+            local zone = zoneAttributes(color)
+            if zone then
+                zone.homeSystemPosition = position
+            end
+        end
+    end
+
+    drawBordersVectorLines(true)
+end
+
+function onSave()
+    local homeSystemPositions = {}
+    for _, zone in ipairs(zonesAttributes()) do
+        if zone.color then
+            homeSystemPositions[zone.color] = zone.homeSystemPosition
+        end
+    end
+    return JSON.encode({
+        playerCount = getPlayerCount(),
+        extraRings = getExtraRings(),
+        homeSystemPositions = homeSystemPositions
+    })
+end
+
+function onObjectDrop(playerColor, droppedObject)
+    local color = string.match(droppedObject.getName(), '^Home System Location %((.*)%)$')
+    if color then
+        updateHomeSystemPosition({
+            color = color,
+            position = droppedObject.getPosition()
+        })
+    end
+end
+
+function updateHomeSystemPosition(params)
+    assert(type(params) == 'table', 'bad params')
+    assert(type(params.color) == 'string', 'bad color')
+    assert(type(params.position) == 'table', 'bad position')
+    local zone = zoneAttributes(params.color)
+    if zone then
+        -- Do not trust position to be exact, use hex center at table height.
+        local hex = _systemHelper.hexFromPosition(params.position)
+        local pos = _systemHelper.hexToPosition(hex)
+        zone.homeSystemPosition = {
+            x = pos.x,
+            y = getTableY(),
+            z = pos.z
+        }
+        _drawStaticVectorLines()
+        printToAll('Moved ' .. params.color .. ' home system location', params.color)
+    end
+end
+
+-------------------------------------------------------------------------------
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

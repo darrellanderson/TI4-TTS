@@ -1,0 +1,281 @@
+-------------------------------------------------------------------------------
+--- Hex math functions
+-- Adapted from Red Blob Games
+-- @see https://www.redblobgames.com/grids/hexagons/implementation.html
+-- The full Red Blob Games hex library contains many other functions.
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.RedBlobHex'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.RedBlobHex = assert(not CrLua.RedBlobHex) and {
+    _require = {}
+}
+
+--- Standard hex orientations.
+CrLua.RedBlobHex.ORIENTATION = {
+    POINTY_TOP = 1,
+    FLAT_TOP = 2
+}
+
+-------------------------------------------------------------------------------
+--- Hex grid orientation, used to translate between screen position and unit hex
+-- (unit meaning it does not take into account hex size or screen origin).
+-- Outside users can references CrLua.RedBlobHex.ORIENTATION.{POINT|FLAT}_TOP
+-- values to get an orientation for standard hex grids.
+-- @param f* : matrix to translate from hex to screen position.
+-- @param b* : matrix to translate from screen position to hex.
+-- @param start_angle : angle to the first corner (flat vs pointy top).
+-- @return table : orientation data.
+-------------------------------------------------------------------------------
+function CrLua.RedBlobHex.orientation(f0, f1, f2, f3, b0, b1, b2, b3, start_angle)
+    return { f0 = f0, f1 = f1, f2 = f2, f3 = f3, b0 = b0, b1 = b1, b2 = b2, b3 = b3, start_angle = start_angle }
+end
+
+-------------------------------------------------------------------------------
+--- Hex grid layout.  Used to translate between real screen position and hex.
+-- @param orientatation : one of the CrLua.RedBlobHex.ORIENTATION, or an orientation.
+-- @param hexSize 2D point table : {x,y} keys to hex width and height dimensions.
+-- @param origin 2D point table : {x,y} keys to world origin.
+-- @return table : layout data.
+-------------------------------------------------------------------------------
+function CrLua.RedBlobHex.layout(orientation, hexSize, origin)
+    -- If orientation it an ORIENTATION entry, use a standard orientation.
+    if orientation == CrLua.RedBlobHex.ORIENTATION.POINTY_TOP then
+        orientation = CrLua.RedBlobHex.orientation(math.sqrt(3.0), math.sqrt(3.0) / 2.0, 0.0, 3.0 / 2.0, math.sqrt(3.0) / 3.0, -1.0 / 3.0, 0.0, 2.0 / 3.0, 0.5)
+    elseif orientation == CrLua.RedBlobHex.ORIENTATION.FLAT_TOP then
+        orientation = CrLua.RedBlobHex.orientation(3.0 / 2.0, 0.0, math.sqrt(3.0) / 2.0, math.sqrt(3.0), 2.0 / 3.0, 0.0, -1.0 / 3.0, math.sqrt(3.0) / 3.0, 0.0)
+    elseif type(orientation) == 'string' then
+        error('unknown orientation "' .. orientation .. '"')
+    end
+
+    assert(type(orientation) == 'table' and type(orientation.f0) == 'number')
+    assert(type(hexSize) == 'table' and type(hexSize.x) == 'number' and type(hexSize.y) == 'number')
+    assert(type(origin) == 'table' and type(origin.x) == 'number' and type(origin.y) == 'number')
+
+    return { orientation = orientation, size = hexSize, origin = origin }
+end
+
+-------------------------------------------------------------------------------
+--- 2D point for world space.
+-- @param x : number
+-- @param y : number
+-- @return point table : {x,y} keys.
+-------------------------------------------------------------------------------
+function CrLua.RedBlobHex.point(x, y)
+    return { x = x, y = y }
+end
+
+function CrLua.RedBlobHex._testPoint()
+    local point = CrLua.RedBlobHex.point(1, 2)
+    assert(point.x == 1 and point.y == 2)
+end
+
+-------------------------------------------------------------------------------
+--- Hex coordinates (Axial).
+-- @param q : number.
+-- @param r : number.
+-- @param s : number.
+-- @return hex table : {q,r,s} keys.
+-------------------------------------------------------------------------------
+function CrLua.RedBlobHex.hex(q, r, s)
+    assert(not (math.floor (0.5 + q + r + s) ~= 0), 'q + r + s must be 0')
+    return { q = q, r = r, s = s }
+end
+
+function CrLua.RedBlobHex._testHex()
+    local hex = CrLua.RedBlobHex.hex(1, 2, -3)
+    assert(hex.q == 1, hex.r == 2 and hex.s == -3)
+end
+
+-------------------------------------------------------------------------------
+--- Marshal hex to string.
+-- @param hex table : {q,r,s} keys.
+-- @return string : hex encoded as a string.
+-------------------------------------------------------------------------------
+function CrLua.RedBlobHex.toString(hex)
+    return '<' .. hex.q .. ',' .. hex.r .. ',' .. hex.s .. '>'
+end
+
+function CrLua.RedBlobHex._testToString()
+    local hex = CrLua.RedBlobHex.hex(1, 2, -3)
+    local str = CrLua.RedBlobHex.toString(hex)
+    assert(str == '<1,2,-3>')
+end
+
+-------------------------------------------------------------------------------
+--- Marshal string to hex.
+-- @param string : hex encoded as a string (via toString).
+-- @return hex table : {q,r,s} keys.
+-------------------------------------------------------------------------------
+function CrLua.RedBlobHex.fromString(str)
+    local q, r, s = string.match(str, '<(%-?%d+),(%-?%d+),(%-?%d+)>')
+    return CrLua.RedBlobHex.hex(tonumber(q), tonumber(r), tonumber(s))
+end
+
+function CrLua.RedBlobHex._testFromString()
+    local str = '<1,2,-3>'
+    local hex = CrLua.RedBlobHex.fromString(str)
+    assert(hex.q == 1, hex.r == 2 and hex.s == -3)
+end
+
+-------------------------------------------------------------------------------
+--- Get hex from a world 2D point.
+-- Note this may be a fractional hex if point is not exactly center of hex,
+-- use the round function for a "clean" hex.
+-- @param layout : transform between world 2D and hex space.
+-- @param point table : {x,y} keys.
+-- @return hex : (not-rounded) hex.
+-------------------------------------------------------------------------------
+function CrLua.RedBlobHex.fromPoint(layout, position)
+    assert(layout.orientation and position.x)
+
+    local M = layout.orientation
+    local size = layout.size
+    local origin = layout.origin
+    local pt = CrLua.RedBlobHex.point((position.x - origin.x) / size.x, (position.y - origin.y) / size.y)
+    local q = M.b0 * pt.x + M.b1 * pt.y
+    local r = M.b2 * pt.x + M.b3 * pt.y
+    return CrLua.RedBlobHex.hex(q, r, -q - r)
+end
+
+function CrLua.RedBlobHex._testFromPoint()
+    local orientation = CrLua.RedBlobHex.ORIENTATION.FLAT_TOP
+    local hexSize = CrLua.RedBlobHex.point(1, 1)
+    local origin = CrLua.RedBlobHex.point(0, 0)
+    local layout = CrLua.RedBlobHex.layout(orientation, hexSize, origin)
+
+    -- Floating point precision can lead to "almost" the correct number.
+    local function almost(a, b)
+        return math.abs(a - b) < 0.001
+    end
+
+    local point = CrLua.RedBlobHex.point(0, 0)
+    local hex = CrLua.RedBlobHex.fromPoint(layout, point)
+    assert(almost(hex.q, 0) and almost(hex.r, 0), 'q=' .. hex.q .. ', r=' .. hex.r)
+
+    local point = CrLua.RedBlobHex.point(1.5, math.sqrt(3) / 2)
+    local hex = CrLua.RedBlobHex.fromPoint(layout, point)
+    assert(almost(hex.q, 1) and almost(hex.r, 0), 'q=' .. hex.q .. ', r=' .. hex.r)
+end
+
+-------------------------------------------------------------------------------
+--- Get world 2D point from hex.
+-- @param layout : transform between world 2D and hex space.
+-- @param hex table : {q,r,s} keys.
+-- @return point table : {x,y} keys.
+-------------------------------------------------------------------------------
+function CrLua.RedBlobHex.toPoint(layout, hex)
+    assert(layout.orientation and hex.q)
+
+    local M = layout.orientation
+    local size = layout.size
+    local origin = layout.origin
+    local x = (M.f0 * hex.q + M.f1 * hex.r) * size.x
+    local y = (M.f2 * hex.q + M.f3 * hex.r) * size.y
+    return CrLua.RedBlobHex.point(x + origin.x, y + origin.y)
+end
+
+function CrLua.RedBlobHex._testToPoint()
+    local orientation = CrLua.RedBlobHex.ORIENTATION.FLAT_TOP
+    local hexSize = CrLua.RedBlobHex.point(1, 1)
+    local origin = CrLua.RedBlobHex.point(0, 0)
+    local layout = CrLua.RedBlobHex.layout(orientation, hexSize, origin)
+
+    local hex = CrLua.RedBlobHex.hex(0, 0, 0)
+    local point = CrLua.RedBlobHex.toPoint(layout, hex)
+    assert(point.x == 0 and point.y == 0, 'x=' .. point.x .. ', y=' .. point.y)
+
+    local hex = CrLua.RedBlobHex.hex(1, 0, -1)
+    local point = CrLua.RedBlobHex.toPoint(layout, hex)
+    assert(point.x == 1.5 and point.y == math.sqrt(3) / 2, 'x=' .. point.x .. ', y=' .. point.y)
+end
+
+-------------------------------------------------------------------------------
+--- Round to the nearest on-grid hex.
+-- @param hex : hex, probably from a not-center-of-hex 2D point.
+-- @return hex : nearest on-grid hex.
+-------------------------------------------------------------------------------
+function CrLua.RedBlobHex.round(hex)
+    local qi = math.floor(math.floor (0.5 + hex.q))
+    local ri = math.floor(math.floor (0.5 + hex.r))
+    local si = math.floor(math.floor (0.5 + hex.s))
+    local q_diff = math.abs(qi - hex.q)
+    local r_diff = math.abs(ri - hex.r)
+    local s_diff = math.abs(si - hex.s)
+    if q_diff > r_diff and q_diff > s_diff then
+        qi = -ri - si
+    else
+        if r_diff > s_diff then
+            ri = -qi - si
+        else
+            si = -qi - ri
+        end
+    end
+    return CrLua.RedBlobHex.hex(qi, ri, si)
+end
+
+function CrLua.RedBlobHex._testRound()
+    local hex = CrLua.RedBlobHex.hex(1.1, 2.1, -3.2)
+    local rounded = CrLua.RedBlobHex.round(hex)
+    assert(rounded.q == 1 and rounded.r == 2 and rounded.s == -3, 'q=..' .. rounded.q .. ', r=' .. rounded.r .. ', s=' .. rounded.s)
+    local hex = CrLua.RedBlobHex.hex(0.9, 1.9, -2.8)
+    local rounded = CrLua.RedBlobHex.round(hex)
+    assert(rounded.q == 1 and rounded.r == 2 and rounded.s == -3, 'q=..' .. rounded.q .. ', r=' .. rounded.r .. ', s=' .. rounded.s)
+end
+
+-------------------------------------------------------------------------------
+--- Get the world 2D point locations for hex corners.
+-- @param layout : transform between world 2D and hex space.
+-- @param hex table : {q,r,s} keys.
+-- @return table : list of world-space corner 2D points.
+-------------------------------------------------------------------------------
+function CrLua.RedBlobHex.corners(layout, hex)
+    local M = layout.orientation
+    local size = layout.size
+    local function hexCornerOffset(corner)
+        local angle = 2.0 * math.pi * (M.start_angle - corner) / 6.0
+        return CrLua.RedBlobHex.point(size.x * math.cos(angle), size.y * math.sin(angle))
+    end
+    local corners = {}
+    local center = CrLua.RedBlobHex.toPoint(layout, hex)
+    for i = 0, 5 do
+        local offset = hexCornerOffset(i)
+        table.insert(corners, CrLua.RedBlobHex.point(center.x + offset.x, center.y + offset.y))
+    end
+    return corners
+end
+
+function CrLua.RedBlobHex._testCorners()
+    local orientation = CrLua.RedBlobHex.ORIENTATION.FLAT_TOP
+    local hexSize = CrLua.RedBlobHex.point(1, 1)
+    local origin = CrLua.RedBlobHex.point(0, 0)
+    local layout = CrLua.RedBlobHex.layout(orientation, hexSize, origin)
+
+    local hex = CrLua.RedBlobHex.hex(0, 0, 0)
+    local corners = CrLua.RedBlobHex.corners(layout, hex)
+    assert(#corners == 6)
+end
+
+-------------------------------------------------------------------------------
+--- Get hex neighbors.
+-- @param hex table : {q,r,s} keys.
+-- @return table : list of neighbor hexes.
+-------------------------------------------------------------------------------
+function CrLua.RedBlobHex.neighbors(hex)
+    return {
+        CrLua.RedBlobHex.hex(hex.q + 1.0, hex.r + 0.0, hex.s - 1.0),
+        CrLua.RedBlobHex.hex(hex.q + 1.0, hex.r - 1.0, hex.s + 0.0),
+        CrLua.RedBlobHex.hex(hex.q + 0.0, hex.r - 1.0, hex.s + 1.0),
+        CrLua.RedBlobHex.hex(hex.q - 1.0, hex.r + 0.0, hex.s + 1.0),
+        CrLua.RedBlobHex.hex(hex.q - 1.0, hex.r + 1.0, hex.s + 0.0),
+        CrLua.RedBlobHex.hex(hex.q + 0.0, hex.r + 1.0, hex.s - 1.0)
+    }
+end
+
+function CrLua.RedBlobHex._testNeighbors()
+    local hex = CrLua.RedBlobHex.hex(0, 0, 0)
+    local neighbors = CrLua.RedBlobHex.neighbors(hex)
+    assert(#neighbors == 6)
+end

@@ -1,0 +1,71 @@
+local ITEMS = {
+    'ArborecExtraInfo.jpg',
+    'ArgentBaseInfo.jpg',
+    'ArgentExtraInfo.jpg',
+    'CabalBaseInfo.jpg',
+    'CabalExtraInfo.jpg',
+    'CreussExtraInfo.jpg',
+    'EmpyreanBaseInfo.jpg',
+    'EmpyreanExtraInfo.jpg',
+    'HacanBaseInfo.jpg',
+    'HacanExtraInfo.jpg',
+    'JolNarExtraInfo.jpg',
+    'L1Z1XExtraInfo.jpg',
+    'LetnevExtraInfo.jpg',
+    'MahactBaseInfo.jpg',
+    'MahactExtraInfo.jpg',
+    'MentakExtraInfo.jpg',
+    'MuaatExtraInfo.jpg',
+    'NaaluExtraInfo.jpg',
+    'NaazRokhaBaseInfo.jpg',
+    'NaazRokhaExtraInfo.jpg',
+    'NekroExtraInfo.jpg',
+    'NomadBaseInfo.jpg',
+    'NomadExtraInfo.jpg',
+    'SaarExtraInfo.jpg',
+    'SardakkExtraInfo.jpg',
+    'SolExtraInfo.jpg',
+    'TitansBaseInfo.jpg',
+    'TitansExtraInfo.jpg',
+    'WinnuExtraInfo.jpg',
+    'XxchaExtraInfo.jpg',
+    'YinExtraInfo.jpg',
+    'YssarilExtraInfo.jpg',
+}
+
+function onLoad(save_state)
+    self.addContextMenuItem('DO IT', doIt)
+end
+
+function doIt()
+    local nameToUrl = {}
+    local dir = 'file:////Users/darrell/Downloads/FactionInfoSheets2/'
+    for _, item in ipairs(ITEMS) do
+        local baseInfo = string.match(item, '(.*BaseInfo).jpg')
+        if baseInfo then
+            nameToUrl[baseInfo] = dir .. item
+        end
+        local extraInfo = string.match(item, '(.*ExtraInfo).jpg')
+        if extraInfo then
+            nameToUrl[extraInfo] = dir .. item
+        end
+    end
+
+    local assets = UI.getCustomAssets()
+    -- Update.
+    for _, asset in ipairs(assets) do
+        local url = nameToUrl[asset.name]
+        if url then
+            asset.url = url
+            nameToUrl[asset.name] = nil
+        end
+    end
+    -- Add new.
+    for name, url in pairs(nameToUrl) do
+        table.insert(assets, {
+            name = name,
+            url = url
+        })
+    end
+    UI.setCustomAssets(assets)
+end

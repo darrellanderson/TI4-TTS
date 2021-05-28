@@ -1,0 +1,66 @@
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+function onLoad(save_state)
+    print(self.getName() .. '.onLoad')
+
+    local zoneColors = zoneHelper.zones()
+    print('zone colors: ' .. table.concat(zoneColors, ', '))
+    assert(#zoneColors == 6)
+
+    local commandSheetToColor = {}
+    for _, object in ipairs(getAllObjects()) do
+        local color = string.match(object.getName(), '^Command Sheet %((%a+)%)$')
+        if color then
+            commandSheetToColor[object] = color
+        end
+    end
+
+    -- Verify single position zone lookup.
+    for commandSheet, color in pairs(commandSheetToColor) do
+        local zoneColor = zoneHelper.zoneFromPosition(commandSheet.getPosition())
+        assert(color == zoneColor, (color or 'nil') .. ' vs ' .. (zoneColor or 'nil'))
+        print('"'.. commandSheet.getName() .. '" in zone ' .. zoneColor)
+    end
+
+    -- Verify bulk zone lookup.
+    local guidToPosition = {}
+    for commandSheet, color in pairs(commandSheetToColor) do
+        guidToPosition[commandSheet.guid] = commandSheet.getPosition()
+    end
+    local guidToZone = zoneHelper.zonesFromPositions(guidToPosition)
+    for commandSheet, color in pairs(commandSheetToColor) do
+        local zoneColor = guidToZone[commandSheet.guid]
+        assert(zoneColor == color)
+    end
+
+    -- Is a position in the table area?
+    assert(zoneHelper.inTableZone({ x = 0, y = 1, z = 0 }))
+    assert(not zoneHelper.inTableZone({ x = 500, y = 1, z = 0 }))
+
+    -- Zone polygon boundary, suitable for setVectorLines points.
+    local border = zoneHelper.zoneBorder('White')
+    assert(border and #border > 0)
+    for _, position in ipairs(border) do
+        assert(position.x and position.y and position.z)
+    end
+
+    -- Get all objects in hands.
+    local inHandSet = zoneHelper.inHand()
+    assert(inHandSet)
+end

@@ -1,0 +1,2340 @@
+-- ############################################################################
+-- #### START #include <~/CrLua/Objects/TI4_Faction_Borders>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Draw a border around per-faction controlled map tiles.
+-- @author Darrell
+-- This was a feature request by "@Mr Smains" on the "help-support-requests"
+-- Discord channel on 5/1/2020.
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.Objects.ColorFactionMapTiles'
+
+local DEFAULT_CONFIG = {
+    enabled = true,
+    show = {
+        planet = false,
+        ground = true,
+        space = true,
+    },
+    thickness = {
+        planet = 0.1,
+        ground = 0.15,
+        space = 0.075
+    },
+    padding = {
+        planet = 0,
+        ground = 0.1,
+        space = 0.4
+    },
+    updateBetweenTurns = false,
+    invisibleToSet = {}
+}
+
+local _config = false
+local _cache = false
+local _controlledViewObject = false
+local _clickPlayerColor = false
+local _warnedSystems = {}
+
+local _debugVisualize = false
+
+local _lastUpdateBetweenTurnsTime = false
+
+-------------------------------------------------------------------------------
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    -- Nested tables are considered cross script.  Make a local copy.
+    local function copyTable(t)
+        if t and type(t) == 'table' then
+            local copy = {}
+            for k, v in pairs(t) do
+                copy[k] = type(v) == 'table' and copyTable(v) or v
+            end
+            t = copy
+        end
+        return t
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return copyTable(helperObject.call(functionName, parameters)) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    CrLua.Log.d(TAG, 'onLoad: |data|=' .. (saveState and string.len(saveState) or -1))
+
+    -- Schedule setup, THEN try to decode settings.
+    _config = CrLua.Table.copy(DEFAULT_CONFIG)
+    Wait.frames(_createUI, 2)
+    Wait.frames(updateUiFromConfig, 4)
+
+    local success, value = pcall(function() return JSON.decode(saveState) end)
+    if success and value then
+        _config = type(value) == 'table' and value or _config
+    end
+
+    -- Require manaul update to show again.  If something when HORRIBLY WRONG,
+    -- do not jump into doing it again unless asked!  Also, keep onLoad fast!
+    --if _config.enabled then
+    --    drawPolygons()
+    --end
+end
+
+function onSave()
+    local result = JSON.encode(_config)
+    --CrLua.Log.d(TAG, 'onSave: |data|=' .. string.len(result))
+    return result
+end
+
+function onPlayerConnect(player_id)
+    -- For some reason the UI is not visible for late joiners.
+    -- Reset when new players join.
+    Wait.frames(_createUI, 2)
+    Wait.frames(updateUiFromConfig, 4)
+end
+
+function onPlayerTurnStart(playerColorStart, playerColorPrevious)
+    if _config.updateBetweenTurns then
+        if (not _lastUpdateBetweenTurnsTime) or (Time.time - _lastUpdateBetweenTurnsTime > 1) then
+            _lastUpdateBetweenTurnsTime = Time.time
+            _config.enabled = true
+            updateCacheDrawAndPolygons()
+        end
+    end
+end
+
+function onPlayerChangeColor(player_color)
+    if _config.updateBetweenTurns then
+        if (not _lastUpdateBetweenTurnsTime) or (Time.time - _lastUpdateBetweenTurnsTime > 1) then
+            _lastUpdateBetweenTurnsTime = Time.time
+            _config.enabled = true
+            updateCacheDrawAndPolygons()
+        end
+    end
+end
+
+function updateCacheDrawAndPolygons()
+    startLuaCoroutine(self, 'updateCacheDrawAndPolygonsCoroutine')
+end
+
+function updateCacheDrawAndPolygonsCoroutine()
+    updateCache()
+    coroutine.yield(0)
+    drawPolygons()
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+function _createUI()
+    local defaults = {
+        tag = 'Defaults',
+        children = {
+            {
+                tag = 'Toggle',
+                attributes = {
+                    fontSize = 12,
+                    onValueChanged = 'onToggleValueChanged',
+                }
+            },
+            {
+                tag = 'Slider',
+                attributes = {
+                    minValue = 0,
+                    maxValue = 1,
+                    wholeNumbers = false,
+                    colors = '#555555|Red|Red|Grey',
+                    onValueChanged = 'onSliderValueChanged'
+                }
+            },
+            {
+                tag = 'Button',
+                attributes = {
+                    onClick = 'onButtonClick'
+                }
+            },
+            {
+                tag = 'Text',
+                attributes = {
+                    class = 'label',
+                    fontSize = 9,
+                    alignment = 'MiddleRight'
+                }
+            },
+            {
+                tag = 'Text',
+                attributes = {
+                    class = 'sliderValue',
+                    fontSize = 9,
+                    alignment = 'MiddleLeft'
+                }
+            },
+            {
+                tag = 'Text',
+                attributes = {
+                    class = 'heading',
+                    fontSize = 12,
+                    alignment = 'MiddleLeft'
+                }
+            },
+        }
+    }
+    local top = {
+        tag = 'VerticalLayout',
+        attributes = {
+            position = '0 0 2',  -- 0.05
+            rotation = '0 180 90',
+            width = 200,
+            height = 280,
+            padding = '10 10 10 10',
+            spacing = 10,
+        },
+        children = {
+            {
+                tag = 'Text',
+                attributes = {
+                    fontSize = 24,
+                    fontStyle = 'Bold'
+                },
+                value = 'Draw TI4 Faction Borders'
+            },
+            {
+                tag = 'Button',
+                attributes = {
+                    id = 'update',
+                    minHeight = 50,
+                    fontSize = 36,
+                },
+                value = 'Update'
+            },
+            {
+                tag = 'Button',
+                attributes = {
+                    id = 'hide',
+                    minHeight = 50,
+                    fontSize = 36,
+                },
+                value = 'Hide'
+            },
+            {
+                tag = 'Toggle',
+                attributes = {
+                    id = 'updateBetweenTurns',
+                    fontSize = 14,
+                },
+                value = 'Update between turns'
+            },
+            {
+                tag = 'Text',
+                attributes = {
+                    fontSize = 12
+                },
+                value = '(Flip for settings)'
+            }
+        }
+    }
+
+    local function tableRowToggle(id, label)
+        return {
+            tag = 'Row',
+            attributes = {
+                preferredHeight = 20
+            },
+            children = {
+                {
+                    tag = 'Cell',
+                    attributes = {
+                        columnSpan = 5
+                    },
+                    children = {
+                        {
+                            tag = 'Toggle',
+                            attributes = {
+                                id = id
+                            },
+                            value = label
+                        }
+                    }
+                }
+            }
+        }
+    end
+    local function tableRowSlider(idPrefix, label)
+        return {
+            tag = 'Row',
+            attributes = {
+                preferredHeight = 15
+            },
+            children = {
+                {
+                    tag = 'Cell',
+                    children = {
+                        {
+                            tag = 'Text',
+                            attributes = {
+                                class = 'label'
+                            },
+                            value = label
+                        },
+                    }
+                },
+                {
+                    tag = 'Cell'
+                },
+                {
+                    tag = 'Cell',
+                    children = {
+                        {
+                            tag = 'Slider',
+                            attributes = {
+                                id = idPrefix .. 'Slider'
+                            }
+                        },
+                    }
+                },
+                {
+                    tag = 'Cell'
+                },
+                {
+                    tag = 'Cell',
+                    children = {
+                        {
+                            tag = 'Text',
+                            attributes = {
+                                id = idPrefix .. 'Value',
+                                class = 'sliderValue'
+                            },
+                            value = 0
+                        }
+                    }
+                },
+            }
+        }
+    end
+
+    local function colorToggles()
+        local result = {}
+        for _, color in ipairs(Player.getColors()) do
+            table.insert(result, {
+                tag = 'Toggle',
+                attributes = {
+                    id = color,
+                    textColor = color == 'White' and 'Black' or color
+                },
+                value = color
+            })
+        end
+        return result
+    end
+
+    local bottom = {
+        tag = 'Panel',
+        attributes = {
+            position = '0 0 -22',  -- -20.05
+            rotation = '0 0 90',
+            width = 200,
+            height = 280
+        },
+        children = {
+            {
+                tag = 'VerticalLayout',
+                attributes = {
+                    padding = '10 10 0 10',
+                    spacing = 5,
+                    childForceExpandHeight = false
+                },
+                children = {
+                    -- Override cell padding does not work?  Use empty colums (yuck).
+                    {
+                        tag = 'TableLayout',
+                        attributes = {
+                            padding = '0 0 10 10',
+                            columnWidths = '50 10 0 10 20',
+                            autoCalculateHeight = true,
+                            cellBackgroundColor = 'Clear'
+                        },
+                        children = {
+                            tableRowToggle('planet', 'Individual Planets'),
+                            tableRowSlider('planetThickness', 'Thickness'),
+                            tableRowSlider('planetPadding', 'Padding'),
+                            tableRowToggle('ground', 'System Zones'),
+                            tableRowSlider('groundThickness', 'Thickness'),
+                            tableRowSlider('groundPadding', 'Padding'),
+                            tableRowToggle('space', 'Space'),
+                            tableRowSlider('spaceThickness', 'Thickness'),
+                            tableRowSlider('spacePadding', 'Padding'),
+                        }
+                    },
+                    {
+                        tag = 'Text',
+                        attributes = {
+                            class = 'heading'
+                        },
+                        value = 'Visible to:',
+                    },
+                    {
+                        tag = 'GridLayout',
+                        attributes = {
+                            cellSize = '60 20'
+                        },
+                        children = colorToggles()
+                    }
+                }
+            },
+            {
+                tag = 'Button',
+                attributes = {
+                    id = 'reset',
+                    width = 60,
+                    height = 20,
+                    offsetXY = '-5 -5',
+                    rectAlignment = 'UpperRight'
+                },
+                value = 'RESET'
+            }
+        }
+    }
+
+    self.UI.setXmlTable({ defaults, top, bottom })
+end
+
+-------------------------------------------------------------------------------
+
+function _getOrCreateControlledViewObject()
+    -- Use a second object with restricted visibility to affect who can see the lines.
+    -- Do not restrict visibility on self, control panel is visible to all.
+
+    local cvoName = self.getName() .. ' controlled view object'
+
+    -- If not known, see if there is one already out there.
+    if not _controlledViewObject then
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == cvoName then
+                _controlledViewObject = object
+                break
+            end
+        end
+    end
+
+    -- If not out there, create one.
+    if not _controlledViewObject then
+        _controlledViewObject = spawnObject({
+            type              = 'BlockSquare',
+            position          = { x = 0, y = -10, z = 0 },
+            sound             = false,
+            snap_to_grid      = false,
+        })
+        _controlledViewObject.setName(cvoName)
+        _controlledViewObject.setDescription('Restricts visibility to control who can see lines')
+        _controlledViewObject.setLock(true)
+        _controlledViewObject.interactable = false
+    end
+
+    return _controlledViewObject
+end
+
+-------------------------------------------------------------------------------
+
+function onButtonClick(player, wha, id)
+    _clickPlayerColor = player and player.color
+    if id == 'hide' then
+        _config.enabled = false
+        removePolygons()
+    elseif id == 'update' then
+        _config.enabled = true
+        updateCacheDrawAndPolygons()
+    elseif id == 'reset' then
+        _config = CrLua.Table.copy(DEFAULT_CONFIG)
+        updateUiFromConfig()
+        updateCacheDrawAndPolygons()
+    else
+        error(TAG .. ': unknown button "' .. id .. '"')
+    end
+end
+
+function onSliderValueChanged(player, value, id)
+    local itemType, valueType = string.match(id, '(%l+)(%u%l+)Slider')
+    local valueId = itemType .. valueType .. 'Value'
+
+    local value = tonumber(value)
+    local displayValue = math.floor(value * 100.0) / 10.0
+    self.UI.setValue(valueId, displayValue)
+
+    valueType = string.lower(valueType)
+    assert(_config[valueType] and _config[valueType][itemType])
+
+    _config[valueType][itemType] = value
+
+    if _config.enabled then
+        drawPolygons()
+    end
+end
+
+function onToggleValueChanged(player, value, id)
+    local valueAsBool = string.lower(value) == 'true' and true or false
+    assert(type(valueAsBool) == 'boolean')
+    if string.match(id, '^%l') then
+        if id == 'planet' then
+            _config.show.planet = valueAsBool or false
+        elseif id == 'ground' then
+            _config.show.ground = valueAsBool or false
+        elseif id == 'space' then
+            _config.show.space = valueAsBool or false
+        elseif id == 'updateBetweenTurns' then
+            _config.updateBetweenTurns = valueAsBool or false
+        else
+            error(TAG .. ': unknown id "' .. id '"')
+        end
+    else -- uppercase means toggle color
+        local found = false
+        for _, color in ipairs(Player.getColors()) do
+            if color == id then
+                found = true
+                break
+            end
+        end
+        if not found then
+            error(TAG .. ': unknown id "' .. id '"')
+        end
+        if not valueAsBool then
+            _config.invisibleToSet[id] = true
+        else
+            _config.invisibleToSet[id] = nil
+        end
+    end
+
+    if _config.enabled then
+        drawPolygons()
+    end
+end
+
+function updateUiFromConfig()
+    self.UI.setAttribute('enabled', 'isOn', _config.enabled)
+    self.UI.setAttribute('updateBetweenTurns', 'isOn', _config.updateBetweenTurns)
+    for itemType, value in pairs(_config.show) do
+        local id = itemType
+        self.UI.setAttribute(id, 'isOn', value)
+    end
+    for itemType, value in pairs(_config.thickness) do
+        local id = itemType .. 'ThicknessSlider'
+        self.UI.setAttribute(id, 'value', value)
+        local id = itemType .. 'ThicknessValue'
+        local value = math.floor(tonumber(value) * 100) / 10
+        self.UI.setValue(id, value)
+    end
+    for itemType, value in pairs(_config.padding) do
+        local id = itemType .. 'PaddingSlider'
+        self.UI.setAttribute(id, 'value', value)
+        local id = itemType .. 'PaddingValue'
+        local value = math.floor(tonumber(value) * 100) / 10
+        self.UI.setValue(id, value)
+    end
+    for _, color in ipairs(Player.getColors()) do
+        if not _config.invisibleToSet[color] then
+            self.UI.setAttribute(color, 'isOn', true)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function warnSystem(system, message)
+    assert(type(system) == 'table' and system.tile)
+
+    if _warnedSystems[system.tile] == Time.frame_count then
+        return  -- only warn once per system per update
+    end
+    _warnedSystems[system.tile] = Time.frame_count
+
+    local messageParts = {
+        self.getName() .. ': ',
+        message,
+        ' (' .. system.string .. ')'
+    }
+    message = table.concat(messageParts, '')
+    printToAll(message, 'Orange')
+
+    --if _clickPlayerColor then
+    --    local systemObject = getObjectFromGUID(system.guid)
+    --    Player[_clickPlayerColor].pingTable(systemObject.getPosition())
+    --end
+end
+
+-------------------------------------------------------------------------------
+
+function planetBorderXZ(system, planetName)
+    assert(type(system) == 'table' and system.tile and type(planetName) == 'string')
+
+    local function planetByName()
+        for _, planet in ipairs(system.planets or {}) do
+            if planet.name == planetName then
+                return planet
+            end
+        end
+        error('missing planet "' .. planetName .. '" from system "' .. system.string .. '"')
+    end
+
+    local object = getObjectFromGUID(system.guid)
+
+    local planet = planetByName()
+    local p = planet.position
+    local r = planet.radius
+
+    local points = {}
+    for i = 1, 16 do
+        local phi = i / 16 * math.pi * 2
+        table.insert(points, object.positionToWorld({
+            x = p.x + math.cos(phi) * r,
+            y = system.y,
+            z = p.z + math.sin(phi) * r,
+        }))
+    end
+    return CrLua.Polygon.fromXYZ(points)
+end
+
+function updateCache()
+    -- Keep the non-inset polygons to be able to rapidly adjust thickness.
+    _cache = {
+        originalPolygons = {
+            planets = false,
+            ground = false,
+            space = false,
+        },
+        y = (_cache and _cache.y) or false,
+    }
+
+    local colors = {}
+    for _, object in ipairs(getAllObjects()) do
+        local color = string.match(object.getName(), '^Command Sheet %((%a+)%)$')
+        if color then
+            table.insert(colors, color)
+        end
+    end
+    coroutine.yield(0)
+
+    local ownerTokens = getOwnerTokens()
+    coroutine.yield(0)
+
+    local units = _unitHelper.getUnits()
+    coroutine.yield(0)
+    units = _unitHelper.fillUnitColors(units)
+    coroutine.yield(0)
+    local colorToUnitOverrides = _unitHelper.getColorToUnitOverrides()
+    coroutine.yield(0)
+    local colorToUnitModifiers = _unitHelper.getColorToUnitModifiers()
+    coroutine.yield(0)
+
+    -- Get with-override unit attributes.  Do not consider flagships or other
+    -- unit modifiers (not needed for control, plus fighters-on-ground does
+    -- not count as a ground unit -- so do not set that via flagship modifier).
+    local colorToUnitTypeToUnitAttrs = {}
+    for _, color in ipairs(colors) do
+        local unitOverrides = colorToUnitOverrides[color] or {}
+        local unitAttrs = _unitHelper.getUnitAttributes(unitOverrides)
+        colorToUnitTypeToUnitAttrs[color] = unitAttrs
+    end
+    coroutine.yield(0)
+
+    local hexToThings = getHexToThings(ownerTokens, units, colorToUnitTypeToUnitAttrs)
+    coroutine.yield(0)
+    local hexToOwners = getHexToOwners(hexToThings)
+    coroutine.yield(0)
+
+    _cache.originalPolygons.planets = {}
+    for hex, owners in pairs(hexToOwners) do
+        for planetName, color in pairs(owners.planetName) do
+            local polygon = planetBorderXZ(owners.system, planetName)
+            table.insert(polygon, polygon[1])  -- loop
+            table.insert(_cache.originalPolygons.planets, {
+                color = assert(color),
+                polygon = polygon
+            })
+        end
+    end
+    coroutine.yield(0)
+
+    _cache.originalPolygons.ground = {}
+    _cache.originalPolygons.space = {}
+    for _, color in ipairs(colors) do
+        local ownFullySet, ownPartialSet, ownSpaceSet = getOwned(hexToOwners, color)
+        coroutine.yield(0)
+
+        -- Control ground, with partial hexes.
+        local polygons = getControlPolygons(ownFullySet, ownPartialSet)
+        coroutine.yield(0)
+        for _, polygon in ipairs(polygons) do
+            table.insert(_cache.originalPolygons.ground, {
+                color = assert(color),
+                polygon = polygon
+            })
+        end
+
+        -- Control space.
+        local polygons = getControlPolygons(ownSpaceSet, false)
+        coroutine.yield(0)
+        for _, polygon in ipairs(polygons) do
+            table.insert(_cache.originalPolygons.space, {
+                color = assert(color),
+                polygon = polygon
+            })
+        end
+    end
+
+    -- Get a world Y value from system.
+    if not _cache.y then
+        local system = assert(_systemHelper.systemFromPosition({ x = 0, y = 0, z = 0 }), 'missing system 0,0,0')
+        local object = assert(getObjectFromGUID(system.guid), 'missing object 0,0,0')
+        assert(system.y, 'missing system.y')
+        local position = object.positionToWorld({ x = 0, y = system.y, z = 0 })
+        _cache.y = position.y + 0.02
+    end
+
+    return 1
+end
+
+function removePolygons()
+    _getOrCreateControlledViewObject().setVectorLines()
+    _cache = false
+end
+
+function drawPolygons()
+    if not _cache then
+        return
+    end
+    assert(_cache and _cache.originalPolygons)
+    local y = assert(_cache.y)
+
+    local controlledViewObject = _getOrCreateControlledViewObject()
+    local lines = {}
+    local function addLine(polygon, inset, thickness, color)
+        -- Make a copy because this may mutate the polygon!
+        polygon = CrLua.List.join(polygon, {})
+
+        local a = polygon[1]
+        local b = polygon[#polygon]
+        local loop = almostEqual(a, b)
+        if loop then
+            table.remove(polygon)
+        end
+        if #polygon > 2 then
+            -- Need at least 3 points to inset.
+            polygon = CrLua.Polygon.inset(polygon, inset)
+        end
+        local points = CrLua.Polygon.toXYZ(polygon, y)
+        if _debugVisualize then
+            local p = points[#points]
+            table.insert(points, { x = p.x + 0.01, y = p.y + 2, z = p.z + 0.01})
+        end
+        for i, point in ipairs(points) do
+            points[i] = controlledViewObject.positionToLocal(point)
+        end
+        table.insert(lines, {
+            points = points,
+            thickness = thickness,
+            color = color,
+            square = true,
+            loop = loop
+        })
+    end
+
+    if _config.show.planet then
+        for _, entry in ipairs(_cache.originalPolygons.planets) do
+            local thickness = _config.thickness.planet
+            local inset = thickness / 2.0 + _config.padding.planet
+            addLine(entry.polygon, inset, thickness, entry.color)
+        end
+    end
+    if _config.show.ground then
+        for _, entry in ipairs(_cache.originalPolygons.ground) do
+            local thickness = _config.thickness.ground
+            local inset = thickness / 2.0 + _config.padding.ground
+            addLine(entry.polygon, inset, thickness, entry.color)
+        end
+    end
+    if _config.show.space then
+        for _, entry in ipairs(_cache.originalPolygons.space) do
+            local thickness = _config.thickness.space
+            local inset = thickness / 2.0 + _config.padding.space
+            addLine(entry.polygon, inset, thickness, entry.color)
+        end
+    end
+
+    local invisibleToList = CrLua.List.fromKeys(_config.invisibleToSet)
+    controlledViewObject.setInvisibleTo(invisibleToList)
+    controlledViewObject.setVectorLines(lines)
+end
+
+-------------------------------------------------------------------------------
+
+--- Get owner tokens.
+-- Results have {guid, position, color} fields.
+function getOwnerTokens()
+    -- Map from owner token name to color.
+    local ownerTokenNameToColor = {}
+    for _, faction in pairs(_factionHelper.allFactions()) do
+        if faction.tokenName and faction.color then
+            ownerTokenNameToColor[faction.tokenName .. ' Owner Token'] = faction.color
+        end
+    end
+
+    local guidToPosition = {}
+    local result = {}
+    for _, object in ipairs(getAllObjects()) do
+        local color = ownerTokenNameToColor[object.getName()]
+        if color then
+            local guid = object.getGUID()
+            local position = object.getPosition()
+            table.insert(result, {
+                ownerToken = true,
+                guid = guid,
+                position = position,
+                color = color,
+            })
+            guidToPosition[guid] = position
+        end
+    end
+
+    local guidToHex = _systemHelper.hexesFromPositions(guidToPosition)
+    for _, entry in ipairs(result) do
+        entry.hex = guidToHex[entry.guid]
+    end
+
+    return result
+end
+
+--- Get map from hex to list of {object, color, hex, system, ground, planet} tables.
+function getHexToThings(ownerTokens, units, colorToUnitTypeToUnitAttrs)
+    assert(type(ownerTokens) == 'table')
+    assert(type(units) == 'table')
+    assert(type(colorToUnitTypeToUnitAttrs) == 'table')
+
+    -- Map from hex to system.
+    local hexToSystem = {}
+    for guid, system in pairs(_systemHelper.systems()) do
+        local systemObject = getObjectFromGUID(guid)
+        if systemObject then
+            local hex = _systemHelper.hexFromPosition(systemObject.getPosition())
+            if hexToSystem[hex] then
+                warnSystem(system, 'Multiple system tiles in same hex?')
+            else
+                hexToSystem[hex] = system
+            end
+        end
+    end
+
+    -- Add hex, system, and ground, planet.
+    local hexToThings = {}
+    local function fillHexToThings(things)
+        for _, thing in ipairs(things) do
+            assert(thing.hex, 'thing.hex')
+            assert(thing.position, 'thing.position')
+            thing.system = hexToSystem[thing.hex]
+
+            if thing.system then
+                -- Assign planet name for ground units and owner tokens.
+                if thing.unitType then
+                    local unitTypeToUnitAttrs = thing.color and colorToUnitTypeToUnitAttrs[thing.color] or {}
+                    local attrs = unitTypeToUnitAttrs[thing.unitType] or {}
+                    if attrs.groundCombat or attrs.structure then
+                        thing.ground = true
+                    end
+                end
+
+                if thing.ownerToken or thing.ground then
+                    local planet = _systemHelper.planetFromPosition({
+                        systemGuid = thing.system.guid,
+                        position = thing.position,
+                        exact = true
+                    })
+                    thing.planetName = planet and planet.name
+                end
+
+                -- Owner tokens on planets count for ground control.
+                -- Include owner tokens in space ONLY IF NO PLANETS IN SYSTEM!
+                if thing.ownerToken then
+                    if thing.planetName then
+                        thing.ground = true
+                    elseif #(thing.system.planets or {}) == 0 then
+                        thing.ground = true
+                    end
+                end
+
+                -- Keep all things in space, plus ground units on planets.
+                if thing.ownerToken or (not thing.ground) or thing.planetName then
+                    local entry = hexToThings[thing.hex]
+                    if not entry then
+                        entry = {}
+                        hexToThings[thing.hex] = entry
+                    end
+                    table.insert(entry, thing)
+                end
+            end
+        end
+    end
+
+    -- Get units first, then (since exclusively units) attempt to assign unit
+    -- tokens (e.g., x1 Infantry) to nearby plastic in the same hex.
+    fillHexToThings(units)
+
+    -- Now add owner tokens.
+    fillHexToThings(ownerTokens, false)
+
+    -- It is possible orphaned tokens are on the board (someone forgot to
+    -- place plastic?).  Issue a warning and remove those things.
+    for hex, things in pairs(hexToThings) do
+        for i = #things, 1, -1 do
+            local thing = things[i]
+            if not thing.color then
+                table.remove(things, i)
+                local object = getObjectFromGUID(thing.guid)
+                local name = object and object.getName() or thing.guid
+                warnSystem(thing.system, 'Item “' .. name .. '” has not been assigned a color')
+            end
+        end
+    end
+
+    return hexToThings
+end
+
+--- Get a map from hex to owner table with {ground, space, planetName[]} owners.
+-- If planets are split between different players do not assign ground owner.
+-- If any planet is not owned, do not assign ground owner.
+function getHexToOwners(hexToThings)
+    -- Build the team colors based on the players teams, choose "lowest" color.
+    local teamToColor = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        if player.team and player.team ~= "None" then
+            if (not teamToColor[player.team]) or player.color < teamToColor[player.team] then
+                teamToColor[player.team] = player.color
+            end
+        end
+    end
+
+    -- Make the color aliases, use team if applicable otherwise player color.
+    local colorToAlias = {}
+    for _, color in ipairs(Player.getColors()) do
+        colorToAlias[color] = color
+    end
+    for _, player in ipairs(Player.getPlayers()) do
+        colorToAlias[player.color] = teamToColor[player.team] or player.color
+    end
+
+    local hexToOwners = {}
+    for hex, things in pairs(hexToThings) do
+        for _, thing in ipairs(things) do
+            local owners = hexToOwners[hex]
+            if not owners then
+                owners = {
+                    system = assert(thing.system),
+                    planetName = {}
+                }
+                hexToOwners[hex] = owners
+            end
+
+            assert(thing.color and thing.system)
+
+            -- Wholely owned ground/space.
+            if thing.ground then
+                if owners.ground == nil then
+                    owners.ground = colorToAlias[thing.color]
+                elseif owners.ground ~= colorToAlias[thing.color] then
+                    owners.ground = false
+                end
+            else
+                if owners.space == nil then
+                    owners.space = colorToAlias[thing.color]
+                elseif owners.space ~= colorToAlias[thing.color] then
+                    warnSystem(owners.system, 'More than one space unit color')
+                    owners.space = false
+                end
+            end
+
+            -- Per-planet.
+            if thing.ground and thing.planetName then
+                if owners.planetName[thing.planetName] == nil then
+                    owners.planetName[thing.planetName] = colorToAlias[thing.color]
+                elseif owners.planetName[thing.planetName] ~= colorToAlias[thing.color] then
+                    warnSystem(owners.system, 'More than one ground unit color on "' .. thing.planetName .. '"')
+                    owners.planetName[thing.planetName] = false
+                end
+            end
+        end
+    end
+
+    -- Remove ground owner if any planet is not owned.
+    for hex, owners in pairs(hexToOwners) do
+        local system = assert(owners.system)
+        for _, planet in ipairs(system.planets or {}) do
+            if not owners.planetName[planet.name] then
+                owners.ground = false
+                break
+            end
+        end
+    end
+
+    -- Wholely remove planet table entries if contention prevented assignment.
+    for hex, owners in pairs(hexToOwners) do
+        local dele = {}
+        for planetName, color in pairs(owners.planetName) do
+            if not color then table.insert(dele, planetName) end
+        end
+        for _, planetName in ipairs(dele) do
+            owners.planetName[planetName] = nil
+        end
+    end
+
+    return hexToOwners
+end
+
+--- Get the hexes fully owned, partially owned, and space owned.
+function getOwned(hexToOwners, color)
+    local ownFullySet = {}
+    local ownPartialSet = {}
+    local ownSpaceSet = {}
+    for hex, owners in pairs(hexToOwners) do
+        if owners.ground == color then
+            ownFullySet[hex] = true
+        else
+            for planetName, planetOwner in pairs(owners.planetName) do
+                if planetOwner == color then
+                    local entry = ownPartialSet[hex]
+                    if not entry then
+                        entry = {
+                            system = assert(owners.system),
+                            planetNames = {}
+                        }
+                        ownPartialSet[hex] = entry
+                    end
+                    table.insert(entry.planetNames, assert(planetName))
+                end
+            end
+        end
+        if owners.space == color then
+            ownSpaceSet[hex] = true
+        end
+    end
+    return ownFullySet, ownPartialSet, ownSpaceSet
+end
+
+-------------------------------------------------------------------------------
+
+function commonEdge(hexString, neighborHexString)
+    assert(type(hexString) == 'string' and type(neighborHexString) == 'string')
+
+    local neighbors = _systemHelper.hexNeighbors(hexString)
+    local which = false
+    for i, neighbor in ipairs(neighbors) do
+        if neighbor == neighborHexString then
+            which = i
+            break
+        end
+    end
+    if not which then
+        return false
+    end
+
+    local corners = _systemHelper.hexCorners(hexString)
+
+    -- First corner is at the END of first neighbor.
+    local prev = which > 1 and (which - 1) or 6
+    return corners[prev], corners[which]
+end
+
+function commonEdgeWithMid(hex1, hex2)
+    local a1, a2 = commonEdge(hex1, hex2)
+    local midpoint = { x = (a1.x + a2.x) / 2, y = (a1.y + a2.y) / 2, z = (a1.z + a2.z) / 2 }
+    return a1, midpoint, a2
+end
+
+function almostEqual(a, b, epsilon)
+    assert(type(a) == 'table' and type(b) == 'table')
+    local dx = math.abs((a.x or a[1]) - (b.x or b[1]))
+    local dz = math.abs((a.z or a[2]) - (b.z or b[2]))
+    return dx < (epsilon or 0.1) and dz < (epsilon or 0.1)
+end
+
+function almostEqualEdges(a, b, epsilon)
+    assert(#a == 2 and #b == 2)
+    assert(type(a[1]) == 'table' and type(b[1]) == 'table')
+    if almostEqual(a[1], b[1], epsilon) or almostEqual(a[1], b[2], epsilon) then
+        return almostEqual(a[2], b[1], epsilon) or almostEqual(a[2], b[2], epsilon)
+    end
+end
+
+function edge(hex1, hex2)
+    assert(type(hex1) == 'string' and type(hex2) == 'string')
+    return hex1 .. hex2
+end
+
+function reverseNeighborIndex(forwardIndex)
+    return (((forwardIndex - 1) + 3) % 6) + 1
+end
+
+-- Get map from edge to points.
+function getControlEdges(hexSet)
+    assert(type(hexSet) == 'table')
+    local edgeSet = {}
+    for hex, _ in pairs(hexSet) do
+        for _, neighbor in ipairs(_systemHelper.hexNeighbors(hex)) do
+            if not hexSet[neighbor] then
+                local e1, e2 = commonEdge(hex, neighbor)
+                edgeSet[edge(hex, neighbor)] = { e1, e2 }
+            end
+        end
+    end
+    return edgeSet
+end
+
+-- Mutate edges to flow into partially owned hexes.
+function applyPartialControlEdges(edgeSet, partialHexSet)
+    assert(type(edgeSet) == 'table' and type(partialHexSet) == 'table')
+    local partialEdgeSet = {}
+
+    -- Get all owned planet names as a set.
+    local ownedPlanetNameSet = {}
+    for _, partial in pairs(partialHexSet) do
+        for _, planetName in ipairs(partial.planetNames) do
+            ownedPlanetNameSet[planetName] = true
+        end
+    end
+
+    local function zonePointIndex(zonePoints, position)
+        assert(type(zonePoints) == 'table' and type(position) == 'table' and position.x)
+        local sloppyEpsilon = math.max(1, (Grid.sizeX or 0) / 6)
+        for i, zonePoint in ipairs(zonePoints) do
+            if almostEqual(position, zonePoint, sloppyEpsilon) then
+                return i
+            end
+        end
+    end
+
+    local function getZonePoints(system)
+        assert(type(system) == 'table' and system.tile)
+        local systemObject = getObjectFromGUID(system.guid)
+        local result = {}
+        for _, p in ipairs(system.zoneEdgePositions) do
+            table.insert(result, systemObject.positionToWorld(p))
+        end
+        return result
+    end
+
+    -- Add zone interior bondaries to partial lines.  Unlike edges, this do not
+    -- require clockwise polygon winding (that will happen naturally via extended).
+    for partialHex, partial in pairs(partialHexSet) do
+        local system = assert(partial.system)
+        local zonePoints = getZonePoints(system)
+        local neighbors = _systemHelper.hexNeighbors(partialHex)
+
+        if #system.planets == 2 and #zonePoints == 2 then
+            assert(#partial.planetNames == 1)
+
+            -- System split between two planets, line between two edge midpoints.
+            local found = false
+            for i, neighbor in ipairs(neighbors) do
+                local a1, aMidpoint, a2 = commonEdgeWithMid(partialHex, neighbor)
+                if zonePointIndex(zonePoints, aMidpoint) == 1 then
+                    local farHex = neighbors[reverseNeighborIndex(i)]
+                    local b1, bMidpoint, b2 = commonEdgeWithMid(partialHex, farHex)
+                    partialEdgeSet[partialHex] = { aMidpoint, bMidpoint }
+                    found = true
+                    break
+                end
+            end
+            if not found then
+                error(TAG .. ': 2-zone system but no divider? ("' .. system.string .. '")')
+            end
+
+        elseif #system.planets == 3 and #zonePoints == 3 then
+            assert(#partial.planetNames >= 1 and #partial.planetNames <= 2)
+
+            -- Three planet system, draw lines from corner to middle.
+            -- Zone points are not edge aligned, make at-corner versions.
+            local zoneCorners = {}
+            for _, neighbor in ipairs(neighbors) do
+                local a1, a2 = commonEdge(partialHex, neighbor)
+                for i = 1, 3 do
+                    if almostEqual(zonePoints[i], a1, 1) then
+                        zoneCorners[i] = a1
+                        break
+                    end
+                end
+            end
+            assert(#zoneCorners == 3)
+            -- Now connect zone corners to middle.
+            for i = 1, 3 do
+                local planetCurrent = system.planets[i].name
+                local planetPrev = system.planets[i == 1 and 3 or i - 1].name
+                if ownedPlanetNameSet[planetCurrent] ~= ownedPlanetNameSet[planetPrev] then
+                    local systemObject = getObjectFromGUID(system.guid)
+                    partialEdgeSet[partialHex .. i] = { zoneCorners[i], systemObject.getPosition() }
+                end
+            end
+
+        end
+    end
+
+    local function getPlanetPosition(system, planetName)
+        assert(type(system) == 'table' and system.tile and type(planetName) == 'string')
+        for _, planet in ipairs(system.planets or {}) do
+            if planet.name == planetName then
+                local systemObject = getObjectFromGUID(system.guid)
+                return systemObject.positionToWorld(planet.position)
+            end
+        end
+    end
+
+    -- Add full edges for partial zones in proper winding order.
+    -- Do this BEFORE breaking edges in half in case need to break these!
+    for partialHex, partial in pairs(partialHexSet) do
+        local system = assert(partial.system)
+        local zonePoints = getZonePoints(system)
+        local neighbors = _systemHelper.hexNeighbors(partialHex)
+
+        if #system.planets == 2 and #zonePoints == 2 then
+            assert(#partial.planetNames == 1)
+            local planetPosition = getPlanetPosition(system, partial.planetNames[1])
+
+            -- Create or destroy any full edges.
+            for i, neighbor in ipairs(neighbors) do
+                local a1, aMidpoint, a2 = commonEdgeWithMid(partialHex, neighbor)
+                if not zonePointIndex(zonePoints, aMidpoint) then
+                    -- This edge is not on border.  Compare vs far edge.
+                    local farHex = neighbors[reverseNeighborIndex(i)]
+                    local b1, bMidpoint, b2 = commonEdgeWithMid(partialHex, farHex)
+                    local d1 = CrLua.Util.distanceSq(aMidpoint, planetPosition)
+                    local d2 = CrLua.Util.distanceSq(bMidpoint, planetPosition)
+                    local ownThisSide = d1 < d2 and true or false
+
+                    -- Add partial edge.  Only consider other side owned if fully
+                    -- owned, meaning two adjacent partial edges could contain a
+                    -- shared edge.  Prune those out at the end.
+                    local partialEdge = edge(partialHex, neighbor)
+                    local reverseEdge = edge(neighbor, partialHex)
+                    local ownOtherSide = edgeSet[reverseEdge] and true or false
+
+                    if ownThisSide then
+                        if ownOtherSide then
+                            edgeSet[reverseEdge] = nil
+                        else
+                            edgeSet[partialEdge] = { a1, a2 }
+                        end
+                    end
+                end
+            end
+
+        elseif #system.planets == 3 and #zonePoints == 3 then
+
+            for i, neighbor in ipairs(neighbors) do
+                local a1, aMidpoint, a2 = commonEdgeWithMid(partialHex, neighbor)
+
+                local function planetDistance(planet)
+                    local position = getPlanetPosition(system, planet.name)
+                    return CrLua.Util.distanceSq(position, aMidpoint)
+                end
+                local _, closestPlanet = CrLua.Util.min(system.planets, planetDistance)
+                local ownThisSide = ownedPlanetNameSet[closestPlanet.name]
+
+                local partialEdge = edge(partialHex, neighbor)
+                local reverseEdge = edge(neighbor, partialHex)
+                local ownOtherSide = edgeSet[reverseEdge] and true or false
+
+                -- Three zone system go corner->mid->corner so all edges are
+                -- full edges.
+                if ownOtherSide and ownThisSide then
+                    edgeSet[reverseEdge] = nil
+                elseif ownThisSide and not ownOtherSide then
+                    edgeSet[partialEdge] = { a1, a2 }
+                end
+            end
+
+        end
+    end
+
+    -- Add/break edges for parital zone half-edges.
+    for partialHex, partial in pairs(partialHexSet) do
+        local system = assert(partial.system)
+        local zonePoints = getZonePoints(system)
+        local neighbors = _systemHelper.hexNeighbors(partialHex)
+
+        if #system.planets == 2 and #zonePoints == 2 then
+            assert(#partial.planetNames == 1)
+            local planetPosition = getPlanetPosition(system, partial.planetNames[1])
+
+            -- Connect from midpoint to approriate corner based on which side
+            -- of the partial zone is owned, and to we own the adjacent system.
+            for i, neighbor in ipairs(neighbors) do
+                local a1, aMidpoint, a2 = commonEdgeWithMid(partialHex, neighbor)
+                if zonePointIndex(zonePoints, aMidpoint) then
+
+                    local d1 = CrLua.Util.distanceSq(a1, planetPosition)
+                    local d2 = CrLua.Util.distanceSq(a2, planetPosition)
+                    local ownThisSide = d1 < d2 and true or false
+
+                    -- Add partial edge.  Only consider other side owned if fully
+                    -- owned, meaning two adjacent partial edges could contain a
+                    -- shared edge.  Prune those out at the end.
+                    local partialEdge = edge(partialHex, neighbor)
+                    local reverseEdge = edge(neighbor, partialHex)
+                    local ownOtherSide = edgeSet[reverseEdge] and true or false
+
+                    -- Edge contains a zone point.  Connect to approriate corner.
+                    if ownThisSide then
+                        if ownOtherSide then
+                            edgeSet[reverseEdge] = nil  -- replace this edge
+                            partialEdgeSet[partialEdge] = { aMidpoint, a2 }
+                        else
+                            partialEdgeSet[partialEdge] = { a1, aMidpoint }
+                        end
+                    else
+                        if ownOtherSide then
+                            edgeSet[reverseEdge] = nil  -- replace this edge
+                            partialEdgeSet[partialEdge] = { a1, aMidpoint }
+                        else
+                            partialEdgeSet[partialEdge] = { aMidpoint, a2 }
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    -- At this point the partial edge set contains half-edges.  If two partial
+    -- zones are adjacent they may share a common half-edge.  Remove those.
+    -- This is not the most efficient, but is fast enough and clean.
+    local dele = {}
+    for k1, edge1 in pairs(partialEdgeSet) do
+        for k2, edge2 in pairs(partialEdgeSet) do
+            if (k1 ~= k2) and almostEqualEdges(edge1, edge2) then
+                table.insert(dele, k1)
+                table.insert(dele, k2)
+            end
+        end
+    end
+    for _, k in ipairs(dele) do
+        --CrLua.Log.d(TAG, 'pruning ' .. k)
+        partialEdgeSet[k] = nil
+    end
+
+    return partialEdgeSet
+end
+
+--- Get one polygon from a collection of hexes, removing edges as it goes.
+-- The set may still have entries when finished meaning there is at least one
+-- more disconnected polygon to find.
+function getControlPolygon(hexSet, edgeSet, partialEdgeSet)
+    assert(type(hexSet) == 'table' and type(edgeSet) == 'table')
+    --CrLua.Log.d(TAG, 'getControlPolygon: |edgeSet|=' .. #CrLua.List.fromKeys(edgeSet))
+
+    local polygon = false
+
+    -- First a first point of a full (winding) edge.
+    local function getStartingPoint()
+        for k, points in pairs(edgeSet) do
+            polygon = {{ points[1].x, points[1].z }}
+            return true
+        end
+    end
+    if not getStartingPoint() then
+        CrLua.Log.d(TAG, 'getControlPolygon: getStartingPoint failed')
+        return false
+    end
+
+    -- Full edges must be added in wind order.
+    local function maybeAddFullEdge()
+        local first = polygon[1]
+        local last = polygon[#polygon]
+        assert(type(first) == 'table' and #first == 2)
+        assert(type(last) == 'table' and #last == 2)
+        for k, points in pairs(edgeSet) do
+            assert(#points == 2)
+            local a, b = table.unpack(points)
+            assert(type(a) == 'table' and a.x and type(b) == 'table' and b.x)
+            if almostEqual(first, b) then
+                edgeSet[k] = nil
+                table.insert(polygon, 1, { a.x, a.z })
+                return true
+            elseif almostEqual(last, a) then
+                edgeSet[k] = nil
+                table.insert(polygon, { b.x, b.z })
+                return true
+            end
+        end
+    end
+
+    -- Pick best (if any) candidate, may be reversed.
+    local function maybeAddPartialEdge()
+        local first = polygon[1]
+        local last = polygon[#polygon]
+        assert(type(first) == 'table' and #first == 2)
+        assert(type(last) == 'table' and #last == 2)
+
+        -- Get all possible partial edges, along with the prev/cur/next path.
+        local candidates = false
+        for k, points in pairs(partialEdgeSet) do
+            assert(#points == 2)
+            local a, b = table.unpack(points)
+            assert(type(a) == 'table' and a.x and type(b) == 'table' and b.x)
+            if almostEqual(first, a) then
+                candidates = candidates or {}
+                table.insert(candidates, { k = k, i = 1, prev = polygon[2], cur = first, next = { b.x, b.z }})
+            elseif almostEqual(first, b) then
+                candidates = candidates or {}
+                table.insert(candidates, { k = k, i = 1, prev = polygon[2], cur = first, next = { a.x, a.z }})
+            elseif almostEqual(last, a) then
+                candidates = candidates or {}
+                table.insert(candidates, { k = k, i = #polygon + 1, prev = polygon[#polygon - 1], cur = last, next = { b.x, b.z }})
+            elseif almostEqual(last, b) then
+                candidates = candidates or {}
+                table.insert(candidates, { k = k, i = #polygon + 1, prev = polygon[#polygon - 1], cur = last, next = { a.x, a.z }})
+            end
+        end
+
+        local function positionToBearing(dir)
+            assert(type(dir) == 'table' and dir.x)
+
+            -- Compute bearing in radians.
+            local bearing = math.atan2(dir.z, -dir.x) + (math.pi / 2)
+
+            -- Convert to degrees between 0 and 360.
+            bearing = (bearing * 180 / math.pi) % 360
+            if bearing < 0 then
+                bearing = bearing + 360
+            end
+            if bearing == 360 then
+                bearing = 0  -- hmm, apparently this can happen.  floating point precision?
+            end
+
+            assert(0 <= bearing and bearing < 360, 'bearing='..bearing)
+            return bearing
+        end
+
+        -- If there is more than one partial edge sharing this point, choose
+        -- the one with the smallest clockwise winding to get pretty insets.
+        local function bearingDelta(candidate)
+            local dirPrev = { x = candidate.prev[1] - candidate.cur[1], z = candidate.prev[2] - candidate.cur[2] }
+            local dirNext = { x = candidate.next[1] - candidate.cur[1], z = candidate.next[2] - candidate.cur[2] }
+            local bearingPrev = positionToBearing(dirPrev)
+            local bearingNext = positionToBearing(dirNext)
+            local d = bearingNext - bearingPrev
+            if d < 0 then
+                d = d + 360
+            end
+            return 360 - d  -- reverse to get smallest winding
+        end
+        if candidates then
+            local _, best = CrLua.Util.min(candidates, bearingDelta)
+            assert(best and partialEdgeSet[best.k])
+            partialEdgeSet[best.k] = nil
+            table.insert(polygon, best.i, best.next)
+            return true
+        end
+    end
+
+    local joinCount = 0
+    while maybeAddFullEdge() or (partialEdgeSet and maybeAddPartialEdge()) do
+        joinCount = joinCount + 1
+        assert(joinCount < 1000)  -- watch for infinite loop!
+    end
+
+    -- The last point should always be the same as the first.  Remove last.
+    local a = polygon[1]
+    local b = polygon[#polygon]
+    if not almostEqual(a, b) then
+        --error('last ~= first')
+    end
+
+    --CrLua.Log.d(TAG, 'getControlPolygon: |polygon|=' .. #polygon)
+    if #polygon <= 2 then
+        error('#polygon=' .. #polygon)
+        return false
+    end
+
+    -- Sanity check all points are [1,2] tables.
+    for _, point in ipairs(polygon) do
+        assert(type(point) == 'table')
+        assert(#point == 2)
+        assert(type(point[1]) == 'number')
+        assert(type(point[2]) == 'number')
+        assert(point.x == nil)
+    end
+
+    return polygon
+end
+
+function getControlPolygons(hexSet, partialSet)
+    local function isEmptySet(set)
+        for _, _ in pairs(set) do
+            return false
+        end
+        return true
+    end
+
+    local edgeSet = getControlEdges(hexSet)
+    local partialEdgeSet = partialSet and applyPartialControlEdges(edgeSet, partialSet)
+
+    local polygons = {}
+    while not isEmptySet(edgeSet) do
+        local polygon = getControlPolygon(hexSet, edgeSet, partialEdgeSet)
+        if polygon then
+            table.insert(polygons, polygon)
+        else
+            break
+        end
+    end
+
+    -- If any partials remain, add them?
+    if false then
+        for _, points in pairs(partialEdgeSet or {}) do
+            local polygon = {}
+            for _, point in ipairs(points) do
+                table.insert(polygon, { point.x, point.z })
+            end
+            table.insert(polygons, polygon)
+        end
+    end
+
+    return polygons
+end
+
+-------------------------------------------------------------------------------
+
+-- ############################################################################
+-- #### START #include <~/CrLua/CrLua>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Create the base CrLua table, with require function for dependencies.
+-- @author Darrell
+--
+-- Suggested use: at the END of the object script (so #include does not affect
+-- line number reporting in the above portion), include CrLua and dependencies:
+--
+-- #include <~/CrLua/CrLua>
+-- #include <~/CrLua/LockGlobals>
+--
+-- #include <~/CrLua/[OTHER_DEPENDENCY]> (repeat)
+--
+-- CrLua.assertRequired() -- do this BEFORE lock
+-- CrLua.lock()
+--
+-- -- Optionally enable logging.
+-- CrLua.Log.setLogLevel(CrLua.Log.LOG_LEVEL.DEBUG)
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua'
+
+-- Create a GLOBAL CrLua table.
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua._require = { 'LockTable' }
+
+-------------------------------------------------------------------------------
+--- Assert all required packages exist.
+-- @param extraRequires table : list of additional require entries.
+-- @param table : table to search for _require entries, or CrLua if nil.
+--
+-- Modules add dependencies by having a _require item in their root table,
+-- with a list of module names.
+-- e.g. CrLua.MyModule = { _require = { 'OtherModule1', 'OtherModule2' } }.
+-------------------------------------------------------------------------------
+function CrLua.assertRequired(extraRequires, table)
+    local seen = {}
+    local requireSet = {}
+    local haveSet = {}
+
+    if extraRequires then
+        for _, name in ipairs(extraRequires) do
+            requireSet[name] = true
+        end
+    end
+
+    local function addRequireEntries(table, packagePath)
+        assert(type(table) == 'table')
+        if seen[table] then
+            return
+        end
+        seen[table] = true
+        if table._require then
+            for _, name in ipairs(table._require) do
+                requireSet[name] = true
+            end
+            if packagePath then
+                haveSet[packagePath] = true
+            end
+        end
+        for k, v in pairs(table) do
+            if type(v) == 'table' and not string.match(k, '^[_%l]') then
+                local recurse = type(k) == 'string' and string.match(k, '^%u')
+                if recurse then
+                    local childPackagePath = (packagePath and (packagePath .. '.') or '') .. k
+                    addRequireEntries(v, childPackagePath)
+                end
+            end
+        end
+    end
+    addRequireEntries(table or CrLua)
+
+    -- Make sure all required packages are present.
+    local message = false
+    for package, _ in pairs(requireSet) do
+        assert(type(package) == 'string')
+        -- Descend dot-delimited sub-package names.
+        local entry = CrLua
+        for subPackage in string.gmatch(package, '[^%.]+') do
+            entry = entry and entry[subPackage]
+        end
+        if not entry then
+            message = (message and message .. ', ' or '') .. package
+        end
+    end
+    if message then
+        error(TAG .. ': assertRequired missing ' .. message)
+    end
+
+    -- Make sure all present packages are required.
+    local message = false
+    for package, _ in pairs(haveSet) do
+        if not requireSet[package] then
+            message = (message and message .. ', ' or '') .. package
+        end
+    end
+    if message then
+        error(TAG .. ': assertRequired have not-required ' .. message)
+    end
+
+end
+
+-------------------------------------------------------------------------------
+--- Lock CrLua packages.
+--
+-- @param tableName string : name of table being locked, or nil for CrLua.
+-- @param table : table being locked, or nil for CrLua.
+--
+-- Make CrLua and nested packages read-only, with access requiring keys exist.
+--
+-- Locking rules:
+--
+-- (1.) '_data' is a reserved table name for mutable tables.  Do not lock.
+--
+-- (2.) If the table starts with a capital letter, make it read-only and
+-- require keys exist.  These are packages or constants, attempting to access
+-- a missing field is probably a typo.  (Override by adding an
+-- _allowMissingKeys = { 'tableName1', 'tableName2'} entry at the same level
+-- as the referenced tables.  Such tables allow reads to missing keys, as well
+-- as all sub-tables in them.)
+--
+-- (2.) Otherwise make it read-only but allow reads to missing keys (value nil).
+-- One can query membership by checking if a key exists.
+--
+-- This helps catch typos calling non-existent functions, or overwriting
+-- a constant value by mistake.
+-------------------------------------------------------------------------------
+function CrLua.lock(tableName, table)
+    local seen = {}
+
+    local function lockRecursive(tableName, table, allowMissingKeys)
+        assert(type(tableName) == 'string' and type(table) == 'table' and type(allowMissingKeys) == 'boolean')
+
+        -- Watch out for cycles!  This might happen if a script defines
+        -- an enum table, then later uses one of them in a different table.
+        if seen[table] then
+            return
+        end
+        seen[table] = true
+
+        -- Leave _data tables alone.
+        local isData = tableName == '_data'
+        if isData then
+            return
+        end
+
+        -- Get any missing keys entry BEFORE locking this table.
+        local allowMissingKeysTableNameSet = {}
+        if table._allowMissingKeys then
+            for _, tableName in ipairs(table._allowMissingKeys) do
+                allowMissingKeysTableNameSet[tableName] = true
+            end
+        end
+
+        -- Lock the given table.
+        local firstLetter = string.match(tableName, '%a')
+        local isUpper = firstLetter and firstLetter == string.upper(firstLetter)
+        if isUpper and not allowMissingKeys then
+            CrLua.LockTable.readOnlyRequireKey(tableName, table)
+        else
+            CrLua.LockTable.readOnly(tableName, table)
+        end
+
+        -- Lock sub-tables, respecting _allowMissingKeys values.
+        for k, v in pairs(table) do
+            if type(v) == 'table' then
+                local entryAllowMissingKeys = allowMissingKeys or allowMissingKeysTableNameSet[k] or false
+                lockRecursive(tostring(k), v, entryAllowMissingKeys)
+            end
+        end
+    end
+
+    lockRecursive(tableName or 'CrLua', table or CrLua, false)
+end
+
+-- ############################################################################
+-- #### END #include <~/CrLua/CrLua>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/LockGlobals>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Partially lock the _G global variable table.
+-- Include this AFTER creating any necessary globals to prevent new ones.
+--
+-- - Existing globals can still be read AND WRITTEN.
+-- - Cannot read non-existent globals.
+-- - Cannot write new globals.
+--
+-- This helps catch typos where what was meant to access a local instead
+-- references a (hopefully non-existent) global, as well as forgetting to use
+-- "local" when creating objects.
+--
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.LockGlobals'
+local _lockGlobalsMetaTable = {}
+
+-- Index is only called when the key does not already exist.
+function _lockGlobalsMetaTable.__index(table, key)
+    error(TAG .. ': accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error(TAG .. ': globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+
+setmetatable(_G, _lockGlobalsMetaTable)
+
+-------------------------------------------------------------------------------
+
+-- Add a test function to the CrLua "namespace".
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.LockGlobals = assert(not CrLua.LockGlobals) and {
+    _require = { 'LockGlobals' }  -- require self to avoid missing require error
+}
+
+-- ############################################################################
+-- #### END #include <~/CrLua/LockGlobals>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/TTS/HelperClient>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Connect to a remote "Helper" object..
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.TTS.HelperClient'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.TTS = CrLua.TTS or {}
+CrLua.TTS.HelperClient = assert(not CrLua.TTS.HelperClient) and {
+    _require = {}
+}
+
+-- ############################################################################
+-- #### END #include <~/CrLua/TTS/HelperClient>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/List>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Lua list utility functions
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.List'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.List = assert(not CrLua.List) and {
+    _require = {}
+}
+
+-------------------------------------------------------------------------------
+--- Concatenate two lists.
+-- @param a list: table with number indices.
+-- @param b list: table with number indices.
+-- @return list: list with a's entries followed by b's entries.
+-------------------------------------------------------------------------------
+function CrLua.List.join(a, b)
+    assert(type(a) == 'table' and type(b) == 'table')
+
+    local result = {}
+    for _, v in ipairs(a) do
+        table.insert(result, v)
+    end
+    for _, v in ipairs(b) do
+        table.insert(result, v)
+    end
+    return result
+end
+
+-------------------------------------------------------------------------------
+--- Convert the keys of a table to a list.
+-- The list is dependent on table key iteration order, make no assumptions!
+-- @param set table : map from key to true.
+-- @return list : table with number indices.
+-------------------------------------------------------------------------------
+function CrLua.List.fromKeys(set)
+    assert(type(set) == 'table')
+
+    local result = {}
+    for k, v in pairs(set) do
+        table.insert(result, k)
+    end
+    return result
+end
+
+-- ############################################################################
+-- #### END #include <~/CrLua/List>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/LockTable>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Access control for tables.
+--
+-- Locked tables are empty, using a metatable to detect and redirect all forms
+-- of access to the actual table data.  Metatables contain a few custom fields:
+-- - '_name' string table name.
+-- - '_attrSet' table from set attribute names to true.
+-- - '_tableContents' table holding the actual locked table content.
+--
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.LockTable'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.LockTable = assert(not CrLua.LockTable) and {
+    _require = {}
+}
+
+CrLua.LockTable.ATTR = {
+    READ_ONLY = 1,
+    REQUIRE_KEY = 2
+}
+
+CrLua.LockTable.ACCESS_TYPE = {
+    READ_MISSING = 'read missing',
+    WRITE_NEW = 'write new',
+    OVERWRITE = 'overwrite'
+}
+
+-------------------------------------------------------------------------------
+--- Error and stop script when misusing a locked table.
+-------------------------------------------------------------------------------
+function CrLua.LockTable._error(lockedTable, key, accessType)
+    assert(type(lockedTable) == 'table' and type(accessType) == 'string')
+    local metatable = assert(getmetatable(lockedTable))
+    local tableName = assert(metatable._name)
+    local keyName = tostring(key or '<nil>')
+    error(TAG .. ': ' .. accessType .. ' ' .. tableName .. '.' .. keyName)
+end
+
+-------------------------------------------------------------------------------
+--- Create a new table with the lock table metamethods.
+-- @param tableName string : use this as the tableName.key when reporting errors.
+-- @param attrs table : list of LockTable.ATTRS to apply.
+-- @param table : table to lock (this table itself is mutated!)
+-- @return table : the same table, returned for create-by-wrapping convenience.
+-------------------------------------------------------------------------------
+function CrLua.LockTable._apply(tableName, attrs, table)
+    assert(type(tableName) == 'string' and type(attrs) == 'table' and type(table) == 'table')
+
+    -- Do not attempt to lock a table that already has a metatable.
+    assert(not getmetatable(table), 'cannot apply LockTable when a metatable is already set: ' .. tableName)
+
+    local newMetaTable = {
+        _name = tableName,
+        _attrSet = {},
+        _tableContents = {}
+    }
+
+    -- Add the metatable methods to behave like the original table.
+    for k, v in pairs(CrLua.LockTable._metatable) do
+        newMetaTable[k] = v
+    end
+
+    -- Apply attrs.
+    for _, attr in ipairs(attrs) do
+        assert(type(attr) == 'number')
+        newMetaTable._attrSet[attr] = true
+    end
+
+    -- Move table contents.
+    for k, v in pairs(table) do
+        newMetaTable._tableContents[k] = v
+        table[k] = nil
+    end
+
+    setmetatable(table, newMetaTable)
+    return table
+end
+
+CrLua.LockTable._metatable = {}
+
+function CrLua.LockTable._metatable.__index(lockedTable, key)
+    local metatable = getmetatable(lockedTable)
+    local attrSet = metatable._attrSet
+    local tableContents = metatable._tableContents
+    local value = tableContents[key]
+    local existing = value ~= nil
+    if not existing and attrSet[CrLua.LockTable.ATTR.REQUIRE_KEY] then
+        CrLua.LockTable._error(lockedTable, key, CrLua.LockTable.ACCESS_TYPE.READ_MISSING)
+    end
+    return value
+end
+
+function CrLua.LockTable._metatable.__newindex(lockedTable, key, value)
+    local metatable = getmetatable(lockedTable)
+    local attrSet = metatable._attrSet
+    local tableContents = metatable._tableContents
+    local existing = tableContents[key] ~= nil
+    if attrSet[CrLua.LockTable.ATTR.READ_ONLY] then
+        local accessType = existing and CrLua.LockTable.ACCESS_TYPE.OVERWRITE or CrLua.LockTable.ACCESS_TYPE.WRITE_NEW
+        CrLua.LockTable._error(lockedTable, key, accessType)
+    elseif not existing and attrSet[CrLua.LockTable.ATTR.REQUIRE_KEY] then
+        CrLua.LockTable._error(lockedTable, key, CrLua.LockTable.ACCESS_TYPE.WRITE_NEW)
+    end
+    tableContents[key] = value
+end
+
+function CrLua.LockTable._metatable.__pairs(lockedTable)
+    local metatable = getmetatable(lockedTable)
+    local tableContents = metatable._tableContents
+    local function iter(_, k)
+        local k, v = next(tableContents, k)
+        if v ~= nil then
+            return k, v
+        end
+    end
+    return iter, lockedTable, nil
+end
+
+function CrLua.LockTable._metatable.__ipairs(lockedTable)
+    local metatable = getmetatable(lockedTable)
+    local tableContents = metatable._tableContents
+    local function iter(_, i)
+        local v = tableContents[i + 1]
+        if v ~= nil then
+            return i + 1, v
+        end
+    end
+    return iter, lockedTable, 0
+end
+
+function CrLua.LockTable._metatable.__len(lockedTable)
+    local metatable = getmetatable(lockedTable)
+    local tableContents = metatable._tableContents
+    return #tableContents
+end
+
+-------------------------------------------------------------------------------
+--- Make table read-only.
+-- Reads to missing values return nil, as normal.
+-- If the table has a _name entry, use that when reporting errors.
+-- @param table
+-- @param table : the same table as the argument for convenience assignment.
+-------------------------------------------------------------------------------
+function CrLua.LockTable.readOnly(tableName, table)
+    assert(type(tableName) == 'string' and type(table) == 'table')
+    assert(type(table) == 'table')
+
+    local attrs = { CrLua.LockTable.ATTR.READ_ONLY }
+    return CrLua.LockTable._apply(tableName, attrs, table)
+end
+
+-------------------------------------------------------------------------------
+--- Make table read-only, and error if accessing missing key.
+-- Helps catch typos reading from must-have-item tables.
+-- @param table
+-- @param table : the same table as the argument for convenience assignment.
+-------------------------------------------------------------------------------
+function CrLua.LockTable.readOnlyRequireKey(tableName, table)
+    assert(type(tableName) == 'string' and type(table) == 'table')
+
+    local attrs = { CrLua.LockTable.ATTR.READ_ONLY, CrLua.LockTable.ATTR.REQUIRE_KEY }
+    return CrLua.LockTable._apply(tableName, attrs, table)
+end
+
+-- ############################################################################
+-- #### END #include <~/CrLua/LockTable>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/Log>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Lua logging functions
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.Log'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.Log = assert(not CrLua.Log) and {
+    _require = {},
+    _data = {}
+}
+
+CrLua.Log.LOG_LEVEL = {
+    DEBUG = { level = 1, shortString = 'd' },
+    INFO = { level = 2, shortString = 'i' },
+    WARNING = { level = 3, shortString = 'w' },
+	ERROR = { level = 4, shortString = 'e' },
+    NONE = { level = 5, shortString = 'x' },
+}
+
+-- Store mutable level in a nested table to avoid mutating anything in Log.
+CrLua.Log._data.level = CrLua.Log.LOG_LEVEL.NONE
+
+-------------------------------------------------------------------------------
+--- Set the log level, only log messagees at this level and above.
+-- @param level table : CrLua.Log.LOG_LEVEL value.
+-------------------------------------------------------------------------------
+function CrLua.Log.setLogLevel(level)
+    assert(level and type(level.level) == 'number' and type(level.shortString) == 'string')
+    CrLua.Log._data.level = level
+end
+
+function CrLua.Log._logTable(message, table, depth)
+    assert(type(message) == 'string' and type(table) == 'table' and type(depth) == 'number')
+
+    local indent = '   '
+    local prefix = ''
+    if depth > 1 then
+        for i = 2, depth do
+            prefix = prefix .. indent
+        end
+    end
+    local indentedPrefix = prefix .. '   '
+
+    print(prefix .. message .. ' = {')
+    if depth < 4 then
+        for k, v in pairs(table) do
+            if type(v) == 'table' then
+                CrLua.Log._logTable(tostring(k), v, depth + 1)
+            else
+                print(indentedPrefix .. tostring(k) .. ' = ' .. tostring(v))
+            end
+        end
+    else
+        -- Stop once too deep (also prevents infinite loops if cycles).
+        print(indentedPrefix .. '...')
+    end
+    print(prefix .. '}')
+end
+
+function CrLua.Log._log(logLevel, tag, message, table)
+    -- Be verbose about bad arguments here, easy to pass the wrong item.
+    -- ALWAYS verify arguments even if log level will suppress logging,
+    -- otherwise bugs can creep in that only tickle when logging is enabled.
+    if type(tag) ~= 'string' then
+        error(TAG .. '_log: tag is not a string', 2)
+    elseif type(message) ~= 'string' then
+        error(TAG .. '_log: message is not a string', 2)
+    elseif table and type(table) ~= 'table' then
+        error(TAG .. '_log: table is not a table', 2)
+    end
+
+    if logLevel.level < CrLua.Log._data.level.level then
+        return
+    end
+
+    -- Insert the tag as message prefix.
+    message = tag .. ' ' .. message
+
+    -- Inject a [timestamp/level] prefix.
+    local timestamp = os.date('%I:%M.%S')
+    message = '[' .. timestamp .. '/' .. logLevel.shortString .. '] ' .. message
+
+    if table then
+        CrLua.Log._logTable(message, table, 1)
+    else
+        print(message)
+    end
+end
+
+-------------------------------------------------------------------------------
+--- Log a debug message.
+-- @param tag string.
+-- @param message string.
+-- @table optional table, logging contents if given.
+-------------------------------------------------------------------------------
+function CrLua.Log.d(tag, message, table)
+    CrLua.Log._log(CrLua.Log.LOG_LEVEL.DEBUG, tag, message, table)
+end
+
+-- ############################################################################
+-- #### END #include <~/CrLua/Log>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/Polygon>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Polygon utility functions.
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.Polygon'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.Polygon = assert(not CrLua.Polygon) and {
+    _require = {}
+}
+
+-------------------------------------------------------------------------------
+--- Convert from internal [1,2] points to XYZ tables.
+-- @param polygon table : list of points.
+-- @param y number : optional Y value, defaults to 1.
+-- @return table : list of {x,y,z} points.
+-------------------------------------------------------------------------------
+function CrLua.Polygon.toXYZ(polygon, y)
+    assert(type(polygon) == 'table' and assert(y == nil or type(y) == 'number'))
+    local result = {}
+    for _, vertex in pairs(polygon) do
+        table.insert(result, { x = vertex[1], y = y or 1, z = vertex[2] })
+    end
+    return result
+end
+
+-------------------------------------------------------------------------------
+--- Convert {xyz} points to [1,2] polygon points.
+-- @param points talbe : list of {xyz} points.
+-- @return table : list of [1,2] polygon points.
+-------------------------------------------------------------------------------
+function CrLua.Polygon.fromXYZ(points)
+    assert(type(points) == 'table')
+    local result = {}
+    for _, point in ipairs(points) do
+        table.insert(result, { point.x, point.z })
+    end
+    return result
+end
+
+-------------------------------------------------------------------------------
+--- Inset polygon by fixed perpendicular distance.
+-- Requires polygon vertices be given in clockwise order, otherwise will outset!
+-- @see http://alienryderflex.com/polygon_inset/
+-- @see http://alienryderflex.com/intersect/
+-- @param polygon table : list of 2d points, each point is a list of two numbers.
+-- @param inset number : inset distance (negative to outset).
+-- @param optional xIndex : if x is not point[1], find it as point[xIndex].
+-- @param optional yIndex : if y is not point[2], find it as point[yIndex].
+-- @return inset polygon table : new inset polygon, original left as-is.
+-------------------------------------------------------------------------------
+function CrLua.Polygon.inset(polygon, inset, xIndex, yIndex)
+    assert(type(polygon) == 'table' and type(inset) == 'number')
+    assert(#polygon > 2)
+
+    local x = xIndex or 1
+    local y = yIndex or 2
+
+    local function lineIntersection(a, b, c, d)
+        assert(not(a[x] == b[x] and a[y] == b[y]))
+        assert(not(c[x] == d[x] and c[y] == d[y]))
+
+        -- Translate so A is at the origin.
+        --local A = { [x] = 0, [y] = 0 }
+        local B = { [x] = b[x] - a[x], [y] = b[y] - a[y] }
+        local C = { [x] = c[x] - a[x], [y] = c[y] - a[y] }
+        local D = { [x] = d[x] - a[x], [y] = d[y] - a[y] }
+
+        local distAB = math.sqrt((B[x] * B[x]) + (B[y] * B[y]))
+        assert(distAB > 0)
+
+        -- Rotate so B is on the positive X axis.
+        local cos = B[x] / distAB
+        local sin = B[y] / distAB
+        --B = { [x] = distAB, [y] = 0 }
+        C = { [x] = (C[x] * cos) + (C[y] * sin), [y] = (C[y] * cos) - (C[x] * sin) }
+        D = { [x] = (D[x] * cos) + (D[y] * sin), [y] = (D[y] * cos) - (D[x] * sin) }
+        assert(C[y] ~= D[y])  -- parallel lines
+
+        -- Get intersection on the AB x axis line.
+        local ABx = D[x] + ((C[x] - D[x]) * D[y] / (D[y] - C[y]))
+
+        -- Reverse rotation, translation.
+        return { [x] = a[x] + (ABx * cos), [y] = a[y] + (ABx * sin) }
+    end
+
+    local function insetCorner(prev, cur, next)
+        -- Get line segments (preserve winding direction) and distances.
+        local d1 = { [x] = cur[x] - prev[x], [y] = cur[y] - prev[y] }
+        local dist1 = math.sqrt((d1[x] * d1[x]) + (d1[y] * d1[y]))
+        local d2 = { [x] = next[x] - cur[x], [y] = next[y] - cur[y] }
+        local dist2 = math.sqrt((d2[x] * d2[x]) + (d2[y] * d2[y]))
+        assert(dist1 > 0 and dist2 > 0)
+
+        -- Inset line segments prev->cur and cur->next.
+        local inset1 = { [x] = d1[y] * inset / dist1, [y] = -d1[x] * inset / dist1 }
+        local prev1 = { [x] = prev[x] + inset1[x], [y] = prev[y] + inset1[y] }
+        local prev2 = { [x] = cur[x] + inset1[x], [y] = cur[y] + inset1[y] }
+        local inset2 = { [x] = d2[y] * inset / dist2, [y] = -d2[x] * inset / dist2 }
+        local next1 = { [x] = cur[x] + inset2[x], [y] = cur[y] + inset2[y] }
+        local next2 = { [x] = next[x] + inset2[x], [y] = next[y] + inset2[y] }
+
+        -- If both inset line segments share an endpoint, lines are colinear.
+        if prev2[x] == next1[x] and prev2[y] == next1[y] then
+            return next1
+        end
+
+        -- Otherwise get intersection point.
+        return lineIntersection(prev1, prev2, next1, next2)
+    end
+
+    local insetPolygon = {}
+    local numVertices = #polygon
+    for i = 1, #polygon do
+        local prevPt = polygon[((i - 2) % numVertices) + 1]
+        local curPt = polygon[i]
+        local nextPt = polygon[(i % numVertices) + 1]
+
+        table.insert(insetPolygon, insetCorner(prevPt, curPt, nextPt))
+    end
+
+    return insetPolygon
+end
+
+-- ############################################################################
+-- #### END #include <~/CrLua/Polygon>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/Table>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Lua table utility functions
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.Table'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.Table = assert(not CrLua.Table) and {
+    _require = {}
+}
+
+-------------------------------------------------------------------------------
+--- Copy a table, including sub-tables.
+-- Make a new table, copying key->value from source table.
+-- @param table
+-- @return new table
+-------------------------------------------------------------------------------
+function CrLua.Table.copy(table)
+    assert(type(table) == 'table')
+
+    local result = {}
+    for k, v in pairs(table) do
+        result[k] = type(v) == 'table' and CrLua.Table.copy(v) or v
+    end
+    return result
+end
+
+-- ############################################################################
+-- #### END #include <~/CrLua/Table>
+-- ############################################################################
+
+-- ############################################################################
+-- #### START #include <~/CrLua/Util>
+-- ############################################################################
+
+-------------------------------------------------------------------------------
+--- Lua utility functions
+-- @author Darrell
+-------------------------------------------------------------------------------
+
+local TAG = 'CrLua.Util'
+
+CrLua = CrLua or {}  -- global, <include> wraps in a do .. end block
+CrLua.Util = assert(not CrLua.Util) and {
+    _require = {}
+}
+
+-------------------------------------------------------------------------------
+--- Compute the distance between two {x,y,z} vectors.
+-- @param a table : {x,y,z} keys.
+-- @param b table : {x,y,z} keys.
+-- @return distance squared (sqrt it if need exact, sq is fine for sorting).
+-------------------------------------------------------------------------------
+function CrLua.Util.distanceSq(a, b)
+    local dx = a.x - b.x
+    local dy = a.y - b.y
+    local dz = a.z - b.z
+    return (dx * dx) + (dy * dy) + (dz * dz)
+end
+
+-------------------------------------------------------------------------------
+--- Find the minimum value in a table, with optional function for value.
+-- @param table : table with arbitrary keys (may be a list).
+-- @param optional minFunction : call for each value to minimize.
+-- @return ? : table value with the min value.
+-- Function can return false/nil to reject value from consideration.
+-------------------------------------------------------------------------------
+function CrLua.Util.min(table, minFunction)
+    assert(type(table) == 'table' and ((not minFunction) or type(minFunction) == 'function'))
+
+    local minScore = nil
+    local minKey, minValue = nil, nil
+    for k, v in pairs(table) do
+        local score = (minFunction and minFunction(v)) or tonumber(v)
+        if score and (not minScore or score < minScore) then
+            minScore = score
+            minKey = k
+            minValue = v
+        end
+    end
+    return minKey, minValue
+end
+
+-- ############################################################################
+-- #### END #include <~/CrLua/Util>
+-- ############################################################################
+
+--CrLua.Log.setLogLevel(CrLua.Log.LOG_LEVEL.DEBUG)
+--#include <~/CrLua/UnitTest>
+--CrLua.UnitTest.runTests(TAG, CrLua, true)
+
+CrLua.assertRequired({ 'List', 'Log', 'Polygon', 'Table', 'Util', 'TTS.HelperClient' })
+CrLua.lock()
+
+-- ############################################################################
+-- #### END #include <~/CrLua/Objects/TI4_Faction_Borders>
+-- ############################################################################
+

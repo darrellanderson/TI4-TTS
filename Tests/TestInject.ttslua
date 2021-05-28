@@ -1,0 +1,135 @@
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
+
+function _copy(t)
+    if t and type(t) == 'table' then
+        local copy = {}
+        for k, v in pairs(t) do
+            copy[k] = type(v) == 'table' and _copy(v) or v
+        end
+        t = copy
+    end
+    return t
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    self.addContextMenuItem('Inject Unit Override', injectUnitOverride, true)
+    self.addContextMenuItem('Inject Unit Modifier', injectUnitModifier, true)
+end
+
+-------------------------------------------------------------------------------
+
+function injectUnitOverride()
+    local myUnitOverrideName = 'myUnitOverrideName'  -- does not test find
+    local myUnitOverrideName2 = 'myUnitOverrideName II'  -- does not test find
+
+    _unitHelper.injectUnitOverride({
+        name = myUnitOverrideName,
+        override = 'Infantry',
+        groundCombat = { hit = 2 }
+    })
+    _unitHelper.injectUnitOverride({
+        name = myUnitOverrideName2,
+        upgrade = 'Infantry',
+        groundCombat = { hit = 2 }
+    })
+
+    local unitAttrs = _unitHelper.getUnitAttributes({ myUnitOverrideName })
+    assert(unitAttrs['Infantry'].name == myUnitOverrideName)
+
+    local unitAttrs = _unitHelper.getUnitAttributes({ myUnitOverrideName, myUnitOverrideName2 })
+    assert(unitAttrs['Infantry'].name == myUnitOverrideName2)
+
+    print('injectUnitOverride success')
+end
+
+-------------------------------------------------------------------------------
+
+local _myUnitModifierCalled = false
+
+function _myUnitModifier(unitAttrs)
+    _myUnitModifierCalled = true
+    return unitAttrs
+end
+
+function injectUnitModifier(clickerColor)
+    local myUnitModifierName = self.getName()  -- need to find object on table
+
+    if _myUnitModifierCalled then
+        print('injectUnitModifier already injected')
+        return
+    end
+
+    _unitHelper.injectUnitModifier({
+        name = myUnitModifierName,
+        description = 'short description of my unit modifier',
+        owner = 'any',  -- { self, opponent, any }
+        type = 'adjust',  -- { mutate, adjust, choose }
+        tag = self.tag,  -- defaults to either Tile or Card
+        applyFunctionGuid = self.getGUID(),
+        applyFunctionName = '_myUnitModifier'
+    })
+
+    -- Verify unit modifier is found.
+    local colorToUnitModifiers = _unitHelper.getColorToUnitModifiers()
+    local found = false
+    for color, unitModifiers in pairs(colorToUnitModifiers) do
+        for _, unitModifier in ipairs(unitModifiers) do
+            if unitModifier == myUnitModifierName then
+                found = color
+                break
+            end
+        end
+    end
+    assert(found, '_myUnitModifier not active')
+
+    -- Apply unit modifiers.
+    local unitAttrs = _unitHelper.getUnitAttributes({})
+    local myUnitModifiers = assert(colorToUnitModifiers[found])
+    unitAttrs = _unitHelper.applyUnitModifiers({
+        unitAttrs = unitAttrs,
+        myColor = found,
+        myUnitModifiers = myUnitModifiers,
+        myUnitTypeToCount = {},
+    })
+    local found = false
+    for _, unitModifier in ipairs(unitAttrs._unitModifiers) do
+        if unitModifier.name == myUnitModifierName then
+            found = true
+            break
+        end
+    end
+    assert(found, '_myUnitModifier not found')
+    assert(_myUnitModifierCalled, '_myUnitModifier not called')
+
+    print('injectUnitModifier success')
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

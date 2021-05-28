@@ -1,0 +1,126 @@
+--- Report player token counts.
+-- Feature request from micmacmoose 9/5/20 on tts-module-workshop discord.
+-- @author Darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+_factionHelper = getHelperClient('TI4_FACTION_HELPER')
+_zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+function _doNothing() end
+
+function onLoad(saveState)
+    local y = self.getBoundsNormalized().size.y / 2 + 0.01
+    self.createButton({
+        click_function = '_doNothing',
+        function_owner = self,
+        label          = '',
+        position       = { x = 0, y = y, z = 0 },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = self.getScale(),
+        width          = 0,
+        height         = 0,
+        font_size      = 550,
+    })
+
+    self.addContextMenuItem('Update token counts', updateTokenCounts, false)
+
+    local function delayedUpdateTokenCounts()
+        updateTokenCounts()
+        math.randomseed(self.getPosition().x + Time.time)
+        local delay = 5 + math.random()
+        Wait.time(delayedUpdateTokenCounts, delay)
+    end
+    delayedUpdateTokenCounts()
+end
+
+function updateTokenCounts()
+    local color = _zoneHelper.zoneFromPosition(self.getPosition())
+
+    local numTactics = 0
+    local numFleet = 0
+    local numStrategy = 0
+    local numOther = 0
+
+    local function countToken(commandSheet, tokenPosition)
+        local p = commandSheet.positionToLocal(tokenPosition)
+        local dSq = p.x * p.x + p.z * p.z
+        local degrees = (math.deg(math.atan2(p.z, p.x)) + 360) % 360
+        if dSq < 15 then
+            if 300 > degrees and degrees > 240 then
+                numTactics = numTactics + 1
+            elseif 240 > degrees and degrees > 180 then
+                numFleet = numFleet + 1
+            elseif 180 > degrees and degrees > 120 then
+                numStrategy = numStrategy + 1
+            else
+                numOther = numOther + 1
+            end
+        else
+            numOther = numOther + 1
+        end
+    end
+
+    local faction = color and _factionHelper.fromColor(color)
+    local commandSheet = faction and getObjectFromGUID(faction.commandSheetGuid)
+
+    if faction and commandSheet then
+        -- Get command token positions for this faction.
+        local commandTokenName = faction.tokenName .. ' Command Token'
+        local guidToPosition = {}
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == commandTokenName then
+                guidToPosition[object.getGUID()] = object.getPosition()
+            end
+        end
+
+        -- Count tokens inside the player zone.
+        local guidToZoneColor = _zoneHelper.zonesFromPositions(guidToPosition)
+        for guid, zoneColor in pairs(guidToZoneColor) do
+            if zoneColor == color then
+                local position = guidToPosition[guid]
+                countToken(commandSheet, position)
+            end
+        end
+    end
+
+    -- Update UI.
+    local tokensMessage = {
+        numTactics .. 'T',
+        numFleet .. 'F',
+        numStrategy .. 'S',
+    }
+    if numOther > 0 then
+        table.insert(tokensMessage, numOther .. '??')
+    end
+    tokensMessage = table.concat(tokensMessage, '/')
+
+    self.editButton({
+        index          = 0,
+        label          = tokensMessage,
+    })
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

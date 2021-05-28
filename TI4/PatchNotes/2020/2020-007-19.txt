@@ -1,0 +1,5 @@
+Faction box:
+- Fix pack/unpack to work with new faction tokens.
+
+Faction cards (including Blue Space):
+- Reset hidden attribute.

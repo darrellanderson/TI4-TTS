@@ -1,0 +1,119 @@
+--- Reset strategy cards to use ThatRobHuman's new mesh / UV map.
+-- @author darrell
+
+local DATA = {
+    MODEL = 'file:////Users/darrell/Downloads/tiles/tile_standalone_msh.obj',
+    COLLIDER = 'file:////Users/darrell/Downloads/tiles/tile_standalone_col.obj',
+    IMG = 'file:////Users/darrell/Downloads/creuss-v5.jpg'
+}
+
+local _deletedItems = false
+local _deletePendingSet = {}
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    print('onLoad')
+    _deletedItems = assert(getDeletedItems())
+    self.addContextMenuItem('Mutate', mutate)
+end
+
+function onObjectDestroy(dyingObject)
+    _deletePendingSet[dyingObject.getGUID()] = nil
+end
+
+function getDeletedItems()
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Bag' and object.getName() == 'TI4 Deleted Items' then
+            return object
+        end
+    end
+end
+
+function mutate()
+    startLuaCoroutine(self, 'mutateCoroutine')
+end
+
+local function mutateJson(json, name)
+    assert(type(json) == 'string')
+    json = JSON.decode(json)
+
+    json.CustomMesh.MeshURL = DATA.MODEL
+    json.CustomMesh.ColliderURL = DATA.COLLIDER
+    json.CustomMesh.DiffuseURL = DATA.IMG
+
+    return JSON.encode_pretty(json)
+end
+
+local function mutateObject(object)
+    print('mutating ' .. object.getName())
+
+    local guid = object.getGUID()
+    local json = object.getJSON()
+
+    json = mutateJson(json, object.getName())
+    local spawnParams = {
+        json              = json,
+        position          = object.getPosition(),
+        rotation          = object.getRotation(),
+        callback_function = nil,
+        sound             = false,
+        params            = nil,
+        snap_to_grid      = object.use_grid
+    }
+
+    -- Delete object, wait for delete to actually happen before reusing guid!
+    if _deletedItems then
+        _deletedItems.call('ignoreGuid', guid)
+    end
+    _deletePendingSet[guid] = true
+    destroyObject(object)
+    object = nil
+    while _deletePendingSet[guid] do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+    coroutine.yield(0)
+    coroutine.yield(0)
+
+    local object = spawnObjectJSON(spawnParams)
+    assert(object.getGUID() == guid)
+
+    -- Wait for spawn, plus extra time for texture to load.
+    object.setLock(true)
+    while object.spawning do
+        coroutine.yield(0)
+    end
+    local waitUntil = Time.time + 3
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+
+    return object
+end
+
+function mutateCoroutine()
+    local tile = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.getGUID() == 'f38182' then
+            print('found ' .. object.getName())
+            tile = object
+        end
+    end
+
+    assert(tile)
+    mutateObject(tile)
+
+    print('done!')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

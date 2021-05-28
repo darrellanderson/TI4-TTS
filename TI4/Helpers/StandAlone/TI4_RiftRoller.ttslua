@@ -1,0 +1,316 @@
+--- Add context menu to gravity rift to roll dice
+-- @author Darrell for context menu stuff
+-- @author Mantis for dice rolling stuff (from Quickroller)
+-- @author Milty for cobbling the two together
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+
+local _gravityRiftGuidSet = false
+
+-------------------------------------------------------------------------------
+
+local diePlayerColor = false       --true or false
+--What type of die will be rolled by this tool (only works with 1)
+local dieType = "Die_10"
+--Time before dice disappear. -1 means they do not (until next roll)
+local removalDelay = 5
+--If dice are added together for announcement (true or false)
+local announce_total = false
+--If individual results are displayed (true or false)
+local announce_each = true
+--If last player to click button before roll happens gets their name announced
+local announce_player = true
+--Distance dice are placed from the tool's center
+local radialOffset = 2.2
+--Distance die gets moved up
+local heightOffset = 2
+--Die size, default of 1
+local dieSize = 1
+--How long to wait before rolling the spawned dice
+local waitBeforeRoll = 1.0
+--How many dice can be spawned. 0 is infinite
+local dieLimit = 20
+local hitValue = 4
+local currentDice = {}
+local rollInProgress = false
+local diceCount = 0
+
+-------------------------------------------------------------------------------
+
+function isGravRiftObject(object)
+    if not _gravityRiftGuidSet then
+        _gravityRiftGuidSet = {}
+        for guid, system in pairs(_systemHelper.systems()) do
+            for _, anomaly in ipairs(system.anomalies or {}) do
+                if anomaly == 'gravity rift' then
+                    _gravityRiftGuidSet[guid] = true
+                end
+            end
+        end
+    end
+    if _gravityRiftGuidSet[object.getGUID()] then
+        return true
+    end
+    if object.tag == 'Tile' then
+        local name = object.getName()
+        if name == 'Tear Token (Cabal)' or name == 'Tear Token (Nekro)' then
+            return true
+        end
+    end
+end
+
+function applyGravityRiftGoodness(object)
+    object.addContextMenuItem('Roll Grav Rift', function(playerColor) rollRift(object, playerColor) end, true)
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    self.setColorTint({ r = 0.25, g = 0.25, b = 0.25 })
+    self.setScale({ x = 2, y = 0.01, z = 2 })
+    self.setName('TI4_RIFT_ROLLER')
+    self.setDescription('Adds a right-click "rift roll" to gravity rifts, PLEASE LEAVE ON TABLE! This object is only visible to the black (GM) player.')
+
+    -- Only the GM/black player can see this object.  Others can still interact!
+    local invisibleTo = {}
+    for _, color in ipairs(Player.getColors()) do
+        if color ~= 'Black' then
+            table.insert(invisibleTo, color)
+        end
+    end
+    self.setInvisibleTo(invisibleTo)
+
+    local function delayedAdd()
+        for _, object in ipairs(getAllObjects()) do
+            if isGravRiftObject(object) then
+                applyGravityRiftGoodness(object)
+            end
+        end
+    end
+    Wait.frames(delayedAdd, 11)
+end
+
+function onObjectSpawn(object)
+    if isGravRiftObject(object) then
+        applyGravityRiftGoodness(object)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function rollRift(object, color)
+    --Dice spam protection, can be disabled up at top of script
+    diceCount = 0
+    for _ in pairs(currentDice) do
+        diceCount = diceCount + 1
+    end
+    local denyRoll = false
+    if dieLimit > 0 and diceCount >= dieLimit then
+        denyRoll = true
+    end
+    --Check for if click is allowed
+    if rollInProgress == nil and denyRoll == false then
+
+        --Find dice positions, moving previously spawned dice if needed
+        local angleStep = 360 / (#currentDice+1)
+        for i, die in ipairs(currentDice) do
+            local pos = findGlobalPosWithLocalDirection(object, angleStep*(i-1))
+            die.setPositionSmooth(pos, false, true)
+        end
+
+        --Spawns dice
+        local spawnedDie = spawnObject({
+            type=dieType,
+            position = findGlobalPosWithLocalDirection(object, 360-angleStep),
+            rotation = randomRotation(), scale={dieSize,dieSize,dieSize}
+        })
+        table.insert(currentDice, spawnedDie)
+        spawnedDie.setLock(true)
+        if diePlayerColor == true then
+            spawnedDie.setColorTint(stringColorToRGB(color))
+        end
+
+        --Timer starting
+        Timer.destroy("riftRoller_"..self.getGUID())
+        Timer.create({
+            identifier="riftRoller_"..self.getGUID(), delay=waitBeforeRoll,
+            function_name="rollDice", function_owner=self,
+            parameters = {color = color}
+        })
+    elseif rollInProgress == false then
+        cleanupDice()
+        rollRift(object,color)
+    else
+        Player[color].broadcast("Roll in progress.", {0.8, 0.2, 0.2})
+    end
+end
+
+--Die rolling
+--Rolls all the dice and then launches monitoring
+function rollDice(p)
+    rollInProgress = true
+    function coroutine_rollDice()
+        for _, die in ipairs(currentDice) do
+            die.setLock(false)
+            die.randomize()
+            wait(0.1)
+        end
+        monitorDice(p.color)
+        return 1
+    end
+    startLuaCoroutine(self, "coroutine_rollDice")
+end
+
+--Monitors dice to come to rest
+function monitorDice(color)
+    function coroutine_monitorDice()
+        repeat
+            local allRest = true
+            for _, die in ipairs(currentDice) do
+                if die ~= nil and die.resting == false then
+                    allRest = false
+                end
+            end
+            coroutine.yield(0)
+        until allRest == true
+
+        --Announcement
+        if announce_total==true or announce_each==true then
+            displayResults(color)
+        end
+
+        wait(0.1)
+        rollInProgress = false
+
+        --Auto die removal
+        if removalDelay ~= -1 then
+            --Timer starting
+            Timer.destroy("riftRoller_cleanup_"..self.getGUID())
+            Timer.create({
+                identifier="riftRoller_cleanup_"..self.getGUID(),
+                function_name="cleanupDice", function_owner=self,
+                delay=removalDelay,
+            })
+        end
+
+        return 1
+    end
+    startLuaCoroutine(self, "coroutine_monitorDice")
+end
+
+--After roll broadcasting and cleanup
+function displayResults(color)
+    local total = 0
+    local resultTable = {}
+
+    --Tally result info
+    for _, die in ipairs(currentDice) do
+        if die ~= nil then
+            local value = die.getValue()
+            if value >= hitValue then total = total + 1 end
+            table.insert(resultTable, value)
+        end
+    end
+    --Sort result table into order
+    local sort_func = function(a,b) return a < b end
+    table.sort(resultTable, sort_func)
+    --String assembly
+    local s = ""
+    if announce_each == true then
+        for i, v in ipairs(resultTable) do
+            s = s .. v
+            if i ~= #resultTable then
+                s = s .. ", "
+            end
+        end
+    end
+    if hitValue > 0 then
+        if s ~= "" then
+            s = "Survives the rift on: " .. hitValue .. "  |  " .. s .. "  |  "
+        end
+        if total ~= 1 then plural = "es." else plural = "." end
+        s = s .. "[b]" .. total .. " success" .. plural .. "[/b]"
+    end
+    if announce_player == true then
+        s = Player[color].steam_name .. "  |  " .. s
+    end
+
+    broadcastToAll(s, stringColorToRGB(color))
+end
+
+--Die cleanup
+function cleanupDice()
+    for _, die in ipairs(currentDice) do
+        if die ~= nil then
+            destroyObject(die)
+        end
+    end
+
+    Timer.destroy("riftRoller_cleanup_"..self.getGUID())
+    rollInProgress = nil
+    currentDice = {}
+end
+--Utility functions to obtain info
+--Finds a position, rotated around the Y axis, using distance you want + angle
+--oPos is object pos, oRot=object rotation, distance = how far, angle = angle in degrees
+function findGlobalPosWithLocalDirection(spawn_object, angle)
+    local object, distance = spawn_object, radialOffset * self.getScale().x
+    local oPos, oRot = object.getPosition(), object.getRotation()
+    local posX = oPos.x + math.sin( math.rad(angle+oRot.y) ) * distance
+    local posY = oPos.y + heightOffset
+    local posZ = oPos.z + math.cos( math.rad(angle+oRot.y) ) * distance
+    return {x=posX, y=posY, z=posZ}
+end
+
+--Gets a random rotation vector
+function randomRotation()
+    --Credit for this function goes to Revinor (forums)
+    --Get 3 random numbers
+    local u1 = math.random();
+    local u2 = math.random();
+    local u3 = math.random();
+    --Convert them into quats to avoid gimbal lock
+    local u1sqrt = math.sqrt(u1);
+    local u1m1sqrt = math.sqrt(1-u1);
+    local qx = u1m1sqrt *math.sin(2*math.pi*u2);
+    local qy = u1m1sqrt *math.cos(2*math.pi*u2);
+    local qz = u1sqrt *math.sin(2*math.pi*u3);
+    local qw = u1sqrt *math.cos(2*math.pi*u3);
+    --Apply rotation
+    local ysqr = qy * qy;
+    local t0 = -2.0 * (ysqr + qz * qz) + 1.0;
+    local t1 = 2.0 * (qx * qy - qw * qz);
+    local t2 = -2.0 * (qx * qz + qw * qy);
+    local t3 = 2.0 * (qy * qz - qw * qx);
+    local t4 = -2.0 * (qx * qx + ysqr) + 1.0;
+    --Correct
+    if t2 > 1.0 then t2 = 1.0 end
+    if t2 < -1.0 then ts = -1.0 end
+    --Convert back to X/Y/Z
+    local xr = math.asin(t2);
+    local yr = math.atan2(t3, t4);
+    local zr = math.atan2(t1, t0);
+    --Return result
+    return {math.deg(xr),math.deg(yr),math.deg(zr)}
+end
+
+--Coroutine delay, in seconds
+function wait(time)
+    local start = os.time()
+    repeat coroutine.yield(0) until os.time() > start + time
+end

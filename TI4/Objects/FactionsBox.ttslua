@@ -1,0 +1,162 @@
+--- Pack/unpack faction tokens from the "pick a faction to play bag".
+-- Faction unpack knows how to find faction boxes inside other containers.
+-- @author Darrell
+
+local FACTION_TO_PLAY_BAG = 'Pick a Faction to Play'
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    self.addContextMenuItem('Pack Tokens', packFactionTokens, false)
+    self.addContextMenuItem('Unpack Tokens', unpackFactionTokens, false)
+end
+
+-------------------------------------------------------------------------------
+
+function takeFactionTokensBag()
+    for _, entry in ipairs(self.getObjects()) do
+        if entry.name == 'Faction Tokens' then
+            local position = self.getPosition()
+            local object = self.takeObject({
+                guid = entry.guid,
+                position = { x = position.x, y = position.y + 5, z = position.z },
+            })
+            return object
+        end
+    end
+    error('no faction tokens bag?')
+end
+
+function getPickFactionToPlayBag()
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == FACTION_TO_PLAY_BAG then
+            return object
+        end
+    end
+    error('no "' .. FACTION_TO_PLAY_BAG ..'" bag?')
+end
+
+-------------------------------------------------------------------------------
+
+function unpackFactionTokensLuaCoroutine()
+    local pickFactionToPlayBag = getPickFactionToPlayBag()
+    local factionTokensBag = takeFactionTokensBag()
+    coroutine.yield(0)
+    factionTokensBag.setLock(true)
+
+    -- Get the set of token names from faction boxes in self.
+    local wantTokenNameSet = {}
+    for _, entry in ipairs(self.getObjects()) do
+        local tokenName = string.match(entry.name, '^(.*) Box$')
+        if tokenName then
+            wantTokenNameSet[tokenName .. ' Faction Token'] = true
+        end
+    end
+
+    -- Get the set of token names already in the pick a faction bag.
+    local existingTokenNameSet = {}
+    for _, entry in ipairs(pickFactionToPlayBag.getObjects()) do
+        existingTokenNameSet[entry.name] = true
+    end
+
+    -- Unpack tokens not already in pick a faction bag, delete any that are.
+    local pos = factionTokensBag.getPosition()
+    for i, entry in ipairs(factionTokensBag.getObjects()) do
+        if wantTokenNameSet[entry.name] then
+            local function takeCallback(object)
+                if existingTokenNameSet[object.getName()] then
+                    -- Already in faction bag.  Delete this one.
+                    destroyObject(object)
+                else
+                    pickFactionToPlayBag.putObject(object)
+                end
+            end
+            factionTokensBag.takeObject({
+                guid              = entry.guid,
+                position          = { x = pos.x, y = pos.y + 5 + i, z = pos.z },
+                callback_function = takeCallback,
+                smooth            = false,
+            })
+            coroutine.yield(0)
+        end
+    end
+
+    -- Put faction token bag back.
+    factionTokensBag.setLock(false)
+    self.putObject(factionTokensBag)
+    coroutine.yield(0)
+
+    pickFactionToPlayBag.shuffle()
+
+    return 1
+end
+
+function unpackFactionTokens()
+    startLuaCoroutine(self, 'unpackFactionTokensLuaCoroutine')
+end
+
+-------------------------------------------------------------------------------
+
+function packFactionTokensLuaCoroutine()
+    local pickFactionToPlayBag = assert(getPickFactionToPlayBag())
+    local factionTokensBag = assert(takeFactionTokensBag())
+    coroutine.yield(0)
+    factionTokensBag.setLock(true)
+
+    -- Get the set of token names from faction boxes in self.
+    local wantTokenNameSet = {}
+    for _, entry in ipairs(self.getObjects()) do
+        local tokenName = string.match(entry.name, '^(.*) Box$')
+        if tokenName then
+            wantTokenNameSet[tokenName .. ' Faction Token'] = true
+        end
+    end
+
+    -- Get the set of token names already in self faction bag.
+    local existingTokenNameSet = {}
+    for _, entry in ipairs(factionTokensBag.getObjects()) do
+        existingTokenNameSet[entry.name] = true
+    end
+
+    -- Pack faction tokens.
+    local pos = pickFactionToPlayBag.getPosition()
+    for i, entry in ipairs(pickFactionToPlayBag.getObjects()) do
+        if wantTokenNameSet[entry.name] then
+            local function takeCallback(object)
+                if existingTokenNameSet[object.getName()] then
+                    -- Already in faction bag.  Delete this one.
+                    destroyObject(object)
+                else
+                    factionTokensBag.putObject(object)
+                end
+            end
+            pickFactionToPlayBag.takeObject({
+                guid              = entry.guid,
+                position          = { x = pos.x, y = pos.y + 5 + i, z = pos.z },
+                callback_function = takeCallback,
+                smooth            = false,
+            })
+            coroutine.yield(0)
+        end
+    end
+
+    -- Put faction token bag back.
+    factionTokensBag.setLock(false)
+    self.putObject(factionTokensBag)
+
+    return 1
+end
+
+function packFactionTokens()
+    startLuaCoroutine(self, 'packFactionTokensLuaCoroutine')
+end
+
+-------------------------------------------------------------------------------
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

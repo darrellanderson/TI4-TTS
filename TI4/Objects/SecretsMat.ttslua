@@ -1,0 +1,179 @@
+--- Snap secret objectives to grid.
+-- @author Darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local SNAP_POINTS = {
+    PADDING = {  -- around edge of grid
+        x = 0.5,
+        z = 0.5
+    },
+    CARD_SIZE = {
+        x = 2,
+        z = 3
+    },
+    ROTATION = {
+        x = 0,
+        y = 180,
+        z = 180
+    },
+    BOX_SIZE = {
+        x = 2,
+        z = 3
+    }
+}
+
+-- Snap points are layed out in a 8x3 grid, [row][col] indexing.
+local _snapPointsGrid = false
+local _waitId = false
+
+-------------------------------------------------------------------------------
+
+-- Compute a good location for owner tokens.
+local _slotToTokenSpot = {}
+
+function suggestedOwnerTokenLocation(color)
+    local zoneAttributes = _zoneHelper and _zoneHelper.zoneAttributes(color)
+    local slot = zoneAttributes and zoneAttributes.index
+    local p = slot and _slotToTokenSpot[slot]
+    return p and self.positionToWorld(p)
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(save_state)
+    math.randomseed(tonumber(self.getGUID(), 16))
+    self.addContextMenuItem('Redraw boxes', drawSnapPoints, false)
+    resetSnapPoints()
+    delayedDrawSnapPoints()
+end
+
+function onPlayerTurnStart(player_color_start, player_color_previous)
+    -- in case all lines are erased, redraw on turn start
+    delayedDrawSnapPoints()
+end
+
+-- Helper "event" it triggers when changing player count.
+function onSetupHelperPlayerCountChanged()
+    delayedDrawSnapPoints()
+end
+
+function resetSnapPoints()
+    local bounds = self.getBoundsNormalized()
+
+    -- Create as many snap points as fit inside bounds.
+    local numCols = math.floor(bounds.size.x / (SNAP_POINTS.CARD_SIZE.x + SNAP_POINTS.PADDING.x))
+    local numRows = math.floor(bounds.size.z / (SNAP_POINTS.CARD_SIZE.z + SNAP_POINTS.PADDING.z))
+
+    -- Compute spacing in local space.
+    local size = bounds.size
+    local cardSize = SNAP_POINTS.CARD_SIZE
+    local padding = SNAP_POINTS.PADDING
+
+    local x0 = -(size.x / 2) + padding.x + (cardSize.x / 2)
+    local z0 = -(size.z / 2) + padding.z + (cardSize.z / 2)
+    local dx = cardSize.x + padding.x
+    local dz = cardSize.z + padding.x
+
+    _snapPointsGrid = {}
+    local allSnapPoints = {}
+    for row = 0, numRows - 1 do
+        local columnEntries = {}
+        for col = 0, numCols - 1 do
+            local snapPoint = {
+                position = {
+                    x = x0 + col * dx,
+                    y = bounds.size.y,
+                    z = z0 + row * dz
+                },
+                rotation = SNAP_POINTS.ROTATION,
+                rotation_snap = true
+            }
+            table.insert(columnEntries, snapPoint)
+            table.insert(allSnapPoints, snapPoint)
+
+            -- Reserve last slot as designed owner token area.
+            if row == numRows - 1 then
+                _slotToTokenSpot[col + 1] = snapPoint.position
+            end
+        end
+        table.insert(_snapPointsGrid, columnEntries)
+    end
+    self.setSnapPoints(allSnapPoints)
+end
+
+function drawSnapPoints()
+    local y = self.getBoundsNormalized().size.y + 0.01
+
+    local defaultColor = { r = 0.15, g = 0.15, b = 0.15, a = 0.4 }
+
+    local colIdxToColor = {}
+    for i, color in ipairs(_zoneHelper and _zoneHelper.zones() or {}) do
+        local rgba = Color.fromString(color)
+        rgba = {
+            r = (rgba.r + defaultColor.r) / 2,
+            g = (rgba.g + defaultColor.g) / 2,
+            b = (rgba.b + defaultColor.b) / 2,
+            a = defaultColor.a
+        }
+        colIdxToColor[i] = rgba
+    end
+
+    local thickness = SNAP_POINTS.BOX_SIZE.x
+    local lines = {}
+    local dz = SNAP_POINTS.BOX_SIZE.z / 2
+
+    for rowIdx, row in ipairs(_snapPointsGrid) do
+        for colIdx, snapPoint in ipairs(row) do
+            local p = assert(snapPoint.position)
+            table.insert(lines, {
+                points = {
+                    { x = p.x, y = y, z = p.z - dz },
+                    { x = p.x, y = y, z = p.z + dz },
+                },
+                thickness = thickness,
+                color = colIdxToColor[colIdx] or defaultColor,
+                loop = true,
+                square = true
+            })
+        end
+    end
+    self.setVectorLines(lines)
+end
+
+function delayedDrawSnapPoints()
+    local function drawSnapPointsWrapper()
+        _waitId = false
+        drawSnapPoints()
+    end
+    if _waitId then
+        Wait.stop(_waitId)
+    end
+    _waitId = Wait.time(drawSnapPointsWrapper, 0.2 + math.random())
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)
