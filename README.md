@@ -1,4 +1,4 @@
-# TTS-TI4
+# TI4-TTS
 Scripting for [Raptor1210's Twilight Imperium 4](https://steamcommunity.com/sharedfiles/filedetails/?id=1288687076) workshop mod for [Tabletop Simulator](https://store.steampowered.com/app/286160/Tabletop_Simulator/).
 
 Discord: [Twilight Imperium 4 Tabletop Simulator](https://discord.com/invite/yPWnGt6), #tts-module channel under Workshops.
