@@ -1,7 +1,7 @@
 --- Gather game data (score, tech, etc).
 -- Alec/Root's Twitch overlay: https://ti4-tts-gamedata-display-tool.herokuapp.com/
 -- @author Darrell
--- #include <~/CrLua/Objects/TI4_Helpers/TI4_GameDataHelper>
+-- #include <~/TI4-TTS/TI4/Helpers/TI4_GameDataHelper>
 
 function getHelperClient(helperObjectName)
     local function getHelperObject()
@@ -154,7 +154,7 @@ function asyncGatherDataCoroutine()
     coroutine.yield(0)
     coroutine.yield(0)
 
-    result.mapString = Map.getMapString() or ''
+    result.mapString = _state.mapString or ''
     coroutine.yield(0)
     coroutine.yield(0)
 
@@ -1053,27 +1053,41 @@ function HexSummary.getAttachments(hexToSystem, results)
 end
 
 function HexSummary.sortResults(results)
-    local function soryBy(a, b)
-        if a.tile < b.tile then return true end
-        if a.tile > b.tile then return false end
+    local function soryBy(resultA, resultB)
+        local a = resultA.tile or 0
+        local b = resultB.tile or 0
+        if a < b then return true end
+        if a > b then return false end
 
-        if a.planetIndex < b.planetIndex then return true end
-        if a.planetIndex > b.planetIndex then return false end
+        local a = resultA.planetIndex or 0
+        local b = resultB.planetIndex or 0
+        if a < b then return true end
+        if a > b then return false end
 
-        if a.token and (not b.token) then return true end
-        if (not a.token) and b.token then return false end
+        local a = resultA.token and 1 or 0
+        local b = resultB.token and 1 or 0
+        if a < b then return true end
+        if a > b then return false end
 
-        if a.attachment and (not b.attachment) then return false end
-        if (not a.attachment) and b.attachment then return true end
+        local a = resultA.attachment and 1 or 0
+        local b = resultB.attachment and 1 or 0
+        if a < b then return true end
+        if a > b then return false end
 
-        if (a.color or '') < (b.color or '') then return true end
-        if (a.color or '') > (b.color or '') then return false end
+        local a = resultA.color or ''
+        local b = resultB.color or ''
+        if a < b then return true end
+        if a > b then return false end
 
-        if (a.count or 1) < (b.count or 1) then return true end
-        if (a.count or 1) > (b.count or 1) then return false end
+        local a = resultA.count or 1
+        local b = resultB.count or 1
+        if a < b then return true end
+        if a > b then return false end
 
         -- Arbitrary but consistent final tie breaker.
-        return a.code < b.code
+        local a = resultA.code or ''
+        local b = resultB.code or ''
+        return a < b
     end
     table.sort(results, soryBy)
     return results
@@ -1118,12 +1132,13 @@ function HexSummary.encode(hexToSystem, results)
     for _, result in ipairs(results) do
 
         -- Tile change?
-        if result.tile ~= stickyTile then
+        local tile = result.tile
+        if tile ~= stickyTile then
             if stickyTile then
                 table.insert(encoded, HexSummary.delimiter.system)
             end
-            table.insert(encoded, assert(tileToEncoded[result.tile]))
-            stickyTile = result.tile
+            table.insert(encoded, assert(tileToEncoded[tile]))
+            stickyTile = tile
             stickyPlanetIndex = 0
             stickyColor = ''
             stickyCount = 1
@@ -1131,40 +1146,41 @@ function HexSummary.encode(hexToSystem, results)
         end
 
         -- Planet change?  (Keep tile, color)
-        if result.planetIndex ~= stickyPlanetIndex then
+        local planetIndex = result.planetIndex or 0
+        if planetIndex ~= stickyPlanetIndex then
             table.insert(encoded, HexSummary.delimiter.planet)
-            stickyPlanetIndex = result.planetIndex
+            stickyPlanetIndex = planetIndex
             stickyCount = 1
             stickyAttachment = false
         end
 
         -- Attachment change?
-        result.attachment = result.attachment or false
-        if result.attachment ~= stickyAttachment then
-            assert(result.attachment) -- should only ever toggle to true
+        local attachment = result.attachment or false
+        if attachment ~= stickyAttachment then
+            assert(attachment) -- should only ever toggle to true
             table.insert(encoded, HexSummary.delimiter.attachments)
             stickyColor = ''
             stickyCount = 1
-            stickyAttachment = result.attachment
+            stickyAttachment = attachment
         end
 
         -- Color change?
-        result.color = result.color or ''
-        if result.color ~= stickyColor then
-            table.insert(encoded, HexSummary.colorToCode[result.color])
-            stickyColor = result.color
+        local color = result.color or ''
+        if color ~= stickyColor then
+            table.insert(encoded, HexSummary.colorToCode[color])
+            stickyColor = color
             stickyCount = 1
         end
 
         -- Count change?
-        result.count = result.count or 1
-        if result.count ~= stickyCount then
-            table.insert(encoded, result.count)
-            stickyCount = result.count
+        local count = result.count or 1
+        if count ~= stickyCount then
+            table.insert(encoded, count)
+            stickyCount = count
         end
 
-        table.insert(encoded, result.code)
-
+        local code = result.code or ''
+        table.insert(encoded, code)
     end
     return table.concat(encoded, '')
 end
@@ -1183,7 +1199,8 @@ function getHexSummaryWithYields()
         for i = 0, numPlanets + numWormholes do
             table.insert(results, {
                 tile = system.tile,
-                planetIndex = i
+                planetIndex = i,
+                code = '',
             })
         end
     end
@@ -1591,6 +1608,10 @@ function Map.getMapString()
         return false
     end
     local buildList = mapTool.call('parseMapString', mapString)
+    if not buildList then
+        print('Gamedata: error reading the map string, it might be invalid.  Ignoring.')
+        return false
+    end
     if #buildList > 0 and buildList[1].tile == 18 then
         table.remove(buildList, 1)
     end
@@ -2141,21 +2162,15 @@ function onSetupHelperSetupFinished(params)
     end
 end
 
-local _didOnPlayerTurnStartCheck = false
 function onPlayerTurnStart(player_color_start, player_color_previous)
-    -- A bug report says the map tool keeps re-saving the string every turn.
-    -- Unable to reproduce, hammer to make sure it only tries once.
-    if _didOnPlayerTurnStartCheck then
-        return
-    end
-    _didOnPlayerTurnStartCheck = true
-
-    if _state._gamedataOptIn or _gameDataKey then
+    if (_state._gamedataOptIn or _gameDataKey) and (not _state.mapString) then
         -- If map builder is empty, trigger a save for stats recording
         local mapString = Map.getMapString()
         if (not mapString) or string.len(mapString) == 0 then
             Map.saveMapString()
+            mapString = Map.getMapString()
         end
+        _state.mapString = mapString or ''
     end
 end
 

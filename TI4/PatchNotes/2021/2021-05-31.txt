@@ -1,0 +1,4 @@
+v38
+- Fix gamedata bug when the map tool has an invalid map string (still reports the problem once, but ignores it after that).
+- Fix gamedata bug that can happen with an empty map ("attempt to compare two nil values").
+- Added "Munitions Reserves" card to the tools bag, Letnev players may place it in their play area to automate their faction ability.
