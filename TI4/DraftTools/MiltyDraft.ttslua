@@ -1182,6 +1182,7 @@ function VolverMilty.addRedTiles(hands, count)
     local randAlpha = math.random() > 0.5
     -- rearranges tile list to account for forced in tiles
     for _, hand in ipairs(hands) do
+        local anyWH = false
         if VolverMilty.find(25, hand) or VolverMilty.find(64, hand) then
             wormholesBeta[_] = true
             anyWH = true
@@ -1288,6 +1289,13 @@ function VolverMilty.addRedTiles(hands, count)
             redTiles[alphaAsteroidIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[alphaAsteroidIndex]
         end
     end
+    for _, hand in ipairs(hands) do
+            for _ = 1, count do
+                local tile = assert(table.remove(redTiles))
+                table.insert(hand, tile)
+            end
+        end
+
 end
 
 -------------------------------------------------------------------------------
