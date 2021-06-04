@@ -1,7 +1,7 @@
 --- New draft style.
 -- Authors: Milty, SCPT Matt
 -- Script: Darrell
--- #include <~/CrLua/Objects/Draft2021>
+-- #include <~/TI4-TTS/TI4/DraftTools/MiltyDraft>
 --
 -- Layout:
 --
@@ -72,11 +72,7 @@ _config = {
     MAX_FACTIONS = 12,
 }
 
-_state = {
-    numSlices = _config.DEFAULT_SLICES,
-    numFactions = _config.DEFAULT_FACTIONS
-}
-_deletedItemsBag = false
+_state = false
 _lastScale = false
 
 local BUTTONS = {
@@ -109,9 +105,10 @@ local BUTTONS = {
         confirm = true,
     },
     {
-        label = 'Reverse\nTurn\nOrder',
-        onClick = 'doReverseTurns',
-        tooltip = 'Change next player direction (forward / reverse)',
+        label = 'Snake draft:\nslice,\nfaction,\nor seat'
+        --label = 'Reverse\nTurn\nOrder',
+        --onClick = 'doReverseTurns',
+        --tooltip = 'Change next player direction (forward / reverse)',
     },
     {
         id = 'finish',
@@ -122,21 +119,33 @@ local BUTTONS = {
     }
 }
 
+-- Expose for outsiders to call, use tool values for build rules.
+function getSlices()
+    local slices = false
+    repeat
+        slices = VolverMilty.makeHands(_state.numSlices)
+    until slices
+    VolverMilty.addRedTiles(slices, 2)
+    for i, slice in ipairs(slices) do
+        slices[i] = Slice.randomizeAndFixAdjacentAnomalies(slice)
+    end
+    return slices
+end
+
 function onLoad(saveState)
     math.randomseed(os.time())
 
+    _state = {}
     if saveState and string.len(saveState) > 0 then
         _state = JSON.decode(saveState) or _state
     end
     _state.numSlices = _state.numSlices or _config.DEFAULT_SLICES
     _state.numFactions = _state.numFactions or _config.DEFAULT_FACTIONS
 
-    _deletedItemsBag = _getByName('Bag', 'TI4 Deleted Items')
-
     self.clearButtons()
     for i, button in ipairs(BUTTONS) do
         self.createButton({
-            click_function = button.onClick,
+            click_function = button.onClick or 'doNothing',
             function_owner = self,
             label          = button.label,
             position       = Slots.getPosition(0, i - 1, Slots.DRAFT_MAT),
@@ -208,6 +217,42 @@ function onSave()
     return _state and JSON.encode(_state)
 end
 
+function onPlayerTurn(player, prevPlayer)
+    -- Abort if not correct turn state.
+    if (not player) or (not Turns.enable) or (not Turns.order) then
+        return
+    end
+
+    -- Abort if not snaking.
+    if (not _state) or (not _state.snakeTurns) then
+        return
+    end
+
+    -- Abort if not at the end of turn order.
+    local n = #Turns.order
+    local first = Turns.order[1]
+    local last = Turns.order[n]
+    local snakeWhen = Turns.reverse_order and first or last
+    if player.color ~= snakeWhen then
+        return
+    end
+
+    -- Abort if few enough player that normal turn swaps already snake.
+    if n < 3 then
+        return
+    end
+
+    -- At this point we are snaking and have just reached the end.  Snake!
+    Turns.reverse_order = not Turns.reverse_order
+    local message = {
+        'Snake turn order: ',
+        player.color .. ' please make two selections, ',
+        'changing turn order to ',
+        Turns.reverse_order and 'reverse' or 'forward'
+    }
+    printToAll(table.concat(message, ''), 'Yellow')
+end
+
 function _getByName(tag, name)
     for _, object in ipairs(getAllObjects()) do
         if object.tag == tag and object.getName() == name then
@@ -277,6 +322,7 @@ function changeFactionCount(clickObject, clickerColor, altClick)
 end
 
 function doSetup()
+    _state.snakeTurns = true
     startLuaCoroutine(self, 'setupCoroutine')
 end
 
@@ -287,6 +333,7 @@ function doReverseTurns()
 end
 
 function doFinish()
+    _state.snakeTurns = false
     _gameDataHelper.addExtraData({
         name = 'MiltyDraft',
         value = true
@@ -320,7 +367,12 @@ function setupCoroutine()
     coroutine.yield(0)
 
     -- Get 3 "balanced" blue tiles and 2 red ones.
-    _state.tileLists = assert(VolverMilty.makeHands(_state.numSlices))
+    local slices = false
+    repeat
+        slices = VolverMilty.makeHands(_state.numSlices)
+        coroutine.yield(0)
+    until slices
+    _state.tileLists = assert(slices)
     VolverMilty.addRedTiles(_state.tileLists, 2)
     coroutine.yield(0)
 
@@ -926,7 +978,8 @@ function VolverMilty.makeHands(count)
             end
             cycles = cycles + 1
             if cycles > 1000 then
-                error('infinite loop?')
+                -- Infinite loop?
+                return false
             end
         end
         table.insert(result, { randomTier1[i], randomTier2[i], randomTier3[i] })
@@ -1075,18 +1128,14 @@ function SliceTokens.spawn(tiles, name, label, position, rotation)
     -- Label gets dropped when attaching, place label on anchor later.
     local home = SliceTokens._spawnHex(homePos, spawnRotation, false)
     home.setScale(scale)
-    if _deletedItemsBag then
-        _deletedItemsBag.call('ignoreGuid', home.getGUID())
-    end
+    home.addTag('DELETED_ITEMS_IGNORE')
     anchor.addAttachment(home)
 
     for i, tile in ipairs(tiles) do
         local tilePos = Slice._getTilePosition(i, homePos, false)
         local tileObject = SliceTokens._cloneSystemTile(tile, tilePos, spawnRotation)
         tileObject.setScale(scale)
-        if _deletedItemsBag then
-            _deletedItemsBag.call('ignoreGuid', tileObject.getGUID())
-        end
+        tileObject.addTag('DELETED_ITEMS_IGNORE')
         anchor.addAttachment(tileObject)
     end
 
@@ -1203,9 +1252,7 @@ end
 
 function SliceTokens.stow()
     for _, object in ipairs(SliceTokens.getAll(true)) do
-        if _deletedItemsBag then
-            _deletedItemsBag.call('ignoreGuid', object.getGUID())
-        end
+        object.addTag('DELETED_ITEMS_IGNORE')
         destroyObject(object)
     end
 end
@@ -1373,9 +1420,7 @@ DraftSelectionMats = {
 function DraftSelectionMats.stow()
     for _, object in ipairs(getAllObjects()) do
         if object.tag == 'Generic' and object.getName() == DraftSelectionMats.NAME then
-            if _deletedItemsBag then
-                _deletedItemsBag.call('ignoreGuid', object.getGUID())
-            end
+            object.addTag('DELETED_ITEMS_IGNORE')
             destroyObject(object)
         end
     end
@@ -1581,35 +1626,7 @@ Slice = {
 
 --- Compute "R/I TECH LEGENDARY" label from a list of tile numbers.
 function Slice.getLabel(tiles)
-    local r = 0
-    local i = 0
-    local tech = {}
-    local legendary = 0
-    for _, tile in ipairs(tiles) do
-        local system = _systemHelper.systemFromTile(tile)
-        for _, planet in ipairs(system.planets or {}) do
-            r = r + (planet.resources or 0)
-            i = i + (planet.influence or 0)
-            if planet.tech then
-                table.insert(tech, string.sub(planet.tech, 1, 1):upper())
-            end
-            if planet.legendary then
-                legendary = legendary + 1
-            end
-        end
-    end
-    local items = {
-        r .. '/' .. i
-    }
-    if #tech > 0 then
-        table.sort(tech)
-        table.insert(items, table.concat(tech, ''))
-    end
-    if legendary > 0 then
-        local n = legendary
-        table.insert(items, ((n > 1) and n or '') .. 'L')
-    end
-    return table.concat(items, ' ')
+    return _systemHelper.summarizeTiles(tiles)
 end
 
 --- Swap tiles so no anomalies are adjacent (in this slice).
