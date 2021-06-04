@@ -1,4 +1,4 @@
-local SHEET_ID = '15t4uFglLEjnZhA9udIjJ8HlUF1i-R-MvoWozzzwC5Hc'
+local SHEET_ID = ''
 local NUM_DRAFTS = 1000
 
 #include <~/TI4-TTS/TTS/Spreadsheet>
