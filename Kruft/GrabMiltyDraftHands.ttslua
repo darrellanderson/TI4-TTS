@@ -1,0 +1,88 @@
+local SHEET_ID = '15t4uFglLEjnZhA9udIjJ8HlUF1i-R-MvoWozzzwC5Hc'
+local NUM_DRAFTS = 1000
+
+#include <~/TI4-TTS/TTS/Spreadsheet>
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+
+function onLoad(save_state)
+    self.addContextMenuItem('Get Milty Drafts', getMiltyDrafts)
+    Player['White'].lookAt({
+        position = self.getPosition(),
+        pitch    = 90,
+        yaw      = 0,
+        distance = 30
+    })
+end
+
+function getMiltyDrafts()
+    startLuaCoroutine(self, 'getMiltyDraftsCoroutine')
+end
+
+function getMiltyDraftsCoroutine()
+    local miltyDraftTool = getObjectFromGUID('878e4f')
+    local cells = {}
+    local colIdxToSliceCol = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H' }
+    local colIdxToLabelCol = { 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P' }
+
+    local function partialUpdate()
+        local label = 'slices'
+        local id = SHEET_ID
+        local sheet = 'Sheet1'
+        CrLua.TTS.Spreadsheet.update(label, id, sheet, cells)
+        local waitUntil = Time.time + 5
+        while Time.time < waitUntil do
+            coroutine.yield(0)
+        end
+    end
+
+    for row = 1, NUM_DRAFTS do
+        local slices = false
+        repeat
+            slices = miltyDraftTool.call('getSlices')
+            coroutine.yield(0)
+        until slices
+        for colIdx, slice in ipairs(slices) do
+            local sliceCol = assert(colIdxToSliceCol[colIdx])
+            cells[sliceCol .. (row + 1001)] = table.concat(slice, ',')
+
+            local labelCol = assert(colIdxToLabelCol[colIdx])
+            cells[labelCol .. (row + 1001)] = _systemHelper.summarizeTiles(slice)
+        end
+
+        if (row % 20) == 0 then
+            print(row)
+            partialUpdate()
+        end
+    end
+    partialUpdate()
+
+    print('done')
+    return 1
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)
