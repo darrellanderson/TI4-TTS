@@ -1064,6 +1064,12 @@ function HexSummary.sortResults(results)
         if a < b then return true end
         if a > b then return false end
 
+        -- Attachments are always last.
+        local a = resultA.attachment and 1 or 0
+        local b = resultB.attachment and 1 or 0
+        if a < b then return true end
+        if a > b then return false end
+
         local a = resultA.color or ''
         local b = resultB.color or ''
         if a < b then return true end
@@ -1071,11 +1077,6 @@ function HexSummary.sortResults(results)
 
         local a = resultA.token and 1 or 0
         local b = resultB.token and 1 or 0
-        if a < b then return true end
-        if a > b then return false end
-
-        local a = resultA.attachment and 1 or 0
-        local b = resultB.attachment and 1 or 0
         if a < b then return true end
         if a > b then return false end
 
@@ -1157,7 +1158,10 @@ function HexSummary.encode(hexToSystem, results)
         -- Attachment change?
         local attachment = result.attachment or false
         if attachment ~= stickyAttachment then
-            assert(attachment) -- should only ever toggle to true
+            -- Should only ever toggle to true.  Provide some extra info vs assert.
+            if not attachment then
+                error('error with attachment on tile ' .. tile)
+            end
             table.insert(encoded, HexSummary.delimiter.attachments)
             stickyColor = ''
             stickyCount = 1
