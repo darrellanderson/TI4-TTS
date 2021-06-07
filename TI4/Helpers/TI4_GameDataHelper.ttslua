@@ -1,5 +1,6 @@
 --- Gather game data (score, tech, etc).
 -- Alec/Root's Twitch overlay: https://ti4-tts-gamedata-display-tool.herokuapp.com/
+-- TheParsleySage's data studio: https://datastudio.google.com/s/prr6ZINoncQ
 -- @author Darrell
 -- #include <~/TI4-TTS/TI4/Helpers/TI4_GameDataHelper>
 
