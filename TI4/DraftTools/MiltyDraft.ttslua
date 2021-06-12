@@ -91,11 +91,7 @@ _config = {
     MAX_FACTIONS = 12,
 }
 
-_state = {
-    numSlices = _config.DEFAULT_SLICES,
-    numFactions = _config.DEFAULT_FACTIONS
-}
-_deletedItemsBag = false
+_state = false
 _lastScale = false
 
 
@@ -137,9 +133,10 @@ local BUTTONS = {
         confirm = true,
     },
     {
-        label = 'Reverse\nTurn\nOrder',
-        onClick = 'doReverseTurns',
-        tooltip = 'Change next player direction (forward / reverse)',
+        label = 'Snake draft:\nslice,\nfaction,\nor seat'
+        --label = 'Reverse\nTurn\nOrder',
+        --onClick = 'doReverseTurns',
+        --tooltip = 'Change next player direction (forward / reverse)',
     },
     {
         id = 'finish',
@@ -150,10 +147,24 @@ local BUTTONS = {
     }
 }
 
+-- Expose for outsiders to call, use tool values for build rules.
+function getSlices()
+    local slices = false
+    repeat
+        slices = VolverMilty.makeHands(_state.numSlices)
+    until slices
+    VolverMilty.addRedTiles(slices, 2)
+    for i, slice in ipairs(slices) do
+        slices[i] = Slice.randomizeAndFixAdjacentAnomalies(slice)
+    end
+    return slices
+end
+
 -- U1 | small change to make buttons a bit more dynamic
 function onLoad(saveState)
     math.randomseed(os.time())
 
+    _state = {}
     if saveState and string.len(saveState) > 0 then
         _state = JSON.decode(saveState) or _state
     end
@@ -167,7 +178,7 @@ function onLoad(saveState)
         local buttonHeight = 7200 / #BUTTONS
 
         self.createButton({
-            click_function = button.onClick,
+            click_function = button.onClick or 'doNothing',
             function_owner = self,
             label          = button.label,
             position       = Slots.getButtonPosition(0, i - 1, #BUTTONS, Slots.DRAFT_MAT),
@@ -237,6 +248,48 @@ end
 
 function onSave()
     return _state and JSON.encode(_state)
+end
+
+function onPlayerTurn(player, prevPlayer)
+    -- Abort if not correct turn state.
+    if (not prevPlayer) or (not Turns.enable) or (not Turns.order) then
+        return
+    end
+
+    -- Abort if not snaking.
+    if (not _state) or (not _state.snakeTurns) then
+        return
+    end
+
+    -- Abort if few enough player that normal turn swaps already snake.
+    local n = #Turns.order
+    if n < 3 then
+        return
+    end
+
+    -- Abort if not at the end of turn order.
+    local first = Turns.order[1]
+    local last = Turns.order[n]
+    local snakeWhen = Turns.reverse_order and first or last
+    if prevPlayer.color ~= snakeWhen then
+        return
+    end
+
+    -- Let the turn change, then after a beat fix it.
+    local second = Turns.order[2]
+    local secondLast = Turns.order[n - 1]
+    local snakeNext = Turns.reverse_order and second or secondLast
+    local function doSnake()
+        Turns.reverse_order = not Turns.reverse_order
+        local message = {
+            'Snake turn order: changing to ',
+            Turns.reverse_order and 'reverse' or 'forward',
+            ' and setting turn to ' .. snakeNext
+        }
+        printToAll(table.concat(message, ''), 'Yellow')
+        Turns.turn_color = snakeNext
+    end
+    Wait.frames(doSnake, 2)
 end
 
 function _getByName(tag, name)
@@ -339,6 +392,7 @@ function changeFactionCount(clickObject, clickerColor, altClick)
 end
 
 function doSetup()
+    _state.snakeTurns = true
     startLuaCoroutine(self, 'setupCoroutine')
 end
 
@@ -349,6 +403,7 @@ function doReverseTurns()
 end
 
 function doFinish()
+    _state.snakeTurns = false
     _gameDataHelper.addExtraData({
         name = 'MiltyDraft',
         value = true
@@ -387,7 +442,12 @@ function setupCoroutine()
     coroutine.yield(0)
 
     -- Get 3 "balanced" blue tiles and 2 red ones.
-    _state.tileLists = assert(VolverMilty.makeHands(_state.numSlices))
+    local slices = false
+    repeat
+        slices = VolverMilty.makeHands(_state.numSlices)
+        coroutine.yield(0)
+    until slices
+    _state.tileLists = assert(slices)
     VolverMilty.addRedTiles(_state.tileLists, 2)
     coroutine.yield(0)
 
@@ -1074,7 +1134,8 @@ function VolverMilty.makeHands(count)
             end
             cycles = cycles + 1
             if cycles > 1000 then
-                error('infinite loop?')
+                -- Infinite loop?
+                return false
             end
         end
 
@@ -1339,18 +1400,14 @@ function SliceTokens.spawn(tiles, name, label, position, rotation)
     -- Label gets dropped when attaching, place label on anchor later.
     local home = SliceTokens._spawnHex(homePos, spawnRotation, false)
     home.setScale(scale)
-    if _deletedItemsBag then
-        _deletedItemsBag.call('ignoreGuid', home.getGUID())
-    end
+    home.addTag('DELETED_ITEMS_IGNORE')
     anchor.addAttachment(home)
 
     for i, tile in ipairs(tiles) do
         local tilePos = Slice._getTilePosition(i, homePos, false)
         local tileObject = SliceTokens._cloneSystemTile(tile, tilePos, spawnRotation)
         tileObject.setScale(scale)
-        if _deletedItemsBag then
-            _deletedItemsBag.call('ignoreGuid', tileObject.getGUID())
-        end
+        tileObject.addTag('DELETED_ITEMS_IGNORE')
         anchor.addAttachment(tileObject)
     end
 
@@ -1467,9 +1524,7 @@ end
 
 function SliceTokens.stow()
     for _, object in ipairs(SliceTokens.getAll(true)) do
-        if _deletedItemsBag then
-            _deletedItemsBag.call('ignoreGuid', object.getGUID())
-        end
+        object.addTag('DELETED_ITEMS_IGNORE')
         destroyObject(object)
     end
 end
@@ -1637,9 +1692,7 @@ DraftSelectionMats = {
 function DraftSelectionMats.stow()
     for _, object in ipairs(getAllObjects()) do
         if object.tag == 'Generic' and object.getName() == DraftSelectionMats.NAME then
-            if _deletedItemsBag then
-                _deletedItemsBag.call('ignoreGuid', object.getGUID())
-            end
+            object.addTag('DELETED_ITEMS_IGNORE')
             destroyObject(object)
         end
     end
@@ -1849,6 +1902,7 @@ Slice = {
 -- # how skewed hands can get when cormund / everra get added.
 -- # have left in information to show if slice has wormholes.
 function Slice.getLabel(tiles)
+    --return _systemHelper.summarizeTiles(tiles)
     local r = 0
     local i = 0
     local rr = 0
