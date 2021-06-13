@@ -1,6 +1,6 @@
 -- @author Darrell for context menu stuff
 -- @author Milty for adapting to exploration
---
+-- #include <~/TI4-TTS/TI4/Helpers/TI4_ExploreHelper>
 
 function getHelperClient(helperObjectName)
     local function getHelperObject()
@@ -965,8 +965,8 @@ function AttachLib._injectAttachment(system, planetName, attachTokenObject)
     local attachment = false
     -- Object.is_face_down might be wrong if rotation was changed this frame.
     -- Read rotation instead.
-    local rotZ = attachTokenObject.getRotation().z
-    if rotZ > 90 or rotZ < -90 then
+    local rotZ = (attachTokenObject.getRotation().z + 360) % 360
+    if 90 < rotZ and rotZ < 270 then
         attachment = attrs.faceDown or attrs.faceUpOrDown
     else
         attachment = attrs.faceUp or attrs.faceUpOrDown
@@ -1018,8 +1018,11 @@ function AttachLib._injectAttachment(system, planetName, attachTokenObject)
     planet.resources = (planet.resources or 0) + (attachment.resources or 0)
     planet.influence = (planet.influence or 0) + (attachment.influence or 0)
     if attachment.tech then
-        assert(not planet.tech)
-        planet.tech = attachment.tech
+        if not planet.tech then
+            planet.tech = attachment.tech
+        else
+            printToAll('Warning: ' .. planet.name .. ' ' .. name .. ' ' .. rotZ)
+        end
     end
 
     if planet.resources <= 0 then

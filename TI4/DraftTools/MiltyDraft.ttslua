@@ -1,7 +1,7 @@
 --- New draft style.
 -- Authors: Milty, SCPT Matt
 -- Script: Darrell
--- #include <~/CrLua/Objects/Draft2021>
+-- #include <~/TI4-TTS/TI4/DraftTools/MiltyDraft>
 --
 -- Layout:
 --
@@ -170,8 +170,6 @@ function onLoad(saveState)
     end
     _state.numSlices = _state.numSlices or _config.DEFAULT_SLICES
     _state.numFactions = _state.numFactions or _config.DEFAULT_FACTIONS
-
-    _deletedItemsBag = _getByName('Bag', 'TI4 Deleted Items')
 
     self.clearButtons()
     for i, button in ipairs(BUTTONS) do

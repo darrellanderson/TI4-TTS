@@ -1,0 +1,3 @@
+v38b:
+- Fix game data bug when mixing command tokens with other in-space tokens.
+- Milty Draft Tool now switches turn order for snake draft automatically. 
