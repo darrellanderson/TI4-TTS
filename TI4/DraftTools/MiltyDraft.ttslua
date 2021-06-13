@@ -6,7 +6,7 @@
 -- Layout:
 --
 -- ╔════════════════════════╗
--- ║ SLICES (room for 8)    ║
+-- ║ SLICES (room for 9)    ║
 -- ╠════════════════════════╣
 -- ║ FACTIONS (room for 12) ║
 -- ╠════════════════════════╣
@@ -40,8 +40,9 @@
 -- # Tiers based on a bag draft system I was working on, Basic premise is the first tier is systems with 2
 -- # or more planets and no tech skips. Second tier are the systems with 2 or more planets with tech skips
 -- # and the legendaries, and Atlas / Lodor. Third tier is the single planet systems + Quann
--- # These tiers are more likely to cause slices that don't meet minimum requirements
+-- # These tiers are more likely to cause slices that don't meet minimum requirements - although the latest rebase from main will retry makeHands.
 -- # (Original idea took the remaing unchosen tier 2 systems and randomized them with tier 3 - would help with min req issues)
+-- # Also allows for 9 hands to be generated.
 -- # Added option button to split wormholes better (and prevent Cormund/Everra being together)
 -- # Changed forced wormhole options to track between blue and red tile selections
 -- # Changed blue tile hand builder to prevent relocating reserved tileSet
@@ -85,7 +86,7 @@ _config = {
     DEFAULT_FACTIONS = 9,
 
     MIN_SLICES = 6,
-    MAX_SLICES = 8,
+    MAX_SLICES = 9,
 
     MIN_FACTIONS = 6,
     MAX_FACTIONS = 12,
