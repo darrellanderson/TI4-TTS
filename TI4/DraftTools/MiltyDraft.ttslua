@@ -34,6 +34,25 @@
 
 -- 7x6 mat: http://cloud-3.steamusercontent.com/ugc/1734422701007725477/663ABBFFF278EA1CDFEEF84C1DBA12D309C745F0/
 
+-- #########################################################
+-- # Update (U1): DangerousGoods
+-- # Added alternate tiers
+-- # Tiers based on a bag draft system I was working on, Basic premise is the first tier is systems with 2
+-- # or more planets and no tech skips. Second tier are the systems with 2 or more planets with tech skips
+-- # and the legendaries, and Atlas / Lodor. Third tier is the single planet systems + Quann
+-- # These tiers are more likely to cause slices that don't meet minimum requirements
+-- # (Original idea took the remaing unchosen tier 2 systems and randomized them with tier 3 - would help with min req issues)
+-- # Added option button to split wormholes better (and prevent Cormund/Everra being together)
+-- # Changed forced wormhole options to track between blue and red tile selections
+-- # Changed blue tile hand builder to prevent relocating reserved tileSet
+-- # Started adding in a hand weight calculator, with the idea that if Cormund or Everra are to be in a
+-- # slice that they go into the worst ones. -- would like some feedback on this as opinion on a slices
+-- # can vary along which what races are available, also not taking into consideration planet traits.. as
+-- # a 4 of a kind slice could get a higher rating.
+-- # Cormund / Everra - these skew the slices, and idea would be to put a placeholder system image in place for
+-- # both nebula / gravity rifts i.e. use the non planet system image with a ?? and make it lucky dip for selection.
+-- #########################################################
+
 -------------------------------------------------------------------------------
 
 function getHelperClient(helperObjectName)
@@ -75,14 +94,9 @@ _config = {
 _state = false
 _lastScale = false
 
+
+-- U1 | moved toggleWormholesAndLegendaries button, added singlewormholesanomalies button
 local BUTTONS = {
-    {
-        id = 'toggleWormholesAndLegendaries',
-        label = '<>',
-        onClick = 'toggleWormholesAndLegendaries',
-        LABEL_TEMPLATE = 'More wormholes\nand legendary\nplanets: $VALUE',
-        tooltip = 'Make sure wormholes and legendaries are well represented when building slices?'
-    },
     {
         id = 'numSlices',
         label = '<>',
@@ -96,6 +110,20 @@ local BUTTONS = {
         onClick = 'changeFactionCount',
         LABEL_TEMPLATE = '#Factions: $VALUE\nLeft +/Right -',
         tooltip = 'Left click to increase, right click to decrease',
+    },
+    {
+        id = 'toggleWormholesAndLegendaries',
+        label = '<>',
+        onClick = 'toggleWormholesAndLegendaries',
+        LABEL_TEMPLATE = 'More wormholes\nand legendary\nplanets: $VALUE',
+        tooltip = 'Make sure wormholes and legendaries are well represented when building slices?'
+    },
+    {
+    id = 'toggleSingleWormholesAnomalies',
+    label = '<>',
+    onClick = 'toggleSingleWormholesAnomalies',
+    LABEL_TEMPLATE = 'Prevent multiple\nwormholes and\nanomaly planets\nin slice: $VALUE',
+    tooltip = 'Make sure only 1 wormhole per slice. Also prevent Cormund / Everra in same slice. (Wormholes / Legendary setting must be on "YES")'
     },
     {
         id = 'setup',
@@ -132,6 +160,7 @@ function getSlices()
     return slices
 end
 
+-- U1 | small change to make buttons a bit more dynamic
 function onLoad(saveState)
     math.randomseed(os.time())
 
@@ -144,16 +173,18 @@ function onLoad(saveState)
 
     self.clearButtons()
     for i, button in ipairs(BUTTONS) do
+        local buttonHeight = 7200 / #BUTTONS
+
         self.createButton({
             click_function = button.onClick or 'doNothing',
             function_owner = self,
             label          = button.label,
-            position       = Slots.getPosition(0, i - 1, Slots.DRAFT_MAT),
+            position       = Slots.getButtonPosition(0, i - 1, #BUTTONS, Slots.DRAFT_MAT),
             rotation       = { x = 0, y = 0, z = 0 },
             scale          = { x = 1, y = 1, z = 1 },
             width          = button.onClick and 1900 or 0,
-            height         = button.onClick and 1200 or 0,
-            font_size      = 240,
+            height         = button.onClick and buttonHeight or 0,
+            font_size      = 200,
             font_color     = button.onClick and 'Black' or 'White',
             tooltip        = button.tooltip,
         })
@@ -263,7 +294,7 @@ function _getByName(tag, name)
 end
 
 -------------------------------------------------------------------------------
-
+-- U1 | added reset for toggleSingleWormholesAnomalies
 function resetButtons()
     for i, values in ipairs(BUTTONS) do
         if values.id == 'toggleWormholesAndLegendaries' then
@@ -273,6 +304,13 @@ function resetButtons()
                 index          = i - 1,
                 label          = label
             })
+        elseif values.id == 'toggleSingleWormholesAnomalies' then
+                local value = VolverMilty.pushSingleWormholesAnomalies and 'YES' or 'NO'
+                local label = string.gsub(values.LABEL_TEMPLATE, '$VALUE', value)
+                self.editButton({
+                    index          = i - 1,
+                    label          = label
+                })
         elseif values.id == 'numSlices' then
             local value = tostring(_state.numSlices)
             local label = string.gsub(values.LABEL_TEMPLATE, '$VALUE', value)
@@ -292,10 +330,34 @@ function resetButtons()
 end
 
 -------------------------------------------------------------------------------
-
+-- U1 | added resets for fields set during setup
 function toggleWormholesAndLegendaries()
     assert(type(VolverMilty.pushWormholesLegends) == 'boolean')
     VolverMilty.pushWormholesLegends = not VolverMilty.pushWormholesLegends
+
+    VolverMilty.numAlpha = -1
+        VolverMilty.numAlphaRed = -1
+        VolverMilty.numBeta = -1
+        VolverMilty.numBetaRed = -1
+        VolverMilty.numLegend = -1
+
+    if not VolverMilty.pushWormholesLegends then
+        VolverMilty.pushSingleWormholesAnomalies = false
+    end
+
+    resetButtons()
+end
+
+-- U1 | toggleSingleWormholesAnomalies onClick
+function toggleSingleWormholesAnomalies()
+    assert(type(VolverMilty.pushWormholesLegends) == 'boolean')
+    if not VolverMilty.pushWormholesLegends then
+        broadcastToAll('Please enable more wormholes first', 'Red')
+    else
+        assert(type(VolverMilty.pushSingleWormholesAnomalies) == 'boolean')
+        VolverMilty.pushSingleWormholesAnomalies = not VolverMilty.pushSingleWormholesAnomalies
+    end
+
     resetButtons()
 end
 
@@ -346,12 +408,17 @@ function doReset()
 end
 
 -------------------------------------------------------------------------------
-
+-- U1 | added resets for worst hand tracking
 function setupCoroutine()
     if not _setupHelper.getPoK() then
         broadcastToAll('Please do setup with PoK enabled first', 'Red')
         return 1
     end
+
+    VolverMilty.worstHand = 1
+    VolverMilty.worstHandVal = 999
+    VolverMilty.secworstHand = 2
+    VolverMilty.secworstHandVal = 999
 
     -- Put away any existing draft parts (start from scratch).
     SeatTokens.stow()
@@ -739,6 +806,32 @@ function Slots.getPosition(col, row, mat)
     }
 end
 
+-- U1 | function to squeeze in more buttons than 'rows' probably could have overloaded getPosition but meh.
+function Slots.getButtonPosition(col, row, maxrows, mat)
+    assert(type(col) == 'number' and type(row) == 'number' and type(maxrows) == 'number'and type(mat) == 'table')
+    assert(type(mat.numCols) == 'number' and type(mat.numRows) == 'number')
+    -- Not safe to read bounds while spawning.
+    local bounds = {
+        x = (mat.numCols * Slots.SIZE.x) + ((mat.numCols + 1) * Slots.SIZE.gap),
+        y = 0.4,
+        z = (mat.numRows * Slots.SIZE.z) + ((mat.numRows + 1) * Slots.SIZE.gap),
+    }
+
+    local p0 = {
+        x = -(bounds.x / 2) + Slots.SIZE.gap + (Slots.SIZE.x / 2),
+        y = bounds.y + 0.01,
+        z = -(bounds.z / 2) + Slots.SIZE.gap + (Slots.SIZE.z / 2),
+    }
+
+    local buttonZ = (bounds.z - Slots.SIZE.gap) / maxrows
+
+    return {
+        x = p0.x + col * (Slots.SIZE.x + Slots.SIZE.gap),
+        y = p0.y,
+        z = p0.z + row * (buttonZ),
+    }
+end
+
 function Slots.getVectorLine(col, row, mat, color, rowSpan)
     assert(type(col) == 'number' and type(row) == 'number' and type(mat) == 'table')
     assert(type(mat.numCols) == 'number' and type(mat.numRows) == 'number')
@@ -842,10 +935,16 @@ end
 -- Allocates tiles from three tiers, with minimum and maximum spends for resources/influence.
 -- @author Volverbot for design
 -- @author Milty for scripting and design
+-- U1 | Alternative blue tiers, additional options for wormhole randomizor, and track worst hands by 'math'
 VolverMilty = {
-    tier1 = { 27, 28, 35, 37, 30, 69, 72, 75 },
-    tier2 = { 26, 29, 38, 33, 34, 62, 64, 65, 66, 70, 71, 74, 76 },
-    tier3 = { 19, 20, 21, 22, 23, 24, 25, 31, 32, 36, 59, 60, 61, 63, 73 },
+    oldtier1 = { 27, 28, 35, 37, 30, 69, 72, 75 },
+    oldtier2 = { 26, 29, 38, 33, 34, 62, 64, 65, 66, 70, 71, 74, 76 },
+    oldtier3 = { 19, 20, 21, 22, 23, 24, 25, 31, 32, 36, 59, 60, 61, 63, 73 },
+
+    tier1 = {28, 29, 30, 32, 33, 35, 36, 38, 69, 70, 71, 72},
+    tier2 = {26, 27, 31, 34, 37, 64, 65, 66, 72, 73, 74, 76},
+    tier3 = {19, 20, 21, 23, 24, 25, 59, 60, 61, 62, 63},
+
 
     defaultMinR = 2.5,
     defaultMinI = 4,
@@ -855,9 +954,16 @@ VolverMilty = {
     minTotal = 9,
     maxTotal = 13,
     pushWormholesLegends = false,
-    numAlpha = 0,
-    numBeta = 0,
-    numLegend = 0,
+    pushSingleWormholesAnomalies = false,
+    numAlpha = -1,
+    numAlphaRed = -1,
+    numBeta = -1,
+    numBetaRed = -1,
+    numLegend = -1,
+    worstHand = 1,
+    worstHandVal = 999,
+    secworstHand = 2,
+    secworstHandVal = 999
 }
 
 function VolverMilty.permute(list)
@@ -879,6 +985,21 @@ function VolverMilty.find(target, list) -- find element target's index in list
     return nil
 end
 
+-- U1 | used to check if system in hand is reserved (probably could have used .find and tested for not null)
+function VolverMilty.isReserved(target, list) -- find if target exists in list
+    for _, v in ipairs(list) do
+      if v == target then
+        return true
+      end
+    end
+    return false
+end
+
+-- U1
+-- # updated how wormholes get forced in. i.e can force both alpha red tiles and not have lodor
+-- # record what tiles we forced in so they don't get moved during the validation of hands
+-- # updated checking of hands to skip passed reserved tiles
+-- # added recording of worst hands
 function VolverMilty.makeHands(count)
     assert(type(count) == 'number')
     -- shuffles tile tier list
@@ -897,16 +1018,31 @@ function VolverMilty.makeHands(count)
         VolverMilty.numLegend = math.random(1,2)
         VolverMilty.numAlpha = math.random(2,3)
         VolverMilty.numBeta = math.random(2,3)
+
+        if VolverMilty.numAlpha == 3 then
+            VolverMilty.numAlphaRed = 2
+        else
+            VolverMilty.numAlphaRed = math.random(1,2)
+        end
+
+        if VolverMilty.numBeta == 3 then
+            VolverMilty.numBetaRed = 1
+        else
+            VolverMilty.numBetaRed = math.random(0,1)
+        end
     end
     -- randomizes which beta planet/legendary planet to force in
     local randBeta = math.random() >= 0.5
     local randLegend = math.random() >= 0.5
     local numReserved = 1
+    local blueReserved = {}
     local betaChosen = randBeta and 25 or 64
     --rearranges tile lists to account for forced in systems
-    if VolverMilty.numBeta == 3 then
+    if VolverMilty.numBeta == 3 or VolverMilty.numBetaRed == 0 then
         local quannIndex = VolverMilty.find(25, randomTier3)
         local atlasIndex = VolverMilty.find(64, randomTier2)
+
+        -- # Question for designers - not quite sure why this is being done as each tile will be going into a random hand anyhow
         if randBeta == 0 then
             randomTier3[randTileList[numReserved]], randomTier3[quannIndex] = randomTier3[quannIndex], randomTier3[randTileList[numReserved]]
             randomTier2[randTileList[numReserved + 1]], randomTier2[atlasIndex] = randomTier2[atlasIndex], randomTier2[randTileList[numReserved + 1]]
@@ -914,16 +1050,20 @@ function VolverMilty.makeHands(count)
             randomTier2[randTileList[numReserved]], randomTier2[atlasIndex] = randomTier2[atlasIndex], randomTier2[randTileList[numReserved]]
             randomTier3[randTileList[numReserved + 1]], randomTier3[quannIndex] = randomTier3[quannIndex], randomTier3[randTileList[numReserved + 1]]
         end
+        table.insert(blueReserved, 25)
+        table.insert(blueReserved, 64)
         numReserved = numReserved + 2
     elseif VolverMilty.numBeta == 2 then
         local betaTier = randBeta and randomTier3 or randomTier2
         local betaIndex = VolverMilty.find(betaChosen, betaTier)
         betaTier[randTileList[numReserved]], betaTier[betaIndex] = betaTier[betaIndex], betaTier[randTileList[numReserved]]
+        table.insert(blueReserved, betaChosen)
         numReserved = numReserved + 1
     end
     if VolverMilty.numAlpha == 3 then
         local lodorIndex = VolverMilty.find(26, randomTier2)
         randomTier2[randTileList[numReserved]], randomTier2[lodorIndex] = randomTier2[lodorIndex], randomTier2[randTileList[numReserved]]
+        table.insert(blueReserved, 26)
         numReserved = numReserved + 1
     end
     if VolverMilty.numLegend == 2 then
@@ -949,6 +1089,14 @@ function VolverMilty.makeHands(count)
             if validHand == false then
                 if adjustTier[1] == false and adjustTier[2] == false and adjustTier[3] == false then
                     adjustTier[3] = true
+                end
+                if adjustTier[3] == true and VolverMilty.isReserved(randomTier3[i], blueReserved) then
+                        adjustTier[3] = false
+                        adjustTier[2] = true
+                end
+                if adjustTier[2] == true and VolverMilty.isReserved(randomTier2[i], blueReserved) then
+                    adjustTier[2] = false
+                    adjustTier[1] = true
                 end
                 if adjustTier[1] == true then
                     randomTier1[i], randomTier1[adjCount[1]] = randomTier1[adjCount[1]], randomTier1[i]
@@ -982,17 +1130,33 @@ function VolverMilty.makeHands(count)
                 return false
             end
         end
+
+        local handWeight = VolverMilty._weighHand({ randomTier1[i], randomTier2[i], randomTier3[i] })
+        if handWeight < VolverMilty.worstHandVal then
+            VolverMilty.secworstHand = VolverMilty.worstHand
+            VolverMilty.secworstHandVal = VolverMilty.worstHandVal
+            VolverMilty.worstHand = i
+            VolverMilty.worstHandVal = handWeight
+        elseif handWeight < VolverMilty.secworstHandVal then
+            VolverMilty.secworstHand = i
+            VolverMilty.secworstHandVal = handWeight
+        end
         table.insert(result, { randomTier1[i], randomTier2[i], randomTier3[i] })
     end
     return result
 end
 
+-- U1 | count WH's in hand if singlewormhole option on fail the hand
 function VolverMilty._verifyHand(tileTable)
     local optR = 0.0
     local optI = 0.0
+    local whCount = 0
     -- sums hands optimized resources and influence, compares to minimum values
     for i, tile in ipairs(tileTable) do
         local system = _systemHelper.systemFromTile(tile)
+        if system.wormholes ~= nil then
+            whCount = whCount +1
+        end
         for j, planet in ipairs(system.planets) do
             if planet.resources > planet.influence then
                 optR = optR + planet.resources
@@ -1008,9 +1172,49 @@ function VolverMilty._verifyHand(tileTable)
     local minI = VolverMilty.minI or VolverMilty.defaultMinI
     local minTotal = VolverMilty.minTotal
     local maxTotal = VolverMilty.maxTotal
-    return optR >= minR and optI >= minI and optR + optI >= minTotal and optR + optI <= maxTotal
+    if VolverMilty.pushSingleWormholesAnomalies and whCount >= 2 then
+        return false
+    else
+        return optR >= minR and optI >= minI and optR + optI >= minTotal and optR + optI <= maxTotal
+    end
 end
 
+-- U1 | hand weight calculation.
+function VolverMilty._weighHand(tileTable)
+    local next = next
+    local handweight = 0.0
+
+    for i, tile in ipairs(tileTable) do
+        local system = _systemHelper.systemFromTile(tile)
+        local systemweight = 0.0
+
+        if system.wormholes ~= nil then
+            systemweight = systemweight + 0.1
+        end
+
+        for j, planet in ipairs(system.planets) do
+            if planet.resources > planet.influence then
+                systemweight = systemweight + (planet.resources / 3.44)
+            else
+                systemweight = systemweight + (planet.influence / 3.44)
+            end
+            if planet.tech then
+                systemweight = systemweight + 0.25
+            end
+            if planet.legendary then
+                systemweight = systemweight + 0.5
+            end
+        end
+        handweight = handweight + systemweight
+    end
+
+    return handweight
+end
+
+-- U1 | update to track if hands have any wormholes
+-- U1 | update wormhole selection to be based on what was determined in makehands func
+-- U1 | noted that orignal version tested for VolverMilty.numAlpha == 1 which made for unreachable code.
+-- U1 | if option selected - force wormholes into seprate tiles, also split up cormund and everra if they're in the same hand
 function VolverMilty.addRedTiles(hands, count)
     local redTiles = SystemTiles.getRedTiles()
     redTiles = VolverMilty.permute(redTiles)
@@ -1018,6 +1222,8 @@ function VolverMilty.addRedTiles(hands, count)
     local wormholesBeta = {}
     local betaLess = {}
     local alphaLess = {}
+    local wormholesAny = {}
+    local wormholesNone = {}
     -- modifies redTile list to force include wormholes as specified
     local randTileList = {}
     for i=1,#hands do
@@ -1029,29 +1235,38 @@ function VolverMilty.addRedTiles(hands, count)
     local randAlpha = math.random() > 0.5
     -- rearranges tile list to account for forced in tiles
     for _, hand in ipairs(hands) do
+        local anyWH = false
         if VolverMilty.find(25, hand) or VolverMilty.find(64, hand) then
             wormholesBeta[_] = true
+            anyWH = true
         else
             wormholesBeta[_] = false
             table.insert(betaLess, _)
         end
         if VolverMilty.find(26, hand) then
             wormholesAlpha[_] = true
+            anyWH = true
         else
             wormholesAlpha[_] = false
             table.insert(alphaLess, _)
         end
+        if anyWH then
+            wormholesAny[_] = true
+        else
+            wormholesAny[_] = false
+            table.insert(wormholesNone, _)
+        end
     end
-    if VolverMilty.numBeta > 0 then
+    if VolverMilty.numBetaRed == 1 then
         local betaIndex = VolverMilty.find(40, redTiles)
         redTiles[20-randTileList[reserveSpots]*2], redTiles[betaIndex] = redTiles[betaIndex], redTiles[20-randTileList[reserveSpots]*2]
         reserveSpots = reserveSpots + 1
     end
-    if VolverMilty.numAlpha == 1 then
+    if VolverMilty.numAlphaRed == 1 then
         local alphaIndex = VolverMilty.find(randAlpha and 39 or 79, redTiles)
         redTiles[20-randTileList[reserveSpots]*2], redTiles[alphaIndex] = redTiles[alphaIndex], redTiles[20-randTileList[reserveSpots]*2]
         reserveSpots = reserveSpots + 1
-    elseif VolverMilty.numAlpha > 1 then
+    elseif VolverMilty.numAlphaRed == 2 then
         local alphaIndex = VolverMilty.find(39, redTiles)
         local alphaAsteroidIndex = VolverMilty.find(79, redTiles)
         if randAlpha == 0 then
@@ -1062,29 +1277,78 @@ function VolverMilty.addRedTiles(hands, count)
             redTiles[20-randTileList[reserveSpots+1]*2], redTiles[alphaIndex] = redTiles[alphaIndex], redTiles[20-randTileList[reserveSpots+1]*2]
         end
     end
-    local betaIndex = VolverMilty.find(40, redTiles)
-    if wormholesBeta[math.floor((20-betaIndex)/2)] == true then
-        local randSlice = betaLess[math.random(#betaLess)]
-        redTiles[betaIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[betaIndex]
-    end
-    local alphaIndex = VolverMilty.find(39, redTiles)
-    local alphaAsteroidIndex = VolverMilty.find(79, redTiles)
-    if wormholesAlpha[math.floor((20-alphaIndex)/2)] == true then
-        local randSlice = alphaLess[math.random(#alphaLess)]
-        redTiles[alphaIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[alphaIndex]
-        wormholesAlpha[randSlice] = true
-        table.remove(alphaLess, VolverMilty.find(randSlice, alphaLess))
-    end
-    if wormholesAlpha[math.floor((20-alphaAsteroidIndex)/2)] == true then
-        local randSlice = alphaLess[math.random(#alphaLess)]
-        redTiles[alphaAsteroidIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[alphaAsteroidIndex]
-    end
-    for _, hand in ipairs(hands) do
-        for _ = 1, count do
-            local tile = assert(table.remove(redTiles))
-            table.insert(hand, tile)
+    if VolverMilty.pushSingleWormholesAnomalies then
+        local betaIndex = VolverMilty.find(40, redTiles)
+        if wormholesAny[math.floor((20-betaIndex)/2)] == true then
+            local randSlice = wormholesNone[math.random(#wormholesNone)]
+            redTiles[betaIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[betaIndex]
+            wormholesAny[randSlice] = true
+            table.remove(wormholesNone, VolverMilty.find(randSlice, wormholesNone))
+        else
+            local slice = math.floor((20-betaIndex)/2)
+            wormholesAny[slice] = true
+            table.remove(wormholesNone, VolverMilty.find(slice, wormholesNone))
+        end
+        local alphaIndex = VolverMilty.find(39, redTiles)
+        if wormholesAny[math.floor((20-alphaIndex)/2)] == true then
+            local randSlice = wormholesNone[math.random(#wormholesNone)]
+            redTiles[alphaIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[alphaIndex]
+            wormholesAny[randSlice] = true
+            table.remove(wormholesNone, VolverMilty.find(randSlice, wormholesNone))
+        else
+            local slice = math.floor((20-alphaIndex)/2)
+            wormholesAny[slice] = true
+            table.remove(wormholesNone, VolverMilty.find(slice, wormholesNone))
+        end
+        local alphaAsteroidIndex = VolverMilty.find(79, redTiles)
+        if wormholesAny[math.floor((20-alphaAsteroidIndex)/2)] == true then
+            local randSlice = wormholesNone[math.random(#wormholesNone)]
+            redTiles[alphaAsteroidIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[alphaAsteroidIndex]
+        end
+        local cormIndex = VolverMilty.find(67, redTiles)
+        local cormHand = math.floor((20-cormIndex)/2)
+        local eveIndex = VolverMilty.find(68, redTiles)
+        local eveHand = math.floor((20-eveIndex)/2)
+        if eveHand == cormHand and eveHand <= #hands then
+            local newhand = 1
+            if eveHand < #hands then
+                newhand = newhand + eveHand
+            end
+            local oldHandIndex = math.random() > 0.5 and eveIndex or cormIndex
+            local newHandIndex = 20-2*newhand
+            -- swap with the other tile if its a wh.
+            local system = _systemHelper.systemFromTile(redTiles[newHandIndex])
+            if system.wormholes ~= nil then
+                newHandIndex = newHandIndex - 1
+            end
+            redTiles[oldHandIndex], redTiles[newHandIndex] = redTiles[newHandIndex], redTiles[oldHandIndex]
+        end
+    else
+        local betaIndex = VolverMilty.find(40, redTiles)
+        if wormholesBeta[math.floor((20-betaIndex)/2)] == true then
+            local randSlice = betaLess[math.random(#betaLess)]
+            redTiles[betaIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[betaIndex]
+        end
+        local alphaIndex = VolverMilty.find(39, redTiles)
+        local alphaAsteroidIndex = VolverMilty.find(79, redTiles)
+        if wormholesAlpha[math.floor((20-alphaIndex)/2)] == true then
+            local randSlice = alphaLess[math.random(#alphaLess)]
+            redTiles[alphaIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[alphaIndex]
+            wormholesAlpha[randSlice] = true
+            table.remove(alphaLess, VolverMilty.find(randSlice, alphaLess))
+        end
+        if wormholesAlpha[math.floor((20-alphaAsteroidIndex)/2)] == true then
+            local randSlice = alphaLess[math.random(#alphaLess)]
+            redTiles[alphaAsteroidIndex], redTiles[20-2*randSlice] = redTiles[20-2*randSlice], redTiles[alphaAsteroidIndex]
         end
     end
+    for _, hand in ipairs(hands) do
+            for _ = 1, count do
+                local tile = assert(table.remove(redTiles))
+                table.insert(hand, tile)
+            end
+        end
+
 end
 
 -------------------------------------------------------------------------------
@@ -1625,8 +1889,83 @@ Slice = {
 }
 
 --- Compute "R/I TECH LEGENDARY" label from a list of tile numbers.
+-- U1
+-- # played around with additonal info in the slice label, mainly for the purpose of seeing
+-- # how skewed hands can get when cormund / everra get added.
+-- # have left in information to show if slice has wormholes.
 function Slice.getLabel(tiles)
-    return _systemHelper.summarizeTiles(tiles)
+    --return _systemHelper.summarizeTiles(tiles)
+    local r = 0
+    local i = 0
+    local rr = 0
+    local ri = 0
+    local rs = 0
+    local tech = {}
+    local legendary = 0
+    local wormholes = {}
+    local handWeight = 0.0
+    for _, tile in ipairs(tiles) do
+        local system = _systemHelper.systemFromTile(tile)
+
+        for _, wh in ipairs(system.wormholes or {}) do
+            if wh == "alpha" then
+                table.insert(wormholes, '\u{03B1}')
+            elseif wh == "beta" then
+                table.insert(wormholes, '\u{03B2}')
+            elseif wh == "delta" then
+                table.insert(wormholes, '\u{03B3}')
+            elseif wh == "gamma" then
+                table.insert(wormholes, '\u{03B4}')
+            else -- do nothing
+            end
+        end
+        for _, planet in ipairs(system.planets or {}) do
+            r = r + (planet.resources or 0)
+            i = i + (planet.influence or 0)
+
+            if planet.resources > planet.influence then
+                rr = rr + (planet.resources or 0)
+            end
+
+            if planet.resources < planet.influence then
+                ri = ri + (planet.influence or 0)
+            end
+            if planet.resources == planet.influence then
+                rs = rs + (planet.influence or 0)
+            end
+
+            if planet.tech then
+                table.insert(tech, string.sub(planet.tech, 1, 1):upper())
+            end
+            if planet.legendary then
+                legendary = legendary + 1
+            end
+        end
+    end
+    handWeight = handWeight + (rr + ri + rs) / 3.44
+    handWeight = handWeight + (legendary * 0.5)
+    handWeight = handWeight + (#tech * 0.25)
+    handWeight = handWeight + (#wormholes * 0.1)
+    local items = {
+        r .. '/' .. i
+        --'Act ' .. r .. '/' .. i,
+        --'Opt ' .. rr .. '/' .. ri .. '/' .. rs,
+        --'Weight ' .. math.floor(handWeight * 100)/100
+    }
+    local specials = {}
+    if #tech > 0 then
+        table.sort(tech)
+        table.insert(specials, table.concat(tech, ''))
+    end
+    if legendary > 0 then
+        local n = legendary
+        table.insert(specials, ((n > 1) and n or '') .. 'L')
+    end
+    if #wormholes > 0 then
+        table.sort(wormholes)
+        table.insert(specials, table.concat(wormholes, ''))
+    end
+    return table.concat(items, '\n') .. '\n' .. table.concat(specials, '')
 end
 
 --- Swap tiles so no anomalies are adjacent (in this slice).
