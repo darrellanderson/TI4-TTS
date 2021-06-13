@@ -252,7 +252,7 @@ end
 
 function onPlayerTurn(player, prevPlayer)
     -- Abort if not correct turn state.
-    if (not prevPlayer) or (not Turns.enable) or (not Turns.order) then
+    if (not player) or (not Turns.enable) or (not Turns.order) then
         return
     end
 
@@ -261,35 +261,29 @@ function onPlayerTurn(player, prevPlayer)
         return
     end
 
-    -- Abort if few enough player that normal turn swaps already snake.
+    -- Abort if not at the end of turn order.
     local n = #Turns.order
+    local first = Turns.order[1]
+    local last = Turns.order[n]
+    local snakeWhen = Turns.reverse_order and first or last
+    if player.color ~= snakeWhen then
+        return
+    end
+
+    -- Abort if few enough player that normal turn swaps already snake.
     if n < 3 then
         return
     end
 
-    -- Abort if not at the end of turn order.
-    local first = Turns.order[1]
-    local last = Turns.order[n]
-    local snakeWhen = Turns.reverse_order and first or last
-    if prevPlayer.color ~= snakeWhen then
-        return
-    end
-
-    -- Let the turn change, then after a beat fix it.
-    local second = Turns.order[2]
-    local secondLast = Turns.order[n - 1]
-    local snakeNext = Turns.reverse_order and second or secondLast
-    local function doSnake()
-        Turns.reverse_order = not Turns.reverse_order
-        local message = {
-            'Snake turn order: changing to ',
-            Turns.reverse_order and 'reverse' or 'forward',
-            ' and setting turn to ' .. snakeNext
-        }
-        printToAll(table.concat(message, ''), 'Yellow')
-        Turns.turn_color = snakeNext
-    end
-    Wait.frames(doSnake, 2)
+    -- At this point we are snaking and have just reached the end.  Snake!
+    Turns.reverse_order = not Turns.reverse_order
+    local message = {
+        'Snake turn order: ',
+        player.color .. ' please make two selections, ',
+        'changing turn order to ',
+        Turns.reverse_order and 'reverse' or 'forward'
+    }
+    printToAll(table.concat(message, ''), 'Yellow')
 end
 
 function _getByName(tag, name)
