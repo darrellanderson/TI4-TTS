@@ -1,6 +1,6 @@
 --- Shared deck locations, etc.
 -- @author Darrell
--- #include <~/CrLua/Objects/TI4_Helpers/TI4_DeckHelper>
+-- #include <~/TI4-TTS/TI4/Helpers/TI4_DeckHelper>
 
 -- Users should copy this getHelperClient function, and use via:
 --
@@ -25,6 +25,17 @@ end
 local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
 local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
 local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+local function copyTable(t)
+    if t and type(t) == 'table' then
+        local copy = {}
+        for k, v in pairs(t) do
+            copy[k] = type(v) == 'table' and copyTable(v) or v
+        end
+        t = copy
+    end
+    return t
+end
 
 -- DECK_NAME to SOURCE_NAME to CARDS
 -- CARDS were originally a simple string list, however they may also be
@@ -924,6 +935,74 @@ function injectCard(params)
         deckName = params.deckName,
         factionName = params.factionName,
     }
+end
+
+--- Add a homebrew deck.
+function injectDeck(params)
+    local deckAttributes = _copyTable(params)
+    _verifyDeck(params)
+
+    DECKS[deckAttributes.deckName] = deckAttributes
+
+    -- Card lists can be a mix of number->cardName and cardName->attributes entries.
+    for source, cards in pairs(deckAttributes.cardNames or {}) do
+        for _, cardName in ipairs(cards) do
+            if type(cardName) == 'string' then
+                injectCard({
+                    cardName = cardName,
+                    deckName = deckAttributes.deckName
+                })
+            end
+        end
+        for cardName, _ in pairs(cards) do
+            if type(cardName) == 'string' then
+                injectCard({
+                    cardName = cardName,
+                    deckName = deckAttributes.deckName
+                })
+            end
+        end
+    end
+end
+
+function _verifyDeck(deckAttributes)
+    assert(type(deckAttributes.deckName) == 'string', 'deckName')
+    assert(type(deckAttributes.transform) == 'table', 'transform')
+    assert((not deckAttributes.transform.parent) or type(deckAttributes.transform.parent) == 'string', 'transform.parent')
+    assert(type(deckAttributes.transform.deck) == 'table', 'transform')
+    assert(type(deckAttributes.transform.deck.position) == 'table', 'transform.deck.position')
+    assert(type(deckAttributes.transform.deck.position.x) == 'number', 'transform.deck.position.x')
+    assert(type(deckAttributes.transform.deck.position.y) == 'number', 'transform.deck.position.y')
+    assert(type(deckAttributes.transform.deck.position.z) == 'number', 'transform.deck.position.z')
+    assert(type(deckAttributes.transform.deck.rotation) == 'table', 'transform.deck.rotation')
+    assert(type(deckAttributes.transform.deck.rotation.x) == 'number', 'transform.deck.rotation.x')
+    assert(type(deckAttributes.transform.deck.rotation.y) == 'number', 'transform.deck.rotation.y')
+    assert(type(deckAttributes.transform.deck.rotation.z) == 'number', 'transform.deck.rotation.z')
+    if deckAttributes.transform.discard then
+        assert(type(deckAttributes.transform.discard) == 'table', 'transform.discard')
+        assert(type(deckAttributes.transform.discard.position) == 'table', 'transform.discard.position')
+        assert(type(deckAttributes.transform.discard.position.x) == 'number', 'transform.discard.position.x')
+        assert(type(deckAttributes.transform.discard.position.y) == 'number', 'transform.discard.position.y')
+        assert(type(deckAttributes.transform.discard.position.z) == 'number', 'transform.discard.position.z')
+        assert(type(deckAttributes.transform.discard.rotation) == 'table', 'transform.discard.rotation')
+        assert(type(deckAttributes.transform.discard.rotation.x) == 'number', 'transform.discard.rotation.x')
+        assert(type(deckAttributes.transform.discard.rotation.y) == 'number', 'transform.discard.rotation.y')
+        assert(type(deckAttributes.transform.discard.rotation.z) == 'number', 'transform.discard.rotation.z')
+    end
+    if deckAttributes.cardNames then
+        assert(type(deckAttributes.cardNames) == 'table', 'deckAttributes.cardNames')
+        for k, v in pairs(deckAttributes.cardNames) do
+            assert(type(v) == 'table')
+        end
+    end
+end
+
+function _verifyDecks()
+    for _, deck in pairs(DECKS) do
+        print('checking ' .. deck.deckName)
+        _verifyDeck(deck)
+    end
+    print('done')
 end
 
 -------------------------------------------------------------------------------
@@ -1832,6 +1911,7 @@ function onLoad(saveState)
     end
 
     -- Test methods.
+    self.addContextMenuItem('Verify decks', _verifyDecks, false)
     self.addContextMenuItem('Split decks', _splitDecks, false)
     self.addContextMenuItem('Get locations', _reportDeckPositionsInParentSpace, false)
     self.addContextMenuItem('Discard cards', testDiscardCards, false)
