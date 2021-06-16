@@ -1,6 +1,6 @@
 --- SCPT 2021 Tournament Draft
 -- (script) @author Darrell
--- #include <~/CrLua/Objects/SCPT_2021_Draft>
+-- #include <~/TI4-TTS/TI4/DraftTools/SCPT_2021_Draft>
 -- https://cdn.discordapp.com/attachments/535582218077339659/812945113884917770/unknown.png
 --
 -- ╔═══════════════╗
@@ -65,10 +65,21 @@ local MAPS = {
         }
     },
     ['2021 Semifinals'] = {
+        mapString = '70 32 50 47 42 73 74 65 48 69 71 64 78 36 26 66 77 72 0 46 79 0 27 45 0 24 29 0 62 37 0 41 38 0 43 40',
+        sliceNames = {
+            White = 'Vanilla\nPizza',
+            Blue = 'Malcom\nin the\nMiddle',
+            Purple = 'Grape\nNuts',
+            Yellow = 'Old\nMoney',
+            Red = 'Sonic the\nHedgehog: \nAmerica’s\nDrive-In',
+            Green = 'It’s the\nReal Thing',
+        }
     },
     ['2021 Finals'] = {
     }
 }
+
+DEFAULT_MAP = '2021 Semifinals'
 
 local _snapPointsGrid = false
 local _draftOrder = false
@@ -307,7 +318,7 @@ function randomizeDraft()
     if mapTool then
         mapString = mapTool.call('getMapString')
         if string.len(mapString) == 0 then
-            mapString = MAPS['2021 Prelim'].mapString
+            mapString = MAPS[DEFAULT_MAP].mapString
             mapTool.call('setMapString', mapString)
         end
     end
