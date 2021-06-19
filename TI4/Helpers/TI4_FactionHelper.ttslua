@@ -965,6 +965,22 @@ function injectFaction(faction)
             factionName = faction.name
         })
     end
+
+    -- Add hero to hero name set for purge menu item, apply now if card exists.
+    if faction.hero then
+        local cardName = faction.hero
+        if _heroNameSet then
+            _heroNameSet[cardName] = true
+        end
+        if _hasContextMenuCardNameSet then
+            _hasContextMenuCardNameSet[cardName] = true
+        end
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == cardName then
+                _applyContextMenuItems(object)
+            end
+        end
+    end
 end
 
 function _factionIsValid(faction)
@@ -2201,8 +2217,8 @@ local function _replaceTitanSleeperToken(sleeperTokenObject, clickingColor, repl
     sleeperTokensBag.putObject(sleeperTokenObject)
 end
 
-local _heroNameSet = false
-local _hasContextMenuCardNameSet = false
+_heroNameSet = false
+_hasContextMenuCardNameSet = false
 local function _hasContextMenuItems(object)
     if not _hasContextMenuCardNameSet then
         _heroNameSet = {}
