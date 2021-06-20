@@ -1,0 +1,343 @@
+<!-- Strategy Card UI Elements -->
+
+<Defaults>
+    <Button color="black" textColor="white" />
+    <VerticalLayout
+        height="300"
+        width="200"
+        allowDragging="true"
+        returnToOriginalPositionWhenReleased="false"
+        rectAlignment="UpperLeft"
+        offsetXY="1200 -80"
+        active="false"
+    />
+    <HorizontalLayout
+        height="300"
+        width="300"
+    />
+</Defaults>
+
+<VerticalLayout id="leadership">
+    <Button
+        text="Leadership Primary Ability" tooltip="+ Gain 3 command tokens.&#xA;+ Spend any amount of influence to gain 1 command token for every 3 influence spent."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Primary" id="leadership_primary" onClick="genericFollow(Leadership Primary)"></Button>
+    <Button
+        text="Leadership Secondary Ability" tooltip="+ Spend any amount of influence to gain 1 command token for every 3 influence spent."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <HorizontalLayout id="leadershipButtonsRow1">
+        <Button color="green" textColor="black" text="1" id="leadership_secondary" onClick="leadershipSelected(1)"></Button>
+        <Button color="green" textColor="black" text="2" id="leadership_secondary" onClick="leadershipSelected(2)"></Button>
+        <Button color="green" textColor="black" text="3" id="leadership_secondary" onClick="leadershipSelected(3)"></Button>
+        <Button color="green" textColor="black" text="4" id="leadership_secondary" onClick="leadershipSelected(4)"></Button>
+    </HorizontalLayout>
+    <HorizontalLayout id="leadershipButtonsRow2">
+        <Button color="green" textColor="black" text="5" id="leadership_secondary" onClick="leadershipSelected(5)"></Button>
+        <Button color="green" textColor="black" text="6" id="leadership_secondary" onClick="leadershipSelected(6)"></Button>
+        <Button color="green" textColor="black" text="7" id="leadership_secondary" onClick="leadershipSelected(7)"></Button>
+        <Button color="green" textColor="black" text="8" id="leadership_secondary" onClick="leadershipSelected(8)"></Button>
+    </HorizontalLayout>
+    <HorizontalLayout id="leadershipButtonsRow3">
+        <Button color="green" textColor="black" text="9" id="leadership_secondary" onClick="leadershipSelected(9)"></Button>
+        <Button color="green" textColor="black" text="10" id="leadership_secondary" onClick="leadershipSelected(10)"></Button>
+        <Button color="green" textColor="black" text="11" id="leadership_secondary" onClick="leadershipSelected(11)"></Button>
+        <Button color="green" textColor="black" text="12" id="leadership_secondary" onClick="leadershipSelected(12)"></Button>
+    </HorizontalLayout>
+    <Button color="red" textColor="black" text="Pass"  id="leadership_pass" onClick="notFollow(Leadership)"></Button>
+    <Button color="black" textColor="white" text="Close Menu" id="leadership_close" onClick="closeMenu(leadership)"></Button>
+</VerticalLayout>
+
+<VerticalLayout id="diplomacy">
+    <Button
+        text="Diplomacy Primary Ability" tooltip="+ Choose 1 system other than the Mechatol Rex system that contains a planet you control; each other player places a command token from their reinforcements in the chosen system.  Then, ready up to 2 exhausted planets you control."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Primary" id="diplomacy_primary" onClick="genericFollow(Diplomacy Primary)"></Button>
+    <Button
+        text="Diplomacy Secondary Ability" tooltip="+ Spend 1 token from your strategy pool to ready up to 2 exhausted planets."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Secondary" id="diplomacy_secondary" onClick="genericFollow(Diplomacy Secondary)"></Button>
+    <Button color="red" textColor="black" text="Pass" id="diplomacy_pass" onClick="notFollow(Diplomacy)"></Button>
+    <Button color="black" textColor="white" text="Close Menu" id="diplomacy_close" onClick="closeMenu(diplomacy)"></Button>
+</VerticalLayout>
+
+<VerticalLayout id="politics">
+    <Button
+        text="Politics Primary Ability" tooltip="+ Choose a player other than the speaker.  That player gains the speaker token.&#xA;+ Draw 2 action cards.&#xA;+ Look at the top 2 cards of the agenda deck.  Place each card on the top or bottom of the deck in any order."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <HorizontalLayout id="politicsButtons">
+        <Button color="green" textColor="black" text="Both Top" id="politics_primary" onClick="politicsPrimary(both agendas on top)"></Button>
+        <Button color="green" textColor="black" text="One Each" id="politics_primary" onClick="politicsPrimary(one agenda on top and one on bottom)"></Button>
+        <Button color="green" textColor="black" text="Both Bottom" id="politics_primary" onClick="politicsPrimary(both agendas on bottom)"></Button>
+    </HorizontalLayout>
+    <Button
+        text="Politics Secondary Ability" tooltip="+ Spend 1 token from your strategy pool to draw 2 action cards."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Secondary" id="politics_secondary" onClick="genericFollow(Politics Secondary)"></Button>
+    <Button color="red" textColor="black" text="Pass" id="politics_pass" onClick="notFollow(Politics)"></Button>
+    <Button color="black" textColor="white" text="Close Menu" id="politics_close" onClick="closeMenu(politics)"></Button>
+</VerticalLayout>
+
+<VerticalLayout id="construction">
+    <Button
+        text="Construction Primary Ability" tooltip="+ Place 1 PDS or 1 space dock on a planet you control.&#xA;+ Place 1 PDS on a planet you control."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <HorizontalLayout id="constructionButtons">
+        <Button color="green" textColor="black" text="Space Dock and PDS" id="construction_primary" onClick="constructionPrimary(a Space Dock and a PDS)"></Button>
+        <Button color="green" textColor="black" text="Two PDS" id="construction_primary" onClick="constructionPrimary(two PDS)"></Button>
+    </HorizontalLayout>
+    <Button
+        text="Construction Secondary Ability" tooltip="+ Place 1 token from your strategy pool in any system; you may place either 1 space dock or 1 PDS on a planet you control in that system."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <HorizontalLayout id="constructionFollowButtons">
+        <Button color="green" textColor="black" text="Space Dock" id="construction_secondary" onClick="constructionSecondary(a Space Dock)"></Button>
+        <Button color="green" textColor="black" text="PDS" id="construction_secondary" onClick="constructionSecondary(a PDS)"></Button>
+    </HorizontalLayout>
+    <Button color="red" textColor="black" text="Pass" id="construction_pass" onClick="notFollow(Construction)"></Button>
+    <Button color="black" textColor="white" text="Close Menu" id="construction_close" onClick="closeMenu(construction)"></Button>
+</VerticalLayout>
+
+<VerticalLayout id="industry">
+    <Button
+        text="Industry Primary Ability" tooltip="+ Resolve the PRODUCTION abilities of your units in one system.  Reduce the combined cost of the produced units by 2."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Primary" id="industry_primary" onClick="genericFollow(Industry Primary)"></Button>
+    <Button
+        text="Industry Secondary Ability" tooltip="+ Spend 1 token from your strategy pool to resolve the PRODUCTION abilities of your units in one system, producting a maximum of 3 units."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Secondary" id="industry_secondary" onClick="genericFollow(Industry Secondary)"></Button>
+    <Button color="red" textColor="black" text="Pass" id="industry_pass" onClick="notFollow(Industry)"></Button>
+    <Button color="black" textColor="white" text="Close Menu" id="industry_close" onClick="closeMenu(Industry)"></Button>
+</VerticalLayout>
+
+<VerticalLayout id="trade" width="300">
+    <Button
+        text="Trade Primary Ability" tooltip="+ Gain 3 trade goods.&#xA;+ Replenish commodities.&#xA;+ Choose any number of other players.  Those players use the secondary ability of this strategy card without spending a command token."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Primary" id="trade_primary" onClick="genericFollow(Trade Primary)"></Button>
+    <HorizontalLayout id="colorSelector">
+        <Button color="blue" textColor="black" text="Blue" fontSize ="14" tooltip="Refresh Blue Player's commodities" id="trade_primary" onClick="tradeSelected(Blue)"></Button>
+        <Button color="brown" textColor="black" text="Brown" fontSize ="14" tooltip="Refresh Brown Player's commodities" id="trade_primary" onClick="tradeSelected(Brown)"></Button>
+        <Button color="green" textColor="black" text="Green" fontSize ="14" tooltip="Refresh Green Player's commodities" id="trade_primary" onClick="tradeSelected(Green)"></Button>
+    </HorizontalLayout>
+    <HorizontalLayout id="colorSelector">
+        <Button color="orange" textColor="black" text="Orange" fontSize ="14" tooltip="Refresh Orange Player's commodities" id="trade_primary" onClick="tradeSelected(Orange)"></Button>
+        <Button color="pink" textColor="black" text="Pink" fontSize ="14" tooltip="Refresh Pink Player's commodities" id="trade_primary" onClick="tradeSelected(Pink)"></Button>
+        <Button color="purple" textColor="black" text="Purple" fontSize ="14" tooltip="Refresh Purple Player's commodities" id="trade_primary" onClick="tradeSelected(Purple)"></Button>
+    </HorizontalLayout>
+    <HorizontalLayout id="colorSelector">
+        <Button color="red" textColor="black" text="Red" fontSize ="14" tooltip="Refresh Red Player's commodities" id="trade_primary" onClick="tradeSelected(Red)"></Button>
+        <Button color="white" textColor="black" text="White" fontSize ="14" tooltip="Refresh White Player's commodities" id="trade_primary" onClick="tradeSelected(White)"></Button>
+        <Button color="yellow" textColor="black" text="Yellow" fontSize ="14" tooltip="Refresh Yellow Player's commodities" id="trade_primary" onClick="tradeSelected(Yellow)"></Button>
+    </HorizontalLayout>
+    <Button
+        text="Trade Secondary Ability" tooltip="+ Spend 1 token from your strategy pool to replenish commodities."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Secondary" id="trade_secondary" onClick="genericFollow(Trade Secondary)"></Button>
+    <Button color="red" textColor="black" text="Pass" id="trade_pass" onClick="notFollow(Trade)"></Button>
+    <Button color="black" textColor="white" text="Close Menu" id="trade_close" onClick="closeMenu(trade)"></Button>
+</VerticalLayout>
+
+<VerticalLayout id="warfare">
+    <Button
+        text="Warfare Primary Ability" tooltip="+ Remove one of your command tokens from the game board; then gain 1 command token.&#xA;+ Redistribute any number of the command tokens on your command sheet."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Primary" id="warfare_primary" onClick="genericFollow(Warfare Primary)"></Button>
+    <Button
+        text="Warfare Secondary Ability" tooltip="+ Spend 1 token from your strategy pool to use the PRODUCTION ability 1 of your space docks in your home system."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Secondary" id="warfare_secondary" onClick="genericFollow(Warfare Secondary)"></Button>
+    <Button color="red" textColor="black" text="Pass" id="warfare_pass" onClick="notFollow(Warfare)"></Button>
+    <Button color="black" textColor="white" text="Close Menu" id="warfare_close" onClick="closeMenu(warfare)"></Button>
+</VerticalLayout>
+
+<VerticalLayout id="logistics">
+    <Button
+        text="Logistics Primary Ability" tooltip="+ Place the HIGH ALERT token in a system.&#xA;+ Your ships in the system with the HIGH ALERT token gain +1 to all COMBAT ROLLS and +1 to movement.&#xA;+ If any of your ships start their movement in the token's sytem, you may move the token with the ship."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Primary" id="logistics_primary" onClick="genericFollow(Logistics Primary)"></Button>
+    <Button
+        text="Logistics Secondary Ability" tooltip="+ Spend 1 token from your strategy pool to move up to 2 of your ships unactivated systems to adjacent systems with your planets or units."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Secondary" id="logistics_secondary" onClick="genericFollow(Logistics Secondary)"></Button>
+    <Button color="red" textColor="black" text="Pass" id="logistics_pass" onClick="notFollow(Logistics)"></Button>
+    <Button color="black" textColor="white" text="Close Menu" id="logistics_close" onClick="closeMenu(Logistics)"></Button>
+</VerticalLayout>
+
+
+<VerticalLayout id="technology" height="600" width="600">
+    <Button
+        text="Technology Primary Ability" tooltip="+ Research 1 technology.&#xA;+ Spend 6 resources to research 1 technology."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button
+        text="Technology Secondary Ability" tooltip="+ Spend 1 token from your strategy pool and 4 resources to research 1 technology."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <HorizontalLayout id="greenTechs">
+        <Button color="green" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Neural Motivator" id="technology_generic" onClick="pickTech(Neural Motivator)" tooltip="During the status phase, draw 2 action&#xA;cards instead of 1."></Button>
+        <Button color="green" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Psycho-&#xA;archaeology" id="technology_generic" onClick="pickTech(Psychoarchaeology)" tooltip="You can use technology specialties on&#xA;planets you control without exhausting&#xA;them, even if those planets are exhausted.&#xA;&#xA;During the action phase, you can exhaust&#xA;planets you control that have technology&#xA;specialties to gain 1 trade good. [PoK]"></Button>
+        <Button color="green" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Dacxive Animators&#xA;(G)" id="technology_generic" onClick="pickTech(Dacxive Animators)" tooltip="After you win a ground combat, you may&#xA;place 1 infantry from your reinforcements&#xA;on that planet."></Button>
+        <Button color="green" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Bio-Stims&#xA;(G)" id="technology_generic" onClick="pickTech(Bio-Stims)" tooltip="You may exhaust this card at the end of&#xA;your turn to ready 1 of your planets that&#xA;has a technology specialty or 1 of your&#xA;other technologies. [PoK]"></Button>
+        <Button color="green" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Hyper Metabolism&#xA;(GG)" id="technology_generic" onClick="pickTech(Hyper Metabolism)" tooltip="During the status phase, gain 3 command&#xA;tokens instead of 2."></Button>
+        <Button color="green" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="X-89 Bacterial Weapon Ω&#xA;(GGG)" id="technology_generic" onClick="pickTech(X-89 Bacterial Weapon)" tooltip="After 1 or more of your units use&#xA;BOMBARDMENT against a planet, if at least&#xA;1 of your opponent's infantry was&#xA;destroyed, you may destroy all of your&#xA;oppponent's infantry on that planet."></Button>
+    </HorizontalLayout>
+    <HorizontalLayout id="redTechs">
+        <Button color="red" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Plasma Scoring" id="technology_generic" onClick="pickTech(Plasma Scoring)" tooltip="When 1 or more of your units use&#xA;BOMBARDMENT or SPACE CANNON, 1 of&#xA;those units may roll 1 additional die."></Button>
+        <Button color="red" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="AI Development Algorithm" id="technology_generic" onClick="pickTech(AI Development Algorithm)" tooltip="When you research a unit upgrade&#xA;technology, you may exhaust this card&#xA;to ignore any 1 prerequisite.&#xA;&#xA;When 1 or more of your units use&#xA;PRODUCTION, you may exhaust this card to&#xA;reduce the combined cost of the produced&#xA;units by the number of unit upgrade&#xA;technologies that you own. [PoK]"></Button>
+        <Button color="red" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Magen Defense Grid&#xA;Ω (R)" id="technology_generic" onClick="pickTech(Magen Defense Grid)" tooltip="At the start of ground combat on a planet&#xA;that contains 1 or more of your structures,&#xA; you may produce 1 hit and assign it to 1 of&#xA;your opponent's ground forces."></Button>
+        <Button color="red" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Self Assembly Routines&#xA;(R)" id="technology_generic" onClick="pickTech(Self Assembly Routines)" tooltip="After 1 or more of your units use&#xA;PRODUCTION, you may exhaust this card to&#xA;place 1 mech from your reinforcements on&#xA;a planet you control in the system.&#xA;&#xA;After 1 of your mechs is destroyed,&#xA;gain 1 trade good. [PoK]"></Button>
+        <Button color="red" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Duranium Armor&#xA;(RR)" id="technology_generic" onClick="pickTech(Duranium Armor)" tooltip="During each combat round, after you assign&#xA;hits to your units, repair 1 of your damaged&#xA;units that did not use SUSTAIN DAMAGE&#xA;during this combat round."></Button>
+        <Button color="red" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Assault Cannon&#xA;(RRR)" id="technology_generic" onClick="pickTech(Assault Cannon)" tooltip="At the start of a space combat in a system&#xA;that contains 3 or more of your non-fighter&#xA;ships, your opponent must destroy 1 of&#xA;their non-fighter ships."></Button>
+    </HorizontalLayout>
+    <HorizontalLayout id="blueTechs">
+        <Button color="blue" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Antimass Deflectors" id="technology_generic" onClick="pickTech(Antimass Deflectors)" tooltip="Your ships can move into and through&#xA;asteroid fields.&#xA;&#xA;When other players' units SPACE&#xA;CANNON against your units, apply -1 to the&#xA;result of each die roll."></Button>
+        <Button color="blue" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Dark Energy Tap" id="technology_generic" onClick="pickTech(Dark Energy Tap)" tooltip="After you perform a tactical action in a&#xA;system that contains a frontier token, if you&#xA;have 1 or more ships in that system, explore&#xA;that token.&#xA;&#xA;Your ships can retreat into adjacent systems&#xA;that do not contain other players’ units,&#xA;even if you do not have units or&#xA;control planets in that system. [PoK]"></Button>
+        <Button color="blue" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Gravity Drive&#xA;(B)" id="technology_generic" onClick="pickTech(Gravity Drive)" tooltip="After you activate a system, apply +1 to the&#xA;move value of 1 of your ships during this&#xA;tactical action."></Button>
+        <Button color="blue" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Sling Relay&#xA;(B)" id="technology_generic" onClick="pickTech(Sling Relay)" tooltip="ACTION: Exhaust this card to produce&#xA;1 ship in any system that contains 1 of&#xA;your space docks. [PoK]"></Button>
+        <Button color="blue" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Fleet Logistics&#xA;(BB)" id="technology_generic" onClick="pickTech(Fleet Logistics)" tooltip="During each of your turns of the action&#xA;phase, you may perform 2 actions instead&#xA;of 1."></Button>
+        <Button color="blue" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Light-Wave Deflector&#xA;(BBB)" id="technology_generic" onClick="pickTech(Light-Wave Deflector)" tooltip="Your ships can move through systems that&#xA;contain other players' ships."></Button>
+    </HorizontalLayout>
+    <HorizontalLayout id="yellowTechs">
+        <Button color="yellow" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Sarween Tools" id="technology_generic" onClick="pickTech(Sarween Tools)" tooltip="When 1 or more of your units use&#xA;PRODUCTION, reduce the combined cost of&#xA;the produced units by 1."></Button>
+        <Button color="yellow" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Scanlink Drone Network" id="technology_generic" onClick="pickTech(Scanlink Drone Network)" tooltip="When you activate a system, you may&#xA;explore 1 planet in that system that&#xA;contains 1 or more of your units. [PoK]"></Button>
+        <Button color="yellow" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Graviton Laser System&#xA;(Y)" id="technology_generic" onClick="pickTech(Graviton Laser System)" tooltip="You may exhaust this card before 1 or&#xA;more of your units use SPACE CANNON;&#xA;hits produced by those units must be&#xA;assigned to non-fighter ships if able."></Button>
+        <Button color="yellow" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Predictive Intelligence&#xA;(Y)" id="technology_generic" onClick="pickTech(Predictive Intelligence)" tooltip="At the end of your turn, you may exhaust this&#xA;card to redistribute your command tokens.&#xA;&#xA;When you cast votes during the agenda&#xA;phase, you may cast 3 additional votes; if&#xA;you do, and the outcome you voted for is not&#xA;resolved, exhaust this card. [PoK]"></Button>
+        <Button color="yellow" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Transit Diodes&#xA;(YY)" id="technology_generic" onClick="pickTech(Transit Diodes)" tooltip="You may exhaust this card at the start of&#xA;your turn during the action phase; remove&#xA;up to 4 of your ground forces from the&#xA;game board and place them on 1 or more&#xA;planets you control."></Button>
+        <Button color="yellow" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Integrated Economy&#xA;(YYY)" id="technology_generic" onClick="pickTech(Integrated Economy)" tooltip="After you gain control of a planet, you may&#xA;produce any number of units on that planet&#xA;that have a combined cost equal to or less&#xA;than that planet's resource value."></Button>
+    </HorizontalLayout>
+    <HorizontalLayout id="unitTechs1">
+        <Button color="grey" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Infantry II&#xA;(GG)" id="technology_generic" onClick="pickTech(Infantry II)" tooltip="After this unit is destroyed, roll 1 die. If the result&#xA;is 6 or greater, place the unit on this card. At the&#xA;start of your next turn, place each unit that is on&#xA;this card on a planet you control&#xA;in your home system.&#xA;Cost: 1(**), Combat: 7"></Button>
+        <Button color="grey" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Destroyer II&#xA;(RR)" id="technology_generic" onClick="pickTech(Destroyer II)" tooltip="ANTI-FIGHTER BARRAGE 6 (x3)&#xA;Cost: 1, Combat: 8, Move: 2"></Button>
+        <Button color="grey" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Carrier II&#xA;(BB)" id="technology_generic" onClick="pickTech(Carrier II)" tooltip="Cost: 3, Combat: 9, Move: 2, Capacity: 6"></Button>
+        <Button color="grey" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Space Dock II&#xA;(YY)" id="technology_generic" onClick="pickTech(Space Dock II)" tooltip="This unit's PRODUCTION value is equal to 4&#xA;more than resource value of this planet.&#xA;&#xA;Up to 3 fighters in this system do not count&#xA;against your ships' capacity."></Button>
+    </HorizontalLayout>
+    <HorizontalLayout id="unitTechs2">
+        <Button color="grey" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Fighter II&#xA;(BG)" id="technology_generic" onClick="pickTech(Fighter II)" tooltip="This unit may move without being transported.&#xA;Fighters in excess of your ships' capacity count against your fleet pool.&#xA;Cost: 1(**), Combat: 8, Move: 2"></Button>
+        <Button color="grey" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="PDS II&#xA;(RY)" id="technology_generic" onClick="pickTech(PDS II)" tooltip="You may use this unit's SPACE CANNON&#xA;against ships that are adjacent to this unit's system.&#xA;PLANETARY SHIELD&#xA;SPACE CANNON: 5"></Button>
+        <Button color="grey" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Cruiser II&#xA;(RGY)" id="technology_generic" onClick="pickTech(Cruiser II)" tooltip="Cost: 2, Combat: 6, Move: 3, Capacity: 1"></Button>
+        <Button color="grey" textColor="black" tooltipBackgroundColor="rgba(0,0,0,1)" text="Dreadnought II&#xA;(BBY)" id="technology_generic" onClick="pickTech(Dreadnought II)" tooltip="This unit cannot be destroyed by 'Direct Hit' action cards.&#xA;SUSTAIN DAMAGE&#xA;BOMBARDMENT: 5&#xA;Cost: 4, Combat: 5, Move: 2, Capacity: 1"></Button>
+    </HorizontalLayout>
+    <HorizontalLayout id="unitTechs3">
+        <Button color="grey" textColor="black" text="War Sun&#xA;(RRRY)" id="technology_generic" onClick="pickTech(War Sun)" tooltip="Other players' units in this system lose PLANETARY SHIELD.&#xA;SUSTAIN DAMAGE&#xA;BOMBARDMENT: 3 (x3)&#xA;Cost: 12, Combat 3 (x3), Move: 2, Capacity: 6"></Button>
+        <Button color="white" textColor="black" text="Faction Tech" id="technology_generic" onClick="pickTech(Faction Tech)"></Button>
+        <Button color="white" textColor="black" text="Command Tokens (Nekro Virus Only)" id="technology_generic" onClick="pickTech(Command Tokens)"></Button>
+    </HorizontalLayout>
+    <Button color="red" textColor="black" text="Pass" id="technology_pass" onClick="notFollow(Technology)"></Button>
+    <Button color="black" textColor="white" text="Close Menu" id="technology_close" onClick="closeMenu(technology)"></Button>
+</VerticalLayout>
+
+<VerticalLayout id="imperial">
+    <Button
+        text="Imperial Primary Ability" tooltip="+ Immediately score 1 public objective if you fulfill its requirements.&#xA;+ Gain 1 victory point if you control Mechatol Rex; otherwise draw 1 secret objective."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Primary" id="imperial_primary" onClick="genericFollow(Imperial Primary)"></Button>
+    <Button
+        text="Imperial Secondary Ability" tooltip="+ Spend 1 token from your strategy pool to draw 1 secret objective."
+        textAlignment="UpperLeft"
+    >
+    </Button>
+    <Button color="green" textColor="black" text="Secondary" id="imperial_secondary" onClick="genericFollow(Imperial Secondary)"></Button>
+    <Button color="red" textColor="black" text="Pass" id="imperial_pass" onClick="notFollow(Imperial)"></Button>
+    <Button color="black" textColor="white" text="Close Menu" id="imperial_close" onClick="closeMenu(imperial)"></Button>
+</VerticalLayout>
+
+<VerticalLayout id="actionSummaryLayout"
+    active="true"
+    width="240"
+    height="460"
+    offsetXY="60 -4"
+    childForceExpandHeight="false"
+    childForceExpandWidth="false"
+    visibility="White|Blue|Purple|Yellow|Red|Green|Orange|Pink|Brown"
+    allowDragging="false"
+>
+<Button
+    minHeight="30"
+    minWidth="60"
+    fontSize="10"
+    text="ACTIONS"
+    onClick="toggleSummary(actionSummary)"
+/>
+<Panel id="actionSummary"
+    color="#000000c0"
+    padding="10 10 10 10"
+    rectAlignment="UpperLeft"
+    visibility=""
+    active="false"
+>
+<!-- Supported:
+- "<textsize size="#"></textsize>"
+- "<br/>
+- nbsp not supported, so far the "best" indent seems to be transparent text, ugh
+- not entirely clear when <br/> is needed
+-->
+<Text
+    fontSize="14"
+    color="#ffffff"
+    alignment="UpperLeft"
+    outline="black"
+    outlineSize="1 1"
+>
+<textsize size="16">Strategic Action</textsize>
+<br/><textcolor color="Yellow">Primary of chosen strategy card</textcolor>
+<br/>
+<br/><textsize size="16">Component Action</textsize>
+<br/><textcolor color="Yellow">Faction sheet or card (technology, leader, action, etc) with “ACTION:”</textcolor>
+<br/>
+<br/><textsize size="16">Tactical Action</textsize>
+<br/><textcolor color="Yellow">1. Activation</textcolor>
+<br/><textcolor color="Yellow">2. Movement</textcolor>
+<br/><textcolor color="#00000000">---</textcolor>a. Move ships
+<textcolor color="#00000000">---</textcolor>b. Space cannon offense
+<textcolor color="Yellow">3. Space combat</textcolor>
+<br/><textcolor color="#00000000">---</textcolor>a. Anti-fighter barrage
+<textcolor color="#00000000">---</textcolor>b. Announce retreat
+<textcolor color="#00000000">---</textcolor>c. Combat rolls
+<textcolor color="#00000000">---</textcolor>d. Assign hits
+<textcolor color="#00000000">---</textcolor>e. Retreat
+<textcolor color="Yellow">4. Invasion</textcolor>
+<br/><textcolor color="#00000000">---</textcolor>a. Bombardment
+<textcolor color="#00000000">---</textcolor>b. Commit ground forces
+<textcolor color="#00000000">---</textcolor>c. Space cannon defense
+<textcolor color="#00000000">---</textcolor>d. Ground combat
+<textcolor color="#00000000">---</textcolor>e. Establish control
+<textcolor color="Yellow">5. Production</textcolor>
+</Text>
+</Panel>
+</VerticalLayout>
