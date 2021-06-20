@@ -1,0 +1,4 @@
+v40:
+- Add purge option to injected faction heroes.
+- MiltyDraft tier tweak, can now generate 9 slices (instead of 8), stop multiple wormholes in a slice (thanks DangerousGoods).
+- Slice summaries now include wormholes.

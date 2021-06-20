@@ -1,0 +1,10 @@
+v1.39:
+- Change "Articles of War" agenda card to say "gains" not "gets" trade goods.
+- Homebrew can now inject new decks as well as cards (mostly for graveyard discarding).
+- SCPT draft tool now defaults to the semis map; right click to choose prelims (or build the map yourself before using the tool).
+- Add or edit some mouseover text to reflect Dane's 6/15/21 errata:
+-- Nebula no longer require active system to move into.
+-- Mendosa (Saar agent) is WHEN not AFTER.
+-- Prophet's Tears may be used by Nekro.
+
+- [TODO] Milty Draft Tool tweak wormhole spread, allow up to 9 slices.
