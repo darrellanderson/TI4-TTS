@@ -1,7 +1,7 @@
 --- Shared system (and generic resource/influence cards) helper object.
 -- @author GarnetBear added the original influence/resource list.
 -- @author Darrell June 2020 more attributes, planet positions.
--- #include <~/CrLua/Objects/TI4_Helpers/TI4_SystemHelper>
+-- #include <~/TI4-TTS/TI4/Helpers/TI4_SystemHelper>
 
 -- Users should copy this getHelperClient function, and use via:
 --
@@ -1379,6 +1379,20 @@ function summarizeTiles(tiles)
     local i = 0
     local tech = {}
     local legendary = 0
+    local wormholes = {}
+
+    -- local wormholeToSymbol = {
+    --     ['alpha'] = '\u{03B1}',
+    --     ['beta'] = '\u{03B2}',
+    --     ['delta'] = '\u{03B3}',
+    --     ['gamma'] = '\u{03B4}',
+    -- }
+    local wormholeToSymbol = {
+        ['alpha'] = 'α',
+        ['beta'] = 'β',
+        ['delta'] = 'δ',
+        ['gamma'] = 'γ',
+    }
     for _, tile in ipairs(tiles) do
         local system = systemFromTile(tile)
         if not system then
@@ -1394,6 +1408,12 @@ function summarizeTiles(tiles)
                 legendary = legendary + 1
             end
         end
+        for _, wormhole in ipairs(system.wormholes or {}) do
+            local symbol = wormholeToSymbol[wormhole]
+            if symbol then
+                table.insert(wormholes, symbol)
+            end
+        end
     end
     local items = {
         r .. '/' .. i
@@ -1405,6 +1425,10 @@ function summarizeTiles(tiles)
     if legendary > 0 then
         local n = legendary
         table.insert(items, ((n > 1) and n or '') .. 'L')
+    end
+    if #wormholes > 0 then
+        table.sort(wormholes)
+        table.insert(items, table.concat(wormholes, ''))
     end
     return table.concat(items, ' ')
 end
