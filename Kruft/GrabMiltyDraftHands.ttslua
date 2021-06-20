@@ -1,4 +1,4 @@
-local SHEET_ID = ''
+local SHEET_ID = 'PUT ID HERE'
 local NUM_DRAFTS = 1000
 
 #include <~/TI4-TTS/TTS/Spreadsheet>
@@ -37,13 +37,13 @@ end
 function getMiltyDraftsCoroutine()
     local miltyDraftTool = getObjectFromGUID('878e4f')
     local cells = {}
-    local colIdxToSliceCol = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H' }
-    local colIdxToLabelCol = { 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P' }
+    local colIdxToSliceCol = { 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I' }
+    local colIdxToLabelCol = { 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R' }
 
     local function partialUpdate()
         local label = 'slices'
         local id = SHEET_ID
-        local sheet = 'Sheet1'
+        local sheet = 'Sheet2'
         CrLua.TTS.Spreadsheet.update(label, id, sheet, cells)
         local waitUntil = Time.time + 5
         while Time.time < waitUntil do
@@ -59,10 +59,10 @@ function getMiltyDraftsCoroutine()
         until slices
         for colIdx, slice in ipairs(slices) do
             local sliceCol = assert(colIdxToSliceCol[colIdx])
-            cells[sliceCol .. (row + 1001)] = table.concat(slice, ',')
+            cells[sliceCol .. (row )] = table.concat(slice, ',')
 
             local labelCol = assert(colIdxToLabelCol[colIdx])
-            cells[labelCol .. (row + 1001)] = _systemHelper.summarizeTiles(slice)
+            cells[labelCol .. (row)] = _systemHelper.summarizeTiles(slice)
         end
 
         if (row % 20) == 0 then
