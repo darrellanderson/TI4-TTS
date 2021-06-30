@@ -1,0 +1,315 @@
+-- Select one faction, set things up and unpack it for ALL players.
+
+-- "Clone" home system tiles.
+-- Register faction copies with new name, token name.
+-- Rename tokens.
+-- No need to re-register flagship, using generic flagship name is linked.
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    -- Nested tables are considered cross script.  Make a local copy.
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return copyTable(helperObject.call(functionName, parameters)) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+function copyTable(t)
+    if t and type(t) == 'table' then
+        local copy = {}
+        for k, v in pairs(t) do
+            copy[k] = type(v) == 'table' and copyTable(v) or v
+        end
+        t = copy
+    end
+    return t
+end
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _setupHelper = getHelperClient('TI4_SETUP_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
+
+-- There's a bug with hero injection, until the mod updates work around it.
+local HERO_INJECTION_WORKAROUND = true
+
+_factionName = false
+_homeSystem = false
+_homeSystemNameSet = {}
+_pendingDeleteSet = {}
+
+function onLoad(saveState)
+    local names = {}
+    for _, faction in pairs(_factionHelper.allFactions(true)) do
+        if (not faction.source) or faction.source == 'PoK' then
+            table.insert(names, faction.tokenName)
+        end
+    end
+    table.sort(names)
+    for _, name in ipairs(names) do
+        self.addContextMenuItem(name, function() cloneForAll(name) end)
+    end
+
+    --self.addContextMenuItem('test', function() cloneForAll("Vuil'raith Cabal") end)
+end
+
+function onObjectLeaveContainer(container, leave_object)
+    if _homeSystemNameSet[leave_object.getName()] then
+        local myHomeSystem = copyTable(_homeSystem)
+        myHomeSystem.guid = leave_object.getGUID()
+        _systemHelper.injectSystem(myHomeSystem)
+    end
+end
+
+function onObjectDestroy(dying_object)
+    _pendingDeleteSet[dying_object.getGUID()] = nil
+end
+
+function cloneForAll(factionName)
+    assert(type(factionName) == 'string')
+    assert(_setupHelper.getPoK(), 'Please do setup with PoK enabled first')
+    assert(_factionHelper.fromTokenName(factionName), 'unrecognized faction "' .. factionName .. '"')
+    --assert(not _factionName, 'already cloning faction "' .. tostring(_factionName) .. '"')
+    --for _, color in ipairs(_zoneHelper.zones()) do
+    --    assert(not _factionHelper.fromColor(color), color .. ' already has a faction')
+    --end
+    _factionName = factionName
+    startLuaCoroutine(self, 'cloneForAllCoroutine')
+end
+
+function cloneForAllCoroutine()
+    assert(_factionName)
+    _log('cloneForAllCoroutine: "' .. _factionName .. '"')
+
+    -- Get source faction information.
+    local factionsBox = _findOnTable('Factions', 'Bag')
+    local faction = assert(_factionHelper.fromTokenName(_factionName))
+    local boxData = _getFactionBoxData(factionsBox, faction)
+    coroutine.yield(0)
+
+    -- Remember home system for re-injection.
+    _homeSystem = assert(_systemHelper.systemFromTile(faction.home))
+    coroutine.yield(0)
+
+    -- Nuke existing faction setup tools.
+    local dele = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == 'Faction Selector' then
+            table.insert(dele, object)
+        end
+    end
+    for _, object in ipairs(dele) do
+        object.addTag('DELETED_ITEMS_IGNORE')
+        destroyObject(object)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    -- Unpack!
+    for i, color in ipairs(_zoneHelper.zones()) do
+        cloneForOne(faction, boxData, color, i, factionsBox)
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    _log('done')
+    return 1
+end
+
+function cloneForOne(srcFaction, srcBoxData, color, i, factionsBox)
+    assert(type(srcFaction) == 'table')
+    assert(type(srcBoxData) == 'table')
+    assert(type(color) == 'string')
+    assert(type(i) == 'number')
+    assert(type(factionsBox) == 'userdata')
+
+    local dstFaction = _rewriteFaction(srcFaction, color)
+    local dstBoxData = _rewriteBoxData(srcBoxData, srcFaction, dstFaction)
+    coroutine.yield(0)
+
+    _factionHelper.injectFaction(dstFaction)
+    _factionHelper.updateFactions()
+    coroutine.yield(0)
+
+    -- Register generic flagship name.
+    local units = assert(_unitHelper.getUnitOverrides())
+    local srcFlagship = assert(units[srcFaction.flagship])
+    local dstFlagship = copyTable(srcFlagship)
+    dstFlagship.name = color .. ' Flagship'
+    _unitHelper.injectUnitOverride(dstFlagship)
+
+    -- Careful, may have already run (e.g. reloaded from a save).
+    local collisionName = dstFaction.name .. ' Sheet'
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == collisionName then
+            _log('cloneForOne: "' .. collisionName .. '" already set up, skipping unpack')
+            return
+        end
+    end
+
+    local dstBox = spawnObjectData({
+        data              = dstBoxData,
+        position          = factionsBox.getPosition() + vector(0, 5 + 3 * i, 0),
+        sound             = false,
+        snap_to_grid      = false
+    })
+    assert(dstBox)
+    coroutine.yield(0)
+
+    local guid = dstBox.getGUID()
+    _pendingDeleteSet[guid] = true
+    factionsBox.putObject(dstBox)
+    while _pendingDeleteSet[guid] do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+
+    _setupHelper.unpackFaction({
+        color = color,
+        factionTokenName = dstFaction.tokenName,
+        unpackButtonGuid = nil
+    })
+
+    -- Give unpack a moment.
+    local waitUntil = Time.time + 1
+    while Time.time < waitUntil do
+        coroutine.yield(0)
+    end
+    coroutine.yield(0)
+end
+
+-------------------------------------------------------------------------------
+
+function _log(message)
+    printToAll(message, 'Yellow')
+end
+
+function _findOnTable(name, tag)
+    assert(type(name) == 'string' and type(tag) == 'string')
+    for _, object in ipairs(getAllObjects()) do
+        if object.type == tag and object.getName() == name then
+            return object
+        end
+    end
+    error('_findOnTable: missing "' .. name .. '" (' .. tag .. ')')
+end
+
+function _findInContainedObjects(containerObjectData, childName)
+    assert(type(containerObjectData) == 'table' and type(childName) == 'string')
+    for _, objectData in ipairs(containerObjectData.ContainedObjects) do
+        if objectData.Nickname == childName then
+            return objectData
+        end
+    end
+    error('_findInContainedObjects: missing "' .. childName .. '"')
+end
+
+function _getFactionBoxData(factionsBox, faction)
+    assert(type(factionsBox) == 'userdata' and type(faction) == 'table')
+    local factionBoxName = faction.tokenName .. ' Box'
+    return _findInContainedObjects(factionsBox.getData(), factionBoxName)
+end
+
+function _rewriteFaction(faction, color)
+    assert(type(faction) == 'table' and type(color) == 'string')
+    _log('Adding faction table for ' .. color)
+    local myFaction = copyTable(faction)
+    myFaction.name = faction.name .. ' ' .. color
+    myFaction.tokenName = faction.tokenName .. ' ' .. color
+    myFaction.frankenName = color
+    myFaction.shortName = color
+    myFaction.flagship = color .. ' Flagship'
+
+    if HERO_INJECTION_WORKAROUND then
+        myFaction.hero = color .. ' Hero'
+    end
+
+    return myFaction
+end
+
+function _rewriteBoxData(boxData, srcFaction, dstFaction)
+    assert(boxData and type(boxData) == 'table', 'boxData')
+    assert(srcFaction and type(srcFaction) == 'table', 'srcFaction')
+    assert(dstFaction and type(dstFaction) == 'table', 'dstFaction')
+    _log('Adding faction box for ' .. dstFaction.tokenName)
+    local myData = copyTable(boxData)
+
+    -- Give it this object's GUID so it will get a new one one spawn.
+    -- Otherwise it will match the original GUID for bag lookup woes.
+    myData.GUID = self.getGUID()
+
+    assert(myData.Nickname == srcFaction.tokenName .. ' Box')
+    myData.Nickname = dstFaction.tokenName .. ' Box'
+
+    local factionSheet = _findInContainedObjects(myData, srcFaction.name .. ' Sheet')
+    factionSheet.Nickname = dstFaction.name .. ' Sheet'
+
+    local suffix = ' Command Tokens Bag'
+    local bag = _findInContainedObjects(myData, srcFaction.tokenName .. suffix)
+    bag.Nickname = dstFaction.tokenName .. suffix
+    for _, tokenData in ipairs(bag.ContainedObjects) do
+        assert(tokenData.Nickname == srcFaction.tokenName .. ' Command Token')
+        tokenData.Nickname = dstFaction.tokenName .. ' Command Token'
+    end
+
+    local suffix = ' Owner Tokens Bag'
+    local bag = _findInContainedObjects(myData, srcFaction.tokenName .. suffix)
+    bag.Nickname = dstFaction.tokenName .. suffix
+    for _, tokenData in ipairs(bag.ContainedObjects) do
+        assert(tokenData.Nickname == srcFaction.tokenName .. ' Owner Token')
+        tokenData.Nickname = dstFaction.tokenName .. ' Owner Token'
+    end
+
+    local suffix = ' Tech Bag'
+    local bag = _findInContainedObjects(myData, srcFaction.tokenName .. suffix)
+    bag.Nickname = dstFaction.tokenName .. suffix
+
+    local suffix = ' Promissory Bag'
+    local bag = _findInContainedObjects(myData, srcFaction.tokenName .. suffix)
+    bag.Nickname = dstFaction.tokenName .. suffix
+
+    local suffix = ' Planets Bag'
+    local bag = _findInContainedObjects(myData, srcFaction.tokenName .. suffix)
+    bag.Nickname = dstFaction.tokenName .. suffix
+
+    local suffix = ' Leaders Bag'
+    local bag = _findInContainedObjects(myData, srcFaction.tokenName .. suffix)
+    bag.Nickname = dstFaction.tokenName .. suffix
+
+    local suffix = ' Alliance'
+    local card = _findInContainedObjects(myData, (srcFaction.shortName or srcFaction.frankenName) .. suffix)
+    card.Nickname = (dstFaction.shortName or dstFaction.frankenName) .. suffix
+
+    -- Rewrite the name for the home system tile, do the system helper update
+    -- after it gets assigned a GUID when leaving the container.
+    local dstTileName = dstFaction.tokenName .. ' Tile'
+    local tile = _findInContainedObjects(myData, srcFaction.tokenName .. ' Tile')
+    tile.Nickname = dstFaction.tokenName .. ' Tile'
+    _homeSystemNameSet[tile.Nickname] = true
+
+    if HERO_INJECTION_WORKAROUND then
+        local bag = _findInContainedObjects(myData, dstFaction.tokenName .. ' Leaders Bag')
+        local card = _findInContainedObjects(bag, srcFaction.hero)
+        card.Nickname = dstFaction.hero
+    end
+
+    return myData
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)
