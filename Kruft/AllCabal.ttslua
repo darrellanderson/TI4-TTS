@@ -274,10 +274,20 @@ function _rewriteBoxData(boxData, srcFaction, dstFaction)
     local suffix = ' Promissory Bag'
     local bag = _findInContainedObjects(myData, srcFaction.tokenName .. suffix)
     bag.Nickname = dstFaction.tokenName .. suffix
+    for _, cardData in ipairs(bag.ContainedObjects) do
+        local old = cardData.Description
+        old = string.len(old) > 0 and ('\n' .. old) or ''
+        cardData.Description = dstFaction.tokenName .. old
+    end
 
     local suffix = ' Planets Bag'
     local bag = _findInContainedObjects(myData, srcFaction.tokenName .. suffix)
     bag.Nickname = dstFaction.tokenName .. suffix
+    for _, cardData in ipairs(bag.ContainedObjects) do
+        local old = cardData.Description
+        old = string.len(old) > 0 and ('\n' .. old) or ''
+        cardData.Description = dstFaction.tokenName .. old
+    end
 
     local suffix = ' Leaders Bag'
     local bag = _findInContainedObjects(myData, srcFaction.tokenName .. suffix)
