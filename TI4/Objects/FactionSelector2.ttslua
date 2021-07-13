@@ -88,16 +88,26 @@ local _includePoK = true
 --- Expose method of outsiders to select a faction.
 function selectFaction(tokenName)
     assert(type(tokenName) == 'string')
+
+    -- Tolerate a variety of "faction names"
+    local faction = _factionHelper.fromTokenName(tokenName)
+    if not faction then
+        printToAll('selectFaction: no such faction "' .. tokenName .. '"', 'Red')
+        return false
+    end
+    tokenName = faction.tokenName
+
     for _, entry in ipairs(FACTION_ID_AND_TOKEN_NAMES) do
         if entry.tokenName == tokenName then
             local clickFunction = 'selectFaction_' .. entry.id
             self.call(clickFunction)
-            return
+            return true
         end
     end
-    error('selectFaction: no such faction "' .. tokenName .. '"')
-end
 
+    printToAll('selectFaction: faction "' .. tokenName .. '" not available on selection tool, homebrew?', 'Red')
+    return false
+end
 
 function doNothing() end
 
