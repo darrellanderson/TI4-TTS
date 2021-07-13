@@ -53,6 +53,17 @@ function getHelperClient(helperObjectName)
     return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
 end
 
+local function copyTable(t)
+    if t and type(t) == 'table' then
+        local copy = {}
+        for k, v in pairs(t) do
+            copy[k] = type(v) == 'table' and copyTable(v) or v
+        end
+        t = copy
+    end
+    return t
+end
+
 local _buttonHelper = getHelperClient('TI4_BUTTON_HELPER')
 local _gameDataHelper = getHelperClient('TI4_GAME_DATA_HELPER')
 local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
@@ -1983,6 +1994,35 @@ end
 
 function _selectFaction(color, factionTokenName)
     assert(type(color) == 'string' and type(factionTokenName) == 'string')
+
+    -- If this is a homebrew faction cannot select it.
+    -- Instead move the token to player area.
+    local faction = _factionHelper.fromTokenName(factionTokenName)
+    local source = faction.source
+    if source ~= 'base' and source ~= 'PoK' then
+        printToAll('"' .. faction.tokenName .. '" is not a base/PoK faction, right click faction selector for "unpack using faction token"', 'Yellow')
+        local bag = assert(FactionTokens._getBag())
+        local zone = copyTable(_zoneHelper.zoneAttributes(color))
+        if not zone then
+            error('missing zone "' .. color .. '"')
+        end
+        local lookFor = faction.tokenName .. ' Faction Token'
+        for _, entry in ipairs(bag.getObjects()) do
+            if entry.name == lookFor then
+                local p = zone.center
+                p.y = p.y + 3
+                bag.takeObject({
+                    position          = p,
+                    rotation          = zone.rotation,
+                    smooth            = true,
+                    index             = entry.index,
+                })
+                return
+            end
+        end
+        error('missing faction token "' .. factionTokenName .. '"')
+        return
+    end
 
     local factionSelector = false
     for _, object in ipairs(getAllObjects()) do

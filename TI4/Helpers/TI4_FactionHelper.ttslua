@@ -45,6 +45,7 @@ local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
 local _factionAttributes = {
 
     ['The Arborec'] = {
+        source = 'base',
         tokenName = 'Arborec',
         frankenName = 'Arborec',
         home = 5,
@@ -62,6 +63,7 @@ local _factionAttributes = {
     },
 
     ['The Barony Of Letnev'] = {
+        source = 'base',
         tokenName = 'Barony of Letnev',
         frankenName = 'Letnev',
         home = 10,
@@ -79,6 +81,7 @@ local _factionAttributes = {
     },
 
     ['The Clan Of Saar'] = {
+        source = 'base',
         tokenName = 'Clan of Saar',
         frankenName = 'Saar',
         home = 11,
@@ -96,6 +99,7 @@ local _factionAttributes = {
     },
 
     ['The Embers Of Muaat'] = {
+        source = 'base',
         tokenName = 'Embers of Muaat',
         frankenName = 'Muaat',
         home = 4,
@@ -113,6 +117,7 @@ local _factionAttributes = {
     },
 
     ['The Emirates Of Hacan'] = {
+        source = 'base',
         tokenName = 'Emirates of Hacan',
         frankenName = 'Hacan',
         home = 16,
@@ -130,6 +135,7 @@ local _factionAttributes = {
     },
 
     ['The Federation Of Sol'] = {
+        source = 'base',
         tokenName = 'Federation of Sol',
         frankenName = 'Sol',
         home = 1,
@@ -147,6 +153,7 @@ local _factionAttributes = {
     },
 
     ['The Ghosts Of Creuss'] = {
+        source = 'base',
         tokenName = 'Ghosts of Creuss',
         frankenName = 'Creuss',
         home = 51,
@@ -164,6 +171,7 @@ local _factionAttributes = {
     },
 
     ['The L1Z1X Mindnet'] = {
+        source = 'base',
         tokenName = 'L1Z1X Mindnet',
         frankenName = 'L1Z1X',
         home = 6,
@@ -181,6 +189,7 @@ local _factionAttributes = {
     },
 
     ['The Mentak Coalition'] = {
+        source = 'base',
         tokenName = 'Mentak Coalition',
         frankenName = 'Mentak',
         home = 2,
@@ -198,6 +207,7 @@ local _factionAttributes = {
     },
 
     ['The Naalu Collective'] = {
+        source = 'base',
         tokenName = 'Naalu Collective',
         frankenName = 'Naalu',
         home = 9,
@@ -215,6 +225,7 @@ local _factionAttributes = {
     },
 
     ['The Nekro Virus'] = {
+        source = 'base',
         tokenName = 'Nekro Virus',
         frankenName = 'Nekro',
         home = 8,
@@ -233,6 +244,7 @@ local _factionAttributes = {
     },
 
     ["The Sardakk N'orr"] = {
+        source = 'base',
         tokenName = "Sardakk N'orr",
         frankenName = 'Sardakk',
         shortName = "N'orr",
@@ -251,6 +263,7 @@ local _factionAttributes = {
     },
 
     ['The Universities of Jol-Nar'] = {
+        source = 'base',
         tokenName = 'Universities of Jol-Nar',
         frankenName = 'Jol-Nar',
         home = 12,
@@ -268,6 +281,7 @@ local _factionAttributes = {
     },
 
     ['The Winnu'] = {
+        source = 'base',
         tokenName = 'Winnu',
         frankenName = 'Winnu',
         home = 7,
@@ -286,6 +300,7 @@ local _factionAttributes = {
     },
 
     ['The Xxcha Kingdom'] = {
+        source = 'base',
         tokenName = 'Xxcha Kingdom',
         frankenName = 'Xxcha',
         home = 14,
@@ -303,6 +318,7 @@ local _factionAttributes = {
     },
 
     ['The Yin Brotherhood'] = {
+        source = 'base',
         tokenName = 'Yin Brotherhood',
         frankenName = 'Yin',
         home = 3,
@@ -320,6 +336,7 @@ local _factionAttributes = {
     },
 
     ['The Yssaril Tribes'] = {
+        source = 'base',
         tokenName = 'Yssaril Tribes',
         frankenName = 'Yssaril',
         home = 15,
@@ -2219,7 +2236,7 @@ end
 
 _heroNameSet = false
 _hasContextMenuCardNameSet = false
-local function _hasContextMenuItems(object)
+function _hasContextMenuItems(object)
     if not _hasContextMenuCardNameSet then
         _heroNameSet = {}
         _hasContextMenuCardNameSet = {}
@@ -2242,7 +2259,7 @@ local function _hasContextMenuItems(object)
     end
 end
 
-local function _applyContextMenuItems(object)
+function _applyContextMenuItems(object)
     local name = object.getName()
 
     local factionCardAbilityFunc = _factionCardNameToAbilityFunc and _factionCardNameToAbilityFunc[name] or false
