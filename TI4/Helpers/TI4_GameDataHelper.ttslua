@@ -128,7 +128,7 @@ function asyncGatherDataCoroutine()
         turn = Turns.turn_color or '',
         isPoK = _setupHelper.getPoK() and true or false,
         isFranken = _factionHelper.isFrankenEnabled() and true or false,
-        scoreboard = Score.getScoreboardPoints(),
+        scoreboard = _setupHelper.getGamePoints(),
         players = {},
         periodicSeconds = _timerPeriodicSeconds,
     }
@@ -1573,13 +1573,6 @@ end
 
 function Score.getScoreboard()
     return Objects.getByName('Scoreboard')
-end
-
-function Score.getScoreboardPoints()
-    local scoreboard = Score.getScoreboard()
-    if scoreboard then
-        return scoreboard.is_face_down and 14 or 10
-    end
 end
 
 function Score._getScoreFromToken(scoreboard, ownerToken)
