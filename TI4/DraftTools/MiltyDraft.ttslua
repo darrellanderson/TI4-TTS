@@ -1999,7 +1999,7 @@ function _selectFaction(color, factionTokenName)
     -- Instead move the token to player area.
     local faction = _factionHelper.fromTokenName(factionTokenName)
     local source = faction.source
-    if source ~= 'base' and source ~= 'PoK' then
+    if source and source ~= 'base' and source ~= 'PoK' then
         printToAll('"' .. faction.tokenName .. '" is not a base/PoK faction, right click faction selector for "unpack using faction token"', 'Yellow')
         local bag = assert(FactionTokens._getBag())
         local zone = copyTable(_zoneHelper.zoneAttributes(color))
