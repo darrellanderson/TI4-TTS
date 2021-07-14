@@ -2,7 +2,7 @@
 -- @author the_mantis (original TI4 tokensweeper unpack)
 -- @author Milty (per-color unpack, player-count zones)
 -- @author Darrell (gathered code into this shared helper)
--- #include <~/CrLua/Objects/TI4_Helpers/TI4_SetupHelper>
+-- #include <~/TI4-TTS/TI4/Helpers/TI4_SetupHelper>
 
 -- Users should copy this getHelperClient function, and use via:
 --
@@ -207,8 +207,9 @@ local SetupCards = {}
 
 local _setupTime = false  -- use os.time() for a durable epoch-based timestamp, Time.time resets on TTS load
 local _includePoK = false
+local _gamePoints = 10
+
 local _putPendingGuidSet = {}
-local _deletedItemsBagGuid = false
 
 -------------------------------------------------------------------------------
 
@@ -219,6 +220,15 @@ end
 
 function getPoK()
     return _includePoK
+end
+
+function setGamePoints(value)
+    assert(type(value) == 'number')
+    _gamePoints = value
+end
+
+function getGamePoints()
+    return _gamePoints
 end
 
 function getGameLengthSeconds()
@@ -249,19 +259,7 @@ end
 
 function _safeDestroyObject(object)
     assert(type(object) == 'userdata')
-    local deletedItems = _deletedItemsBagGuid and getObjectFromGUID(_deletedItemsBagGuid)
-    if not deletedItems then
-        for _, object in ipairs(getAllObjects()) do
-            if object.tag == 'Bag' and object.getName() == 'TI4 Deleted Items' then
-                _deletedItemsBagGuid = object.getGUID()
-                deletedItems = object
-                break
-            end
-        end
-    end
-    if deletedItems then
-        deletedItems.call('ignoreGuid', object.getGUID())
-    end
+    object.setTags({'DELETED_ITEMS_IGNORE'})
     destroyObject(object)
 end
 
@@ -404,6 +402,57 @@ local function yieldForSeconds(seconds)
 end
 
 -------------------------------------------------------------------------------
+
+--- Prepare scoreboard for game points use.
+function SetupGeneric.scoreboard()
+    debugLog('SetupGeneric.scoreboard')
+
+    local scoreboard = false
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == 'Scoreboard' then
+            scoreboard = object
+            break
+        end
+    end
+    assert(scoreboard, 'missing scoreboard')
+
+    local points = getGamePoints()
+    local wantFaceDown = points > 10
+
+    if scoreboard and scoreboard.is_face_down ~= wantFaceDown then
+        scoreboard.setLock(false)
+        scoreboard.flip()
+        Wait.time(function() scoreboard.setLock(true) end, 5)
+    end
+
+    local decals = {}
+    if points > 10 and points < 14 then
+        --local u = -(p.x - 3.25) / 6.5
+        local x0 = (points - 6.5) / 15 * 6.5
+        local x1 = 3.3
+        local sheetColorJpg = 'http://cloud-3.steamusercontent.com/ugc/1499090241450210706/2DA6B757A764A6BC9F6051ABD64E6291135FBA0A/'
+        table.insert(decals, {
+            name = 'cover',
+            url = sheetColorJpg,
+            position = {
+                x = (x0 + x1) / 2,
+                y = -0.01, -- bottom is at 0 for model
+                z = -0.02
+            },
+            rotation = {
+                x = 270, -- facing down
+                y = 0,
+                z = 00
+            },
+            scale = { -- scale x,y is size in world units
+                x = (x1 - x0),
+                y = 0.98,
+                z = 1
+            }
+        })
+    end
+    scoreboard.setDecals(decals)
+end
 
 --- Find the "Setup Bag".
 function SetupGeneric.getSetupBag()
@@ -1108,9 +1157,11 @@ function setup(params)
     assert(not params.extraRings or type(params.extraRings) == 'number')
     assert(not params.includePoK or type(params.includePoK) == 'boolean')
     assert(not params.playerTools or type(params.playerTools) == 'boolean')
+    assert(not params.gamePoints or type(params.gamePoints) == 'number')
 
     _setupTime = os.time()
     setPoK(params.includePoK or false)
+    setGamePoints(params.gamePoints or 10)
 
     table.insert(_setupQueue, params)
     startLuaCoroutine(self, 'setupCoroutine')
@@ -1166,6 +1217,9 @@ function setupCoroutine()
         end
         coroutine.yield(0)
     end
+
+    SetupGeneric.scoreboard()
+    coroutine.yield(0)
 
     _zoneHelper.drawBordersVectorLines()
     coroutine.yield(0)
@@ -2153,7 +2207,7 @@ function SetupFranken.unpackStartingTech(color)
 end
 
 function SetupFranken.unpackStartingUnits(color)
-    local faction = false
+    local startingUnitsFaction = false
     local homeSystemTile = false
 
     local guidToSystem = _systemHelper.systems()
@@ -2163,10 +2217,10 @@ function SetupFranken.unpackStartingUnits(color)
         local tokenName2 = string.match(name, '^(.*) Starting Units$')
         local tokenName = tokenName1 or tokenName2
         if tokenName and _zoneHelper.zoneFromPosition(object.getPosition()) == color then
-            if faction then
+            if startingUnitsFaction then
                 error('SetupFranken.unpackStartingUnits: multiple starting unit tokens for ' .. color)
             end
-            faction = _factionHelper.fromTokenName(tokenName)
+            startingUnitsFaction = _factionHelper.fromTokenName(tokenName)
         end
 
         local system = guidToSystem[object.getGUID()]
@@ -2177,7 +2231,7 @@ function SetupFranken.unpackStartingUnits(color)
             homeSystemTile = object
         end
     end
-    if not faction then
+    if not startingUnitsFaction then
         _safePrintToColor('SetupFranken.unpackStartingUnits: missing starting units for ' .. color .. ', skipping starting units', color, 'Red')
         return
     end
@@ -2195,8 +2249,19 @@ function SetupFranken.unpackStartingUnits(color)
         return
     end
 
-    _safePrintToColor('SetupFranken.unpackStartingUnits: ' .. faction.tokenName .. ' starting units', color, color)
-    SetupFaction.unpackUnits(color, faction, homeSystemTile)
+    -- Create a dummy faction table with the combination of starting units and flagship name.
+    -- FactionHelper sould probably be overriding this but would need to remember original
+    -- values and such.  This isn't too wacky given what franken is already doing.
+    local myFaction = assert(_factionHelper.fromColor(color))
+    local dummyFaction = {
+        name = myFaction.name,
+        tokenName = myFaction.tokenName,
+        startingUnits = startingUnitsFaction.startingUnits,
+        flagship = myFaction.flagship -- FactionHelper does set this for Franken
+    }
+
+    _safePrintToColor('SetupFranken.unpackStartingUnits: ' .. dummyFaction.tokenName .. ' starting units', color, color)
+    SetupFaction.unpackUnits(color, dummyFaction, homeSystemTile)
 end
 
 local _unpackFrankenQueue = {}
@@ -2295,6 +2360,7 @@ function unpackFrankenCoroutine()
 
     -- Make sure the faction helper knows about the faction before unpacking tokens.
     _factionHelper.updateFactions()
+
     local quantity = commandTokensBag.getQuantity()
     _factionHelper.tintTokens({ color = color })
     while commandTokensBag.getQuantity() < quantity do
@@ -2444,15 +2510,23 @@ function onLoad(saveState)
     if saveState then
         _setupTime = saveState._setupTime
         _includePoK = saveState._includePoK
+        _gamePoints = saveState._gamePoints
     end
 
-    self.addContextMenuItem('Fix unit scale', fixUnitScale, false)
+    self.addContextMenuItem('Fix unit scale', fixUnitScale)
+
+    local function testScoreboard()
+        setGamePoints(11)
+        SetupGeneric.scoreboard()
+    end
+    self.addContextMenuItem('Test 11 points', testScoreboard)
 end
 
 function onSave()
     return JSON.encode({
         _setupTime = _setupTime,
-        _includePoK = _includePoK
+        _includePoK = _includePoK,
+        _gamePoints = _gamePoints,
     })
 end
 
