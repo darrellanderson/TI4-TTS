@@ -1,12 +1,13 @@
 -- @author Darrell for UI generation scripting
 -- @author Milty for game setup
--- #include <~/CrLua/Objects/TI4_GameSetupOptions>
+-- #include <~/TI4-TTS/TI4/Objects/GameSetupOptions>
 
 local _config = false
 
 local DEFAULT_CONFIG = {
     playerCount = 6,
     extraRings = 0,
+    gamePoints = 10,
     usePoK = false,
     useCodex1 = false,
     useCodex2 = false,
@@ -53,8 +54,8 @@ local CONTRIBUTORS = {
     'Snorecerer',
     'Steve "Vorpal Dice Press"',  -- TI4/TTS instructions PDF
     'Tactic Blue',
-    'TheParsleySage',  -- game data analysis
     'ThatRobHuman',
+    'TheParsleySage',  -- game data analysis
     'Toppopia',
     'Volverbot',  -- Numpad hot keys
     'Wekker',
@@ -95,19 +96,20 @@ local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
 
 local _getByNameCache = {}
 local _setupInProgress = false
+local _updateUiFromConfigWaitId = false
 
 -------------------------------------------------------------------------------
 
 function onLoad()
     _config = DEFAULT_CONFIG
     Wait.frames(_createUI, 2)
-    Wait.frames(updateUiFromConfig, 4)
+    scheduleUpdateUiFromConfig(4)
 end
 
 function onPlayerConnect(playerId)
     -- UI does not seem to appear for new players, recreating it fixes.
     Wait.frames(_createUI, 2)
-    Wait.frames(updateUiFromConfig, 4)
+    scheduleUpdateUiFromConfig(4)
 end
 
 function _createUI()
@@ -159,6 +161,66 @@ function _createUI()
                 }
             }
         }
+    end
+
+    local function slider(label, id, minValue, maxValue)
+        assert(type(id) == 'string' and type(minValue) == 'number' and type(maxValue) == 'number')
+        assert(maxValue > minValue)
+
+        local height = 20
+        return {
+            tag = 'HorizontalLayout',
+            attributes = {
+                childForceExpandWidth = true,
+                childForceExpandHeight = false,
+            },
+            children = {
+                {
+                    tag = 'Text',
+                    attributes = {
+                        fontSize = 16,
+                        color = 'White',
+                        alignment = 'MiddleRight',
+                        minWidth = 110,
+                        minHeight = height,
+                    },
+                    value = label
+                },
+                {
+                    tag = 'Slider',
+                    attributes = {
+                        id = id,
+                        minValue = minValue,
+                        maxValue = maxValue,
+                        wholeNumbers = true,
+                        onValueChanged = 'onSliderValueChanged',
+                        minWidth = 100,
+                        minHeight = height,
+                        rectAlignment = 'MiddleCenter'
+                    },
+                    value = minValue,
+                },
+                {
+                    tag = 'Text',
+                    attributes = {
+                        id = id .. 'Value',
+                        fontSize = 16,
+                        color = 'White',
+                        alignment = 'MiddleLeft',
+                        horizontalOverflow = 'Overflow',
+                        verticalOverflow = 'Overflow',
+                        minWidth = 20,
+                        minHeight = height,
+                    },
+                    value = minValue,
+                },
+
+            }
+        }
+    end
+
+    local function spacer()
+        return { tag = 'Text', attributes = { fontSize = 8 }}
     end
 
     local defaultColorBlock = '#FFFFFF|#1F45FC|#38ACEC|rgba(0.78,0.78,0.78,0.5)'
@@ -249,21 +311,20 @@ function _createUI()
             {
                 tag = 'VerticalLayout',
                 attributes = {
-                    padding = '10 10 5 70',
+                    padding = '10 10 18 70',
                 },
                 children = {
                     text('title', 'TI4 Game Setup Options'),
+                    spacer(),
 
-                    text('heading', 'Player count'),
-                    toggleGroup('playerCount', { 2, 3, 4, 5, 6, 7, 8 }),
-
-                    text('heading', 'Extra map rings'),
-                    toggleGroup('extraRings', { 0, 1, 2, 3 }),
+                    slider('Player count', 'playerCount', 2, 8),
+                    slider('Extra map rings', 'extraRings', 0, 4),
+                    slider('Game points', 'gamePoints', 10, 14),
+                    spacer(),
 
                     toggle('usePoK', 'Prophecy of Kings expansion'),
                     toggle('useCodex1', 'Codex 1 action cards'),
                     toggle('useCodex2', 'Codex 2 relic cards'),
-                    toggle('14ptGame', '14 point game'),
                     toggle('playerTools', 'Player tools (boards, build area)'),
                     toggle('gamedataOptIn', 'Share anonymized game stats'),
                 }
@@ -316,18 +377,26 @@ function _createUI()
 end
 
 function updateUiFromConfig()
+    self.UI.setAttribute('playerCount', 'value', _config.playerCount)
+    self.UI.setValue('playerCountValue', _config.playerCount)
+    self.UI.setAttribute('extraRings', 'value', _config.extraRings)
+    self.UI.setValue('extraRingsValue', _config.extraRings)
+    self.UI.setAttribute('gamePoints', 'value', _config.gamePoints)
+    self.UI.setValue('gamePointsValue', _config.gamePoints)
+
     self.UI.setAttribute('usePoK', 'isOn', _config.usePoK)
     self.UI.setAttribute('useCodex1', 'isOn', _config.useCodex1)
     self.UI.setAttribute('useCodex2', 'isOn', _config.useCodex2)
-    self.UI.setAttribute('14ptGame', 'isOn', _config.is14ptGame)
     self.UI.setAttribute('playerTools', 'isOn', _config.playerTools)
     self.UI.setAttribute('gamedataOptIn', 'isOn', _config.gamedataOptIn)
-    for i = 3, 8 do
-        self.UI.setAttribute('playerCount' .. i, 'isOn', _config.playerCount == i)
+end
+
+function scheduleUpdateUiFromConfig(delayFrameCount)
+    if _updateUiFromConfigWaitId then
+        Wait.stop(_updateUiFromConfigWaitId)
+        _updateUiFromConfigWaitId = false
     end
-    for i = 0, 2 do
-        self.UI.setAttribute('extraRings' .. i, 'isOn', _config.extraRings == i)
-    end
+    _updateUiFromConfigWaitId = Wait.frames(updateUiFromConfig, delayFrameCount or 2)
 end
 
 -------------------------------------------------------------------------------
@@ -348,25 +417,12 @@ function onToggleValueChanged(player, value, id)
     local valueAsBool = string.lower(value) == 'true' and true or false
     assert(type(valueAsBool) == 'boolean')
 
-    local playerCount = string.match(id, '^playerCount(.*)$')
-    local extraRings = string.match(id, '^extraRings(.*)$')
-
-    if playerCount then
-        if valueAsBool then
-            _config.playerCount = tonumber(playerCount)
-        end
-    elseif extraRings then
-        if valueAsBool then
-            _config.extraRings = tonumber(extraRings)
-        end
-    elseif id == 'usePoK' then
+    if id == 'usePoK' then
         _config.usePoK = valueAsBool
     elseif id == 'useCodex1' then
         _config.useCodex1 = valueAsBool
     elseif id == 'useCodex2' then
         _config.useCodex2 = valueAsBool
-    elseif id == '14ptGame' then
-        _config.is14ptGame = valueAsBool
     elseif id == 'playerTools' then
         _config.playerTools = valueAsBool
     elseif id == 'gamedataOptIn' then
@@ -374,11 +430,20 @@ function onToggleValueChanged(player, value, id)
     else
         error('onToggleValueChanged: unknown toggle "' .. id .. '"')
     end
+    scheduleUpdateUiFromConfig()
+end
 
-    if _config.playerCount > 6 then
-        _config.extraRings = math.max(_config.extraRings, 1)
+function onSliderValueChanged(player, value, id)
+    value = tonumber(value)
+
+    if id == 'playerCount' then
+        _config.playerCount = value
+    elseif id == 'extraRings' then
+        _config.extraRings = value
+    elseif id == 'gamePoints' then
+        _config.gamePoints = value
     end
-    Wait.frames(updateUiFromConfig, 2)
+    scheduleUpdateUiFromConfig()
 end
 
 -------------------------------------------------------------------------------
@@ -402,13 +467,18 @@ end
 function setupGameCoroutine()
     assert(type(_config.playerCount) == 'number')
     assert(type(_config.extraRings) == 'number')
+    assert(type(_config.gamePoints) == 'number')
     assert(type(_config.usePoK) == 'boolean')
     assert(type(_config.useCodex1) == 'boolean')
     assert(type(_config.useCodex2) == 'boolean')
-    assert(type(_config.is14ptGame) == 'boolean')
-    assert(type(_config.isRightClick) == 'boolean')
     assert(type(_config.playerTools) == 'boolean')
     assert(type(_config.gamedataOptIn) == 'boolean')
+    assert(type(_config.isRightClick) == 'boolean')
+
+    -- Require at least one extra ring for 7+ players.
+    if _config.playerCount > 6 then
+        _config.extraRings = math.max(_config.extraRings, 1)
+    end
 
     print('Setting up for ' .. _config.playerCount .. ' players with ' .. _config.extraRings .. ' extra map rings')
 
@@ -421,16 +491,14 @@ function setupGameCoroutine()
     setupCodex2(_config.useCodex2)
     coroutine.yield(0)
 
-    setup14ptGame(_config.is14ptGame)
-    coroutine.yield(0)
-
     _setupHelper.setup({
         playerCount = _config.playerCount,
         extraRings = _config.extraRings,
-        isRightClick = _config.isRightClick,
+        gamePoints = _config.gamePoints,
         includePoK = _config.usePoK,
         playerTools = _config.playerTools and not _config.isRightClick,
         gamedataOptIn = _config.gamedataOptIn,
+        isRightClick = _config.isRightClick,
     })
     coroutine.yield(0)
 
@@ -450,16 +518,6 @@ function setupCodex2(useCodex2)
         _addCards('Variant Pieces (Searching Recommended)', 'Relics', 'Codex 2')
     else
         _removeCards('Variant Pieces (Searching Recommended)', 'Relics', 'Codex 2')
-    end
-end
-
-function setup14ptGame(is14ptGame)
-    local scoreboard = _getByName('Scoreboard')
-    local expect = is14ptGame and true or false
-    if scoreboard and scoreboard.is_face_down ~= expect then
-        scoreboard.setLock(false)
-        scoreboard.flip()
-        Wait.time(function() scoreboard.setLock(true) end, 5)
     end
 end
 
@@ -701,21 +759,7 @@ function postSetupPoK()
 
     if _config.usePoK then
         -- Remove other cards, per PoK setup.
-        local removeCards = {
-            'Core Mining',
-            'Demilitarized Zone',
-            'Holy Planet of Ixth',
-            'Representative Government',
-            'Research Team: Biotic',
-            'Research Team: Cybernetic',
-            'Research Team: Propulsion',
-            'Research Team: Warfare',
-            'Senate Sanctuary',
-            'Shard of the Throne',
-            'Terraforming Initiative',
-            'The Crown of Emphidia',
-            'The Crown of Thalnos',
-        }
+        local removeCards = _deckHelper.getRemoveForPoKCardNames()
         for _, cardName in ipairs(removeCards) do
             local deckName = assert(_deckHelper.getDeckName(cardName), 'getDeckName')
             local deckGuid = assert(_deckHelper.getDeck(deckName), 'getCardName')
