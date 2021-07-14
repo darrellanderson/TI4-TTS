@@ -205,13 +205,13 @@ local DECKS = {
                 'Committee Formation',
                 'Compensated Disarmament',
                 'Conventions of War',
-                'Core Mining',
-                'Demilitarized Zone',
+                ['Core Mining'] = { removeForPoK = true },
+                ['Demilitarized Zone'] = { removeForPoK = true },
                 'Economic Equality',
                 'Enforced Travel Ban',
                 'Executive Sanctions',
                 'Fleet Regulations',
-                ['Holy Planet of Ixth'] = { score = true },
+                ['Holy Planet of Ixth'] = { score = true, removeForPoK = true },
                 'Homeland Defense Act',
                 'Imperial Arbiter',
                 'Incentive Program',
@@ -233,19 +233,19 @@ local DECKS = {
                 'Public Execution',
                 'Publicize Weapon Schematics',
                 'Regulated Conscription',
-                'Representative Government',
-                'Research Team: Biotic',
-                'Research Team: Cybernetic',
-                'Research Team: Propulsion',
-                'Research Team: Warfare',
+                ['Representative Government'] = { removeForPoK = true },
+                ['Research Team: Biotic'] = { removeForPoK = true },
+                ['Research Team: Cybernetic'] = { removeForPoK = true },
+                ['Research Team: Propulsion'] = { removeForPoK = true },
+                ['Research Team: Warfare'] = { removeForPoK = true },
                 ['Seed of an Empire'] = { score = true },
-                'Senate Sanctuary',
-                ['Shard of the Throne'] = { score = true },
+                ['Senate Sanctuary'] = { removeForPoK = true },
+                ['Shard of the Throne'] = { score = true, removeForPoK = true },
                 'Shared Research',
                 'Swords to Plowshares',
-                'Terraforming Initiative',
-                ['The Crown of Emphidia'] = { score = true },
-                'The Crown of Thalnos',
+                ['Terraforming Initiative'] = { removeForPoK = true },
+                ['The Crown of Emphidia'] = { score = true, removeForPoK = true },
+                ['The Crown of Thalnos'] = { removeForPoK = true },
                 'Unconventional Measures',
                 'Wormhole Reconstruction',
                 'Wormhole Research',
@@ -822,6 +822,20 @@ function getScoreCardNameSet()
     for cardName, cardAttrs in pairs(_cardNameToCardAttributes) do
         if cardAttrs.score then
             result[cardName] = true
+        end
+    end
+    return result
+end
+
+--- Expose cards to remove from game for PoK.
+function getRemoveForPoKCardNames()
+    local result = {}
+    local seen = {}
+    _getCardAttributes('bogus')  -- make sure table exists
+    for cardName, cardAttrs in pairs(_cardNameToCardAttributes) do
+        if cardAttrs.removeForPoK and not seen[cardName] then
+            table.insert(result, cardName)
+            seen[cardName] = true
         end
     end
     return result
