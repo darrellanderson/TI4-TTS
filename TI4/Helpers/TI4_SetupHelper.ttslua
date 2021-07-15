@@ -112,15 +112,9 @@ local SetupColor = {
     DEFAULT_COLOR_LIST = { 'White', 'Blue', 'Purple', 'Yellow', 'Red', 'Green', 'Orange', 'Pink', 'Brown' },
 
     HAND = {
-        ACTIVE = {
-            OFFSET = { x = 0, y = 4, z = 21, dzMiddle = 5, yRot = 180 },
-            -- Max SCALE.x is 22.  10 cards need 15.5, start overlapping at 11.
-            SCALE = { x = 15.5, y = 8, z = 4 }
-        },
-        INACTIVE = {
-            POSITION = { x = 150, y = 4, z = 100, dx = 0, dz = -30 },
-            SCALE = { x = 1, y = 4, z = 1 }
-        },
+        OFFSET = { x = 0, y = 4, z = 21, dzMiddle = 5, yRot = 180 },
+        -- Max SCALE.x is 22.  10 cards need 15.5, start overlapping at 11.
+        SCALE = { x = 15.5, y = 8, z = 4 }
     },
 
     -- The box with per-color items, hover above the player area.
@@ -665,50 +659,38 @@ end
 
 -------------------------------------------------------------------------------
 
---- Move hands to zone
-function SetupColor.transformHands()
-    debugLog('SetupColor.transformHands')
+function SetupColor.removeHands()
+    debugLog('SetupColor.removeAllHands')
+    for _, object in ipairs(getObjects()) do
+        if object.type == 'Hand' then
+            _safeDestroyObject(object)
+        end
+    end
+end
+
+function SetupColor.createHands()
+    debugLog('SetupColor.createHands')
 
     local zonesAttributes = _zoneHelper.zonesAttributes()
-    local playerCount = #zonesAttributes
+    for i, zoneAttrs in ipairs(zonesAttributes) do
+        local color = assert(SetupColor.DEFAULT_COLOR_LIST[i]) -- zoneAttrs.color not yet set
 
-    for i, color in ipairs(SetupColor.DEFAULT_COLOR_LIST) do
-        if i <= playerCount then
-            local zoneCenter = zonesAttributes[i].center
-            local position = offsetPosition(zoneCenter, SetupColor.HAND.ACTIVE.OFFSET)
-            local rotation = offsetRotation(zoneCenter, SetupColor.HAND.ACTIVE.OFFSET)
+        local zoneCenter = zoneAttrs.center
+        local position = offsetPosition(zoneCenter, SetupColor.HAND.OFFSET)
+        local rotation = offsetRotation(zoneCenter, SetupColor.HAND.OFFSET)
 
-            -- If this zone is between two like-center-z zones, move hand to
-            -- avoid cards flying between left/right neighbors from hitting
-            -- this hand.  NOTE: this fails if there are 5 players on a side!
-            -- Give a little wiggle room in case zones are built programatically
-            -- and could have floating point error differences for "same".
-            local thisZ = zoneCenter.z
-            local prevZ = zonesAttributes[i - 1] and zonesAttributes[i - 1].center.z or math.huge
-            local nextZ = zonesAttributes[i + 1] and zonesAttributes[i + 1].center.z or math.huge
-            local epsilon = 0.1
-            if math.abs(thisZ - prevZ) < epsilon and math.abs(thisZ - nextZ) < epsilon then
-                local dz = SetupColor.HAND.ACTIVE.OFFSET.dzMiddle
-                position.z = position.z + dz * (position.z > 0 and 1 or -1)
-            end
+        -- Objects moving through a hand (due to a "deal") no longer get pulled
+        -- into hands (confirm?).  No need to offset the middle hand.
 
-            Player[color].setHandTransform({
-                position = position,
-                rotation = rotation,
-                scale    = SetupColor.HAND.ACTIVE.SCALE
-            })
-        else
-            local nonPlayerIndex = (i - playerCount) - 1
-            Player[color].setHandTransform({
-                position = {
-                    x = SetupColor.HAND.INACTIVE.POSITION.x + nonPlayerIndex * (SetupColor.HAND.INACTIVE.POSITION.dx or 0),
-                    y = SetupColor.HAND.INACTIVE.POSITION.y,
-                    z = SetupColor.HAND.INACTIVE.POSITION.z + nonPlayerIndex * (SetupColor.HAND.INACTIVE.POSITION.dz or 0)
-                },
-                rotation = { 0, 0, 0 },
-                scale = SetupColor.HAND.INACTIVE.SCALE
-            })
-        end
+        local hand = spawnObject({
+            type              = 'HandTrigger',
+            position          = position,
+            rotation          = rotation,
+            scale             = SetupColor.HAND.SCALE,
+            sound             = false,
+            snap_to_grid      = false,
+        })
+        hand.setValue(color)
     end
 end
 
@@ -1193,7 +1175,10 @@ function setupCoroutine()
             extraRings = extraRings
         })
 
-        SetupColor.transformHands()
+        SetupColor.removeHands()
+        coroutine.yield(0)
+
+        SetupColor.createHands()
         coroutine.yield(0)
 
         SetupGeneric.unpack(setupBag, extraRings)
