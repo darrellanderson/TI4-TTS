@@ -1031,9 +1031,9 @@ function applyMechPlusOneHitPerTwoUnitUpgrade(unitAttrs)
     local guidToColor = _zoneHelper.zonesFromPositions(guidToPosition)
     local seen = {}
     local count = 0
-    for guid, color in pairs(guidToColor) do
+    for guid, cardColor in pairs(guidToColor) do
         local name = guidToName[guid]
-        if not seen[name] then
+        if cardColor == color and not seen[name] then
             count = count + 1
             seen[name] = true
         end
