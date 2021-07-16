@@ -460,6 +460,9 @@ function recomputeInfluence(includeFaceDown)
             influence = 1
         end
         voteCounter.setValue(influence)
+        -- There's a TTS bug where vote counters may not update for a non-host.
+        -- Store the value in the description as well.
+        voteCounter.setDescription(influence .. ' available')
     end
 
     return colorToInfluence
