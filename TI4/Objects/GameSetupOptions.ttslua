@@ -100,10 +100,18 @@ local _updateUiFromConfigWaitId = false
 
 -------------------------------------------------------------------------------
 
-function onLoad()
+function onLoad(saveState)
     _config = DEFAULT_CONFIG
+    if saveState and string.len(saveState) > 0 then
+        _config = JSON.decode(saveState) or _config
+    end
+
     Wait.frames(_createUI, 2)
     scheduleUpdateUiFromConfig(4)
+end
+
+function onSave()
+    return JSON.encode(_config)
 end
 
 function onPlayerConnect(playerId)
@@ -923,7 +931,7 @@ function _addCards(containerName, deckName, sourceName)
         end
     end
     if not guid then
-        printToAll('_addCards: missing "' .. containerName .. '/' .. name .. '"', 'Yellow')
+        --printToAll('_addCards: missing "' .. containerName .. '/' .. name .. '"', 'Yellow')
         return -- this happens if the deck is already on the table
     end
 
