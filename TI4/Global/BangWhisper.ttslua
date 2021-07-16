@@ -8,6 +8,96 @@ function onChat(message, srcPlayer)
         return false -- originial suppressed message
     end
 
+    -- The teal color can see !whisper messages (for streamers).
+    if string.lower(message) == '!tealme' then
+        if srcPlayer.admin or srcPlayer.promoted then
+            srcPlayer.changeColor('Teal')
+        else
+            printToAll('!tealme failed for ' .. srcPlayer.color .. ', must be promoted to use', 'Yellow')
+        end
+        return false
+    end
+
+    -- Take a non-table color (for streamers to interact with table).
+    if string.lower(message) == '!colorme' then
+        if srcPlayer.admin or srcPlayer.promoted then
+            local function getAvailableColor()
+                local takenSet = {
+                    Gray = true,
+                    Black = true,
+                    Teal = true
+                }
+                for _, color in ipairs(_zoneHelper.zones()) do
+                    takenSet[color] = true
+                end
+                for _, player in ipairs(Player.getPlayers()) do
+                    takenSet[player.color] = true
+                end
+                for _, color in ipairs(Player.getColors()) do
+                    if not takenSet[color] then
+                        return color
+                    end
+                end
+            end
+            local color = getAvailableColor()
+            if srcPlayer.color ~= 'Gray' then
+                printToAll('!colorme failed for ' .. srcPlayer.color .. ', must be spectator (gray)', 'Yellow')
+            elseif not color then
+                printToAll('!colorme failed for ' .. srcPlayer.color .. ', no open colors', 'Yellow')
+            else
+                srcPlayer.changeColor(color)
+            end
+        else
+            printToAll('!colorme failed for ' .. srcPlayer.color .. ', must be promoted to use', 'Yellow')
+        end
+        return false
+    end
+
+    -- Shuffle players between seats.
+    if string.lower(message) == '!seats' then
+        if srcPlayer.admin or srcPlayer.promoted then
+            _randomizeSeats(srcPlayer.color)
+        else
+            printToAll('!seats failed for ' .. srcPlayer.color .. ', must be promoted to use', 'Yellow')
+        end
+        return false
+    end
+
+    if string.lower(message) == '!help' then
+        _help(srcPlayer.color)
+        return false
+    end
+
+    -- '!gamedata' or '!gamedata <key:string> <delay:number>'
+    if string.match(string.lower(message), '!gamedata') then
+        if srcPlayer.admin or srcPlayer.promoted then
+            local parts = {}
+            for part in string.gmatch(message, '%S+') do
+                table.insert(parts, part)
+            end
+            if #parts > 1 then
+                local delay = _gameDataHelper.startPeriodicUpdates({
+                    key = parts[2],
+                    delay = parts[3] and tonumber(parts[3])
+                })
+                printToAll('!gamedata enabled by ' .. srcPlayer.color .. ' delay ' .. delay, 'Yellow')
+            else
+                _gameDataHelper.stopPeriodicUpdates()
+                printToAll('!gamedata disabled by ' .. srcPlayer.color, 'Yellow')
+            end
+        else
+            printToAll('!gamedata failed for ' .. srcPlayer.color .. ', must be promoted to use', 'Yellow')
+        end
+        return false
+    end
+
+    if string.match(string.lower(message), '!timestamp') then
+        local timestamp = _gameDataHelper.getGameDataTimestamp()
+        timestamp = timestamp or '<awaiting setup>'
+        printToColor('!timestamp: ' .. timestamp, srcPlayer.color, 'Yellow')
+        return false
+    end
+
     local colorSet = {}
     for _, color in ipairs(getSeatedPlayers()) do
         colorSet[color] = true
@@ -53,7 +143,12 @@ function onChat(message, srcPlayer)
         else
             printToAll(publicMessage)
             printToColor(privateMessage, srcColor, srcColor)
-            printToColor(privateMessage, dstColor, srcColor)
+            if dstColor ~= srcColor then
+                printToColor(privateMessage, dstColor, srcColor)
+            end
+            if colorSet['Teal'] and srcColor ~= 'Teal' and dstColor ~= 'Teal' then
+                printToColor(privateMessage, 'Teal', srcColor)
+            end
         end
         return false
     end
