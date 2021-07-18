@@ -95,12 +95,40 @@ function selectFaction(tokenName)
         printToAll('selectFaction: no such faction "' .. tokenName .. '"', 'Red')
         return false
     end
-    tokenName = faction.tokenName
 
+    -- If on the selector, pick it.
     for _, entry in ipairs(FACTION_ID_AND_TOKEN_NAMES) do
-        if entry.tokenName == tokenName then
+        if entry.tokenName == faction.tokenName then
             local clickFunction = 'selectFaction_' .. entry.id
             self.call(clickFunction)
+            return true
+        end
+    end
+
+    -- At this point not on the selector.  Try to draw the faction token (homebrew?).
+    local bag = false
+    for _, object in ipairs(getAllObjects()) do
+        if object.type == 'Bag' and object.getName() == 'Pick a Faction to Play' then
+            bag = object
+            break
+        end
+    end
+    assert(bag, 'missing faction token bag')
+    local zone = _zoneHelper.zoneFromPosition(self.getPosition())
+    assert(zone, 'not in a player zone')
+    local lookFor = faction.tokenName .. ' Faction Token'
+    for _, entry in ipairs(bag.getObjects()) do
+        if entry.name == lookFor then
+            bag.takeObject({
+                position          = {
+                    x = zone.center.x,
+                    y = zone.center.y + 3,
+                    z = zone.center.z
+                },
+                rotation          = zone.rotation,
+                smooth            = true,
+                index             = entry.index,
+            })
             return true
         end
     end
