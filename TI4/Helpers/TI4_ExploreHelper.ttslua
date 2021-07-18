@@ -20,6 +20,7 @@ end
 local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
 local _deckHelper = getHelperClient('TI4_DECK_HELPER')
 local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
 
 local function copyTable(t)
     if t and type(t) == 'table' then
@@ -357,17 +358,7 @@ function onObjectSpawn(object)
 
     -- Give token when card is drawn.
     if object.tag == 'Card' then
-        local attrs = exploreCards[name]
-        if attrs and attrs.drawTokenOnSpawn then
-            local guid = object.guid
-            local function delayedCheck()
-                local object = getObjectFromGUID(guid)
-                if object then
-                    checkCardForToken(object, false)
-                end
-            end
-            Wait.time(delayedCheck, 5)
-        end
+        _maybeDrawAttachToken(object)
     end
 end
 
@@ -395,11 +386,64 @@ function onObjectDrop(playerColor, droppedObject)
             Wait.time(delayedReapply, 3)
         end
     end
+
+    _maybeDrawAttachToken(droppedObject)
 end
 
 function onObjectPickUp(playerColor, pickupObject)
     if AttachLib.isAttachToken(pickupObject) then
         AttachLib.detach(pickupObject)
+    end
+end
+
+function onObjectRotate(object, spin, flip, player_color, old_spin, old_flip)
+    _maybeDrawAttachToken(object, flip)
+end
+
+-- Delay fetching attachments for relic cards until properly in a player area.
+-- Homebrew factions may be able to peek at relics, wait for face up in area.
+function _maybeDrawAttachToken(object, flipValue)
+    assert(type(object) == 'userdata')
+
+    if object.type ~= 'Card' then
+        return
+    end
+    if object.held_by_color then
+        return
+    end
+
+    -- If flip is is progress use the destination flip value.
+    local z = flipValue or object.getRotation().z
+    if (z > 90) and (z < 270) then
+        return -- face down (do not read attribute b/c not set for onFlip)
+    end
+
+    local attrs = exploreCards[object.getName()]
+    if (not attrs) or (not attrs.drawTokenOnSpawn) then
+        return
+    end
+
+    local color = _zoneHelper.zoneFromPosition(object.getPosition())
+    if not color then
+        return -- not in a player area
+    end
+
+    -- Do not try to look up player by color (might not be seated), instead search for a match.
+    for _, player in ipairs(Player.getPlayers()) do
+        if player.color == color then
+            for i = 1, player.getHandCount() do
+                for _, handObject in ipairs(player.getHandObjects(i)) do
+                    if object == handObject then
+                        return -- in hand
+                    end
+                end
+            end
+        end
+    end
+
+    -- Is the token still in the bag?  Check function will only draw if yes.
+    if checkCardForToken(object, false) then
+        printToAll('Fetching attachment token for ' .. object.getName() .. ' in ' .. color .. '\'s player area.', 'Yellow')
     end
 end
 
@@ -613,6 +657,8 @@ function checkCardForToken(object_spawned, planetName)
             -- Just in case the card is in hand, mark the token as use_hands
             -- so it will get added to the hand rather than fall through it.
             token.use_hands = true
+
+            return true
         end
     end
 end
