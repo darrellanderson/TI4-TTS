@@ -1,5 +1,6 @@
 --- Sustain damage burn effect
 -- @author Darrell
+-- #include <~/TI4-TTS/TI4/ObjectsInToolsBag/Burninate>
 
 function getHelperClient(helperObjectName)
     local function getHelperObject()
@@ -18,161 +19,14 @@ function getHelperClient(helperObjectName)
 end
 local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
 
-local PARTICLE_SYSTEM_COUNT = 15
-local ANIMATION_UPDATE_SECONDS = 0.2
-
 local _burnNameSet = {}
 
 local _burningObjectGuidSet = {}
 local _isBroken = false
 
-local _burnAnimation = {}
-local _burnAnimationWaitId = false
-local _periodicUpdateWaitId = false
-
--------------------------------------------------------------------------------
-
-function burn(object)
-    _burningObjectGuidSet[object.getGUID()] = object
-end
-
-function unburn(object)
-    _burningObjectGuidSet[object.getGUID()] = nil
-    object.setVectorLines({})
-end
-
--------------------------------------------------------------------------------
-
-function updateBurnSet()
-    local function isBurnable(object)
-        if object.held_by_color then
-            return false
-        end
-        if (object.tag ~= 'Generic') and (object.tag ~= 'Figurine') then
-            return false
-        end
-        if not _burnNameSet[object.getName()] then
-            return false
-        end
-        return true
-    end
-
-    local burnableObjects = {}
-    for _, object in ipairs(getAllObjects()) do
-        if isBurnable(object) then
-            table.insert(burnableObjects, object)
-        end
-    end
-
-    local anyBurning = false
-    for _, object in ipairs(burnableObjects) do
-        local guid = object.getGUID()
-        local shouldBurn = object.is_face_down
-        anyBurning = anyBurning or shouldBurn
-
-        if shouldBurn and not _burningObjectGuidSet[guid] then
-            burn(object)
-        end
-
-        if not shouldBurn and _burningObjectGuidSet[guid] then
-            unburn(object)
-        end
-    end
-
-    if anyBurning then
-        if not _burnAnimationWaitId then
-            _burnAnimationWaitId = Wait.frames(periodicUpdateBurnAnimation, 1)
-        end
-    else
-        if _burnAnimationWaitId then
-            Wait.stop(_burnAnimationWaitId)
-            _burnAnimationWaitId = false
-        end
-    end
-end
-
-function updateBurnAnimation()
-    -- Remove oldest.
-    while #_burnAnimation > PARTICLE_SYSTEM_COUNT do
-        table.remove(_burnAnimation, 1)
-    end
-
-    -- Age.
-    for _, particle in ipairs(_burnAnimation) do
-        particle.position.y = particle.position.y - particle.speed
-        particle.size = particle.size * 0.95
-        particle.color.a = particle.color.a * 0.9
-    end
-
-    -- Add new.
-    local position = {
-        x = -0.2 + math.random() * 0.4,
-        y = -0.2,
-        z = -1 + math.random() * 2
-    }
-    table.insert(_burnAnimation, {
-        position = position,
-        rotation = {
-            x = math.random() * 30 * (position.z > 0 and 1 or -1),
-            y = 0,
-            z = math.random() * 30 * (position.x > 0 and 1 or -1),
-        },
-        size = 0.3 + math.random() * 0.3,
-        speed = 0.04 + math.random() * 0.04,
-        color = {
-            r = 1,
-            g = math.random(),
-            b = 0,
-            a = 0.95
-        }
-    })
-
-    -- Make lines.
-    local lines = {}
-    for _, particle in ipairs(_burnAnimation) do
-        if particle.size > 0.1 then
-            table.insert(lines, {
-                points = {
-                    {
-                        x = particle.position.x, -- - particle.size / 2,
-                        y = particle.position.y,
-                        z = particle.position.z
-                    },
-                    {
-                        x = particle.position.x, -- + particle.size / 2,
-                        y = particle.position.y,
-                        z = particle.position.z
-                    },
-                },
-                rotation = particle.rotation,
-                thickness = particle.size,
-                color = particle.color,
-                loop = false,
-                square = false
-            })
-        end
-    end
-
-    for guid, object in pairs(_burningObjectGuidSet) do
-        object.setVectorLines(lines)
-    end
-end
-
-function periodicUpdateBurnSet()
-    updateBurnSet()
-    _periodicUpdateWaitId = Wait.time(periodicUpdateBurnSet, 2 + math.random())
-end
-
-function periodicUpdateBurnAnimation()
-    updateBurnAnimation()
-    _burnAnimationWaitId = Wait.time(periodicUpdateBurnAnimation, ANIMATION_UPDATE_SECONDS)
-end
-
 -------------------------------------------------------------------------------
 
 function onLoad(saveState)
-    math.random(tonumber(self.getGUID(), 16))
-
     for _, color in ipairs(Player.getColors()) do
         _burnNameSet[color .. ' Mech'] = true
         _burnNameSet[color .. ' Carrier'] = true
@@ -186,47 +40,149 @@ function onLoad(saveState)
     for color, faction in pairs(_factionHelper.allFactions()) do
         _burnNameSet[faction.flagship] = true
     end
-
-    _periodicUpdateWaitId = Wait.time(periodicUpdateBurnSet, math.random())
+    for _, object in ipairs(getAllObjects()) do
+        _maybeBurn(object)
+    end
 end
 
 function onDestroy()
     for guid, _ in pairs(_burningObjectGuidSet) do
         local object = getObjectFromGUID(guid)
-        if object then
-            unburn(object)
+        if object and _burningObjectGuidSet[object.getGUID()] then
+            _unburn(object)
         end
     end
-    _burningObjectGuidSet = {}
-    if _periodicUpdateWaitId then
-        Wait.stop(_periodicUpdateWaitId)
-    end
-    if _burnAnimationWaitId then
-        Wait.stop(_burnAnimationWaitId)
-    end
 end
 
-function onObjectPickUp(playerColor, pickedUpObject)
-    assert(type(pickedUpObject) == 'userdata')
-    if _burningObjectGuidSet[pickedUpObject.getGUID()] then
-        unburn(pickedUpObject)
-    end
-end
-
-function onObjectDestroy(dyingObject)
+function onObjectDestroy(object)
     if not _isBroken then
         _isBroken = true  -- when exiting TTS this getGUID call errors out
-        if _burningObjectGuidSet[dyingObject.getGUID()] then
-            unburn(dyingObject)
+        if _burningObjectGuidSet[object.getGUID()] then
+            _unburn(object)
         end
         _isBroken = false  -- didn't error out?  great, reset to healthy
     end
 end
 
-function onObjectEnterContainer(container, enterObject)
-    if _burningObjectGuidSet[enterObject] then
-        unburn(dyingObject)
+function onObjectEnterContainer(container, object)
+    if _burningObjectGuidSet[object.getGUID()] then
+        _unburn(object)
     end
+end
+
+-- function onObjectPickUp(playerColor, object)
+--     assert(type(object) == 'userdata')
+--     if _burningObjectGuidSet[object.getGUID()] then
+--         _unburn(object)
+--     end
+-- end
+
+function onObjectDrop(playerColor, object)
+    assert(type(object) == 'userdata')
+    if object.is_face_down then
+        _maybeBurn(object)
+    end
+end
+
+function onObjectRotate(object, spin, flip, player_color, old_spin, old_flip)
+    assert(type(object) == 'userdata')
+    if (flip ~= old_flip) then
+        if flip > 90 and flip < 270 then
+            _maybeBurn(object, flip)
+        elseif _burningObjectGuidSet[object.getGUID()] then
+            _unburn(object)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+function _maybeBurn(object, flipValue)
+    if object.held_by_color then
+        return false
+    end
+    if (object.tag ~= 'Generic') and (object.tag ~= 'Figurine') then
+        return false
+    end
+    local z = flipValue or object.getRotation().z
+    if (z < 90) or (z > 270) then
+        return false
+    end
+    if not _burnNameSet[object.getName()] then
+        return false
+    end
+
+    -- Decal placement is wrong while flip is in progress?
+    local function delayed()
+        _delayedStableBurn(object)
+    end
+    Wait.time(delayed, 0.1)
+end
+
+function _delayedStableBurn(object)
+    local guid = object.getGUID()
+
+    local function act()
+        local object = getObjectFromGUID(guid)
+        if not object then
+            return false
+        end
+        _burn(object)
+    end
+
+    local function condition()
+        local object = getObjectFromGUID(guid)
+        if not object then
+            return false
+        end
+        if object.spawning then
+            return false
+        end
+        if not object.resting then
+            return false
+        end
+        if object.isSmoothMoving() then
+            return false
+        end
+        return true
+    end
+    local timeout = act
+    Wait.condition(act, condition, 1, timeout)
+end
+
+function _burn(object)
+    _burningObjectGuidSet[object.getGUID()] = object
+
+    local bounds = object.getBoundsNormalized()
+    local bounds = object.getBounds()
+    local centerY = bounds.offset.y / object.getScale().y
+    local bottomY = centerY - bounds.size.y / object.getScale().y / 2
+
+    -- Models vary a good amount, do not attempt to center X/Z.
+    local p = {
+        x = 0,
+        y = bottomY - 0.01,
+        z = 0,
+    }
+
+    local decalSize = 0.5
+    local w = decalSize / object.getScale().x
+    local h = decalSize / object.getScale().z
+
+    object.setDecals({
+        {
+            name     = 'sustained',
+            url      = 'http://cloud-3.steamusercontent.com/ugc/1705159835345168116/36E357F52BDA9585CF6FFA5708B0DEEF1D5AA46F/',
+            position = p,
+            rotation = { x = 270, y = 0, z = 0 }, -- facing down
+            scale    = { x = w, y = h, z = 1 }, -- w, h in world units
+        }
+    })
+end
+
+function _unburn(object)
+    _burningObjectGuidSet[object.getGUID()] = nil
+    object.setDecals({})
 end
 
 -------------------------------------------------------------------------------
