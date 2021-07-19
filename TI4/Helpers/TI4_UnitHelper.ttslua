@@ -1566,6 +1566,9 @@ function getColorToUnitModifiers()
         local name, unitModifier = getUnitModifier(object)
         if unitModifier then
             -- Tekklar Legion debuffs Sardakk when played by others.
+            -- Unfortunately do not know "opponent color" here, cannot know
+            -- who is fighting who; if Tekklar is on the table always debuff
+            -- Sardakk, rely on card being used and disposed of correctly.
             if name == 'Tekklar Legion' then
                 local sardakk = _factionHelper.fromTokenName("Sardakk N'orr")
                 local color = _zoneHelper.zoneFromPosition(object.getPosition())
