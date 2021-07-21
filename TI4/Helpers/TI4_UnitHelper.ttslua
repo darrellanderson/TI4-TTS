@@ -1,6 +1,6 @@
 --- Shared unit logic.
 -- @author Darrell
--- #include <~/CrLua/Objects/TI4_Helpers/TI4_UnitHelper>
+-- #include <~/TI4-TTS/TI4/Helpers/TI4_UnitHelper>
 
 -- Users should copy this getHelperClient function, and use via:
 --
