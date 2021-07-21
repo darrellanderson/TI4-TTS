@@ -20,6 +20,8 @@ end
 local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
 
 local _burnNameSet = {}
+local _decalUrl = false
+local _decalSize = 1
 
 local _burningObjectGuidSet = {}
 local _isBroken = false
@@ -40,6 +42,10 @@ function onLoad(saveState)
     for color, faction in pairs(_factionHelper.allFactions()) do
         _burnNameSet[faction.flagship] = true
     end
+
+    -- Use the bottom image as the decal.
+    _decalUrl = assert(self.getCustomObject().image_bottom)
+
     for _, object in ipairs(getAllObjects()) do
         _maybeBurn(object)
     end
@@ -165,14 +171,13 @@ function _burn(object)
         z = 0,
     }
 
-    local decalSize = 0.5
-    local w = decalSize / object.getScale().x
-    local h = decalSize / object.getScale().z
+    local w = _decalSize / object.getScale().x
+    local h = _decalSize / object.getScale().z
 
     object.setDecals({
         {
             name     = 'sustained',
-            url      = 'http://cloud-3.steamusercontent.com/ugc/1705159835345168116/36E357F52BDA9585CF6FFA5708B0DEEF1D5AA46F/',
+            url      = _decalUrl,
             position = p,
             rotation = { x = 270, y = 0, z = 0 }, -- facing down
             scale    = { x = w, y = h, z = 1 }, -- w, h in world units
