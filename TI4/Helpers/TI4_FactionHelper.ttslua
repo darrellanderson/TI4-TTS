@@ -1,6 +1,6 @@
 --- Faction attributes.
 -- @author Darrell
--- #include <~/CrLua/Objects/TI4_Helpers/TI4_FactionHelper>
+-- #include <~/TI4-TTS/TI4/Helpers/TI4_FactionHelper>
 --
 -- Get faction tables with:
 -- - factionName string, matches a key in the faction attributes table.
@@ -862,10 +862,10 @@ function getColorToCommanders()
     local zoneColorToRejectAllianceColorSet = {}
     for guid, allianceColor in pairs(guidToAllianceColor) do
         local card = getObjectFromGUID(guid)
-        if _unitHelper._isToggleActiveCard(card) and not _unitHelper._isToggleActiveCardActive(card) then
-            local zoneColor = guidToZoneColor[guid]
+        local zoneColor = guidToZoneColor[guid]
+        if zoneColor and _unitHelper._isToggleActiveCard(card) and not _unitHelper._isToggleActiveCardActive(card) then
             local rejectAllianceColorSet = zoneColorToRejectAllianceColorSet[zoneColor]
-            if not rejectAllianceColorSet then
+            if zoneColor and not rejectAllianceColorSet then
                 rejectAllianceColorSet = {}
                 zoneColorToRejectAllianceColorSet[zoneColor] = rejectAllianceColorSet
             end
