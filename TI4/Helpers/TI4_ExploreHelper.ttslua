@@ -250,12 +250,6 @@ function injectAttachToken(params)
     assert(type(params.cardName) == 'string')
     assert(type(params.tokenName) == 'string')
 
-    -- Abort if already there (repeated injection?)
-    if attachTokens[params.tokenName] then
-        printToAll('ExploreHelper.injectAttachToken: already attached "' .. params.tokenName .. '"', 'Red')
-        return false
-    end
-
     -- Add to tokens associated with that card.
     local attach = exploreCards[params.cardName]
     if not attach then
