@@ -53,7 +53,7 @@
 
 <VerticalLayout id="diplomacy">
     <Button
-        text="Diplomacy Primary Ability" tooltip="+ Choose 1 system other than the Mechatol Rex system that contains a planet you control; each other player places a command token from their reinforcements in the chosen system.  Then, ready up to 2 exhausted planets you control."
+        text="Diplomacy Primary Ability" tooltip="+ Choose 1 system other than the Mecatol Rex system that contains a planet you control; each other player places a command token from their reinforcements in the chosen system.  Then, ready up to 2 exhausted planets you control."
         textAlignment="UpperLeft"
     >
     </Button>
@@ -262,7 +262,7 @@
 
 <VerticalLayout id="imperial">
     <Button
-        text="Imperial Primary Ability" tooltip="+ Immediately score 1 public objective if you fulfill its requirements.&#xA;+ Gain 1 victory point if you control Mechatol Rex; otherwise draw 1 secret objective."
+        text="Imperial Primary Ability" tooltip="+ Immediately score 1 public objective if you fulfill its requirements.&#xA;+ Gain 1 victory point if you control Mecatol Rex; otherwise draw 1 secret objective."
         textAlignment="UpperLeft"
     >
     </Button>
