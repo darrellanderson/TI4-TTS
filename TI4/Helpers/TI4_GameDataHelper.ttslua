@@ -44,7 +44,7 @@ local GAME_DATA_LOCALHOST_KEY = 'localhost'
 
 local MIN_PERIODIC_SECONDS = 30
 local MAX_PERIODIC_SECONDS = 3600
-local DEFAULT_KEY_PERIODIC_SECONDS = 45
+local DEFAULT_KEY_PERIODIC_SECONDS = 30
 local DEFAULT_ANON_PERIODIC_SECONDS = 900
 
 -- Remember opt-in across save/reload.
@@ -2285,10 +2285,17 @@ function _uploadGameDataCallback(data)
         host = GAME_DATA_LOCALHOST
     end
 
-    local url = host .. '/data'
+    local urlArgs = {}
     if _gameDataKey then
-        url = url .. '?key=' .. _gameDataKey
+        table.insert(urlArgs, 'key=' .. _gameDataKey)
     end
+    table.insert(urlArgs, 'timestamp=' .. (_state.setupTimestamp or 0))
+
+    local url = host .. '/data'
+    if urlArgs then
+        url = url .. '?' .. table.concat(urlArgs, '&')
+    end
+
     local function callback(result)
         if result.is_error then
             print('!gamedata error: ' .. result.error)
