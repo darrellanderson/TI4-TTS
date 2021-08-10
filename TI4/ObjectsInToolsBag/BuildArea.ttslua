@@ -1,5 +1,27 @@
 --- Show the produce and consume costs for contained objects.
 -- @author Darrell
+-- #include <~/TI4-TTS/TI4/ObjectsInToolsBag/BuildArea>
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+local _factionHelper = getHelperClient('TI4_FACTION_HELPER')
+local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
+local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
 
 local TAG = 'BuildArea'
 
@@ -39,6 +61,9 @@ local OBJECT_EFFECTS = {
         hegemonic = true,
     },
     ['AI Development Algorithm'] = {
+        -- Require player move it into the build area to count.
+        --anywhereInPlayerZone = true,
+        --requireFaceUp = true,
         aiDevelopmentAlgorithm = true
     },
 
@@ -107,12 +132,6 @@ local _data = {
     philModeProductionValue = false
 }
 
-local _deckHelper = false
-local _factionHelper = false
-local _systemHelper = false
-local _unitHelper = false
-local _zoneHelper = false
-
 local _graveyardGuid = false
 
 local _unitAttributes = false
@@ -121,7 +140,6 @@ local _unitAttributesLastUpdateTime = false
 -------------------------------------------------------------------------------
 
 function onLoad(saveState)
-    CrLua.Log.d(TAG, 'onLoad')
     math.randomseed(tonumber(self.getGUID(), 16))
 
     local saveState = saveState and JSON.decode(saveState)
@@ -130,12 +148,6 @@ function onLoad(saveState)
     _data.width = math.max(_data.width, _config.minWidth)
     _data.height = math.max(_data.height, _config.minHeight)
     _data.playerColor = saveState and saveState.playerColor or _data.playerColor
-
-    _deckHelper = CrLua.TTS.HelperClient.get('TI4_DECK_HELPER')
-    _factionHelper = CrLua.TTS.HelperClient.get('TI4_FACTION_HELPER')
-    _systemHelper = CrLua.TTS.HelperClient.get('TI4_SYSTEM_HELPER')
-    _unitHelper = CrLua.TTS.HelperClient.get('TI4_UNIT_HELPER')
-    _zoneHelper = CrLua.TTS.HelperClient.get('TI4_ZONE_HELPER')
 
     self.addContextMenuItem("Warp to active", warpToActiveSystem, false)
     self.addContextMenuItem("Warp to home", warpToHomeSystem, false)
@@ -156,7 +168,6 @@ end
 function onObjectDrop(playerColor, droppedObject)
     assert(type(playerColor) == 'string' and type(droppedObject) == 'userdata')
     if droppedObject == self then
-        CrLua.Log.d(TAG, 'onObjectDrop: self')
         _graveyardGuid = false
         updateEverything()
     elseif isInsideBuildArea(droppedObject.getPosition()) then
@@ -167,16 +178,13 @@ end
 
 function onObjectPickUp(playerColor, pickedUpObject)
     assert(type(playerColor) == 'string' and type(pickedUpObject) == 'userdata')
-    if pickedUpObject == self then
-        CrLua.Log.d(TAG, 'onObjectPickUp: self')
-    elseif _data.inside[pickedUpObject] then
+    if pickedUpObject ~= self and _data.inside[pickedUpObject] then
         _data.inside[pickedUpObject] = nil
         updateProduceConsumeValues()
     end
 end
 
 function onPlayerChangeColor(playerColor)
-    CrLua.Log.d(TAG, 'onPlayerChangeColor')
     Wait.frames(updateEverything, 2)
 end
 
@@ -212,6 +220,19 @@ function onObjectSpawn(object)
 end
 
 -------------------------------------------------------------------------------
+
+function _joinTables(a, b)
+    assert(type(a) == 'table' and type(b) == 'table')
+
+    local result = {}
+    for k, v in pairs(a) do
+        result[k] = v
+    end
+    for k, v in pairs(b) do
+        result[k] = v
+    end
+    return result
+end
 
 function _getUnitAttributes(unitType)
     assert(type(unitType) == 'string')
@@ -542,17 +563,15 @@ end
 
 function getPlayerColor()
     local zoneColor = _zoneHelper.zoneFromPosition(self.getPosition())
-    CrLua.Log.d(TAG, 'getPlayerColor: ' ..(zoneColor or 'nil'))
     return zoneColor
 end
 
 function getProduceConsumeItems()
-    CrLua.Log.d(TAG, 'getProduceConsumeItems')
     local playerColor = _data.playerColor
 
     -- Get objects to consider.
     local inHandGuidSet = _zoneHelper.inHand()
-    local objects = CrLua.Table.join(_data.inside, {})
+    local objects = _joinTables(_data.inside, {}) -- copy
     local function useOutsizeBuildAreaObject(object)
         local objectEffects = OBJECT_EFFECTS[object.getName()]
         if not objectEffects then
@@ -635,7 +654,7 @@ function getProduceConsumeItems()
                 result.consumeObjectNameToCount[name] = (result.consumeObjectNameToCount[name] or 0) + 1
             end
             if objectEffects.objectEffectsOverrides then
-                result.objectEffectsOverrides = CrLua.Table.join(result.objectEffectsOverrides, objectEffects.objectEffectsOverrides)
+                result.objectEffectsOverrides = _joinTables(result.objectEffectsOverrides, objectEffects.objectEffectsOverrides)
             end
             result.sarween = result.sarween or objectEffects.sarween
             result.hegemonic = result.hegemonic or objectEffects.hegemonic
@@ -696,13 +715,11 @@ function getProduceConsumeItems()
         result.aiDevelopmentAlgorithm = unitUpgradeCount
     end
 
-    CrLua.Log.d(TAG, 'getProduceConsumeItems', result)
     return result
 end
 
 function getProduceConsumeResourcesAndCost(produceConsumeItems)
     assert(type(produceConsumeItems) == 'table')
-    CrLua.Log.d(TAG, 'getProduceConsumeResourcesAndCost')
 
     local result = {
         resources = 0,
@@ -713,7 +730,7 @@ function getProduceConsumeResourcesAndCost(produceConsumeItems)
     for objectName, count in pairs(produceConsumeItems.consumeObjectNameToCount) do
         local objectEffects = OBJECT_EFFECTS[objectName]
         local objectEffectsOverrides = produceConsumeItems.objectEffectsOverrides[objectName]
-        objectEffects = CrLua.Table.join(objectEffects or {}, objectEffectsOverrides or {})
+        objectEffects = _joinTables(objectEffects or {}, objectEffectsOverrides or {})
         if objectEffects.resources then
             result.resources = result.resources + objectEffects.resources * count
         end
@@ -736,9 +753,8 @@ function getProduceConsumeResourcesAndCost(produceConsumeItems)
         result.numUnits = result.numUnits + productionConsumed
     end
 
-    if produceConsumeItems.aiDevelopmentAlgorithm then
-        result.cost = math.max(result.cost - produceConsumeItems.aiDevelopmentAlgorithm, 0)
-    end
+    -- Do not automatically deduct AI development algorithm.
+    result.aiDevelopmentAlgorithm = produceConsumeItems.aiDevelopmentAlgorithm
 
     if produceConsumeItems.berekar then
         result.cost = math.max(result.cost - 2, 0)
@@ -759,13 +775,11 @@ function getProduceConsumeResourcesAndCost(produceConsumeItems)
             end
         end
         if best then
-            CrLua.Log.d(TAG, 'hegemonic')
             result.resources = result.resources - best.resources
             result.resources = result.resources + best.influence
         end
     end
 
-    CrLua.Log.d(TAG, 'getProduceConsumeResourcesAndCost', result)
     return result
 end
 
@@ -884,7 +898,6 @@ end
 
 function drawUi(items, resourcesAndCost)
     assert(type(items) == 'table' and type(resourcesAndCost) == 'table')
-    CrLua.Log.d(TAG, 'drawUi')
     assert(type(_data.playerColor) == 'string')
     local colorTable = Color.fromString(_data.playerColor)
     local hexColor = '#' .. Color.toHex(colorTable)
@@ -925,12 +938,15 @@ function drawUi(items, resourcesAndCost)
     local panelPosition = '0 0 ' .. trimFloat(boundsDepth * 50.0 + 2)
     local cornerPosition = trimFloat(cornerX) .. ' ' .. trimFloat(cornerY) .. ' ' .. trimFloat(-boundsDepth * 50.0 + 1)
 
-    local r1c1 = 'Build Cost: ' .. (resourcesAndCost and resourcesAndCost.cost or '-')
+    local r1c1 = 'Cost: ' .. (resourcesAndCost and resourcesAndCost.cost or '-')
     if resourcesAndCost and items and items.sarween then
         r1c1 = r1c1 .. '-ST'
     end
     if resourcesAndCost and items and items.warmachine then
         r1c1 = r1c1 .. '-WM'
+    end
+    if resourcesAndCost and items and items.aiDevelopmentAlgorithm then
+        r1c1 = r1c1 .. '-' .. 'AI(' .. items.aiDevelopmentAlgorithm .. ')'
     end
     local r2c1 = 'Resources: ' .. (resourcesAndCost and resourcesAndCost.resources or '-')
     local r1c2 = '# Units: ' .. (resourcesAndCost and resourcesAndCost.numUnits or '-')
@@ -1066,7 +1082,6 @@ end
 
 function announce(items, resourcesAndCost)
     assert(type(items) == 'table' and type(resourcesAndCost) == 'table')
-    CrLua.Log.d(TAG, 'announce')
     local produce = {}
     for unitType, unit in pairs(items.produceUnitNameToUnitWithCount) do
         if unit.count > 1 then
@@ -1082,7 +1097,7 @@ function announce(items, resourcesAndCost)
     for objectName, count in pairs(items.consumeObjectNameToCount) do
         local objectEffects = OBJECT_EFFECTS[objectName]
         local objectEffectsOverrides = items.objectEffectsOverrides[objectName]
-        objectEffects = CrLua.Table.join(objectEffects or {}, objectEffectsOverrides or {})
+        objectEffects = _joinTables(objectEffects or {}, objectEffectsOverrides or {})
         if objectEffects.tradegoods then
             tradegoods = tradegoods + (objectEffects.resources * count)
         else
@@ -1110,9 +1125,6 @@ function announce(items, resourcesAndCost)
 
         table.insert(consume, 'Amalgamation: ' .. table.concat(amalgamated, '; '))
     end
-    if items.aiDevelopmentAlgorithm then
-        table.insert(consume, 'AI Development Algorithm (' .. items.aiDevelopmentAlgorithm .. ')' )
-    end
 
     local message = table.concat({
         _data.playerColor,
@@ -1123,6 +1135,7 @@ function announce(items, resourcesAndCost)
         ' and total cost ' .. resourcesAndCost.cost,
         items.sarween and '-ST' or '',
         items.warmachine and '-WM' or '',
+        items.aiDevelopmentAlgorithm and ('-AIDA(' .. items.aiDevelopmentAlgorithm .. ')') or '',
         items.berekar and ' (BB)' or '',
         ',',
         ' consuming ' .. resourcesAndCost.resources,
@@ -1134,7 +1147,6 @@ function announce(items, resourcesAndCost)
 end
 
 function commit()
-    CrLua.Log.d(TAG, 'commit')
     local inHandGuidSet = _zoneHelper.inHand()
     for object, _ in pairs(_data.inside) do
         local tag = object.tag
@@ -1147,19 +1159,12 @@ function commit()
 end
 
 -------------------------------------------------------------------------------
-
-#include <~/CrLua/CrLua>
-#include <~/CrLua/LockGlobals>
-
-#include <~/CrLua/LockTable>
-#include <~/CrLua/Log>
-#include <~/CrLua/Table>
-
-#include <~/CrLua/TTS/HelperClient>
-
---CrLua.Log.setLogLevel(CrLua.Log.LOG_LEVEL.DEBUG)
---#include <~/CrLua/UnitTest>
---CrLua.UnitTest.runTests('CrLua.TI4.System', CrLua.TI4.System, true)
-
-CrLua.assertRequired({ 'Log', 'Table', 'TTS.HelperClient' })
-CrLua.lock()
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)
