@@ -1,0 +1,35 @@
+v41:
+
+Setup
+- Setup tile sliders for choose options.
+- New point options (12 point gamers rejoice).
+- PoK expansion and all Codex are now default, uncheck to remove them.
+- Hyperlanes bag now has 7 & 8 player setups.
+- Hyperlanes bag setup now moves home systems.
+
+Hands
+- Remove extra hands.  Game setup and color switcher create hands as needed.
+- Uncheck "disable unused hands" option, when a player disconnects (or split game) cards stay hidden in hand.
+- Remove Hide Hands from tools bag.
+
+Streamer
+- New "!colorme" streamer command to switch to a color / interact with the table (must be promoted).
+- Vote counters now show available votes in the mouseover description text (workaround for TTS bug where displayed value does not always update for non-host players, possibly due to a spectator host).
+
+Homebrew
+- Faction Selector pulls homebrew faction token into player area when it can't display the faction (e.g. when using the Milty Draft tool).
+- Homebrew may inject the same attachment for different exploration cards.
+
+Tools
+- Replace Burninate animation with a simple, non-animated sustain symbol.
+- Build Area shows AIDA as a "-AIDA(#)" cost to be consistent with Sarween Tools and War Machine (AIDI needs to be in the box).
+- New "All X Faction" tool in tools bag, right click to unpack same faction for all players.
+- Milty Draft has a new right click option to enter custom slices.
+
+Other
+- Franken using Nomad starting fleet selects the correct flagship.
+- Fixed "Learn to Play [3p base]" map rotation, as well as one tile 20->24.
+- When drawing a relic with an attachment, wait for it to be face up in a player area before fetching attach token.
+- Fix a bug when an alliance card is on the table but not in any player area.
+- Fix spelling in some UI tooltips.
+- Added SCPT 2021 Final to maps bag, right click option on the SCPT draft tool.
