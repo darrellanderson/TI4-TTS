@@ -223,6 +223,8 @@ function onLoad(saveState)
         })
     end
     self.addContextMenuItem('Look at me', lookAtMe)
+
+    self.addContextMenuItem('Input slices', CustomSlices.toggleInput)
 end
 
 function onSave()
@@ -393,6 +395,15 @@ function setupCoroutine()
         _state.tileLists[i] = Slice.randomizeAndFixAdjacentAnomalies(tileList)
     end
     coroutine.yield(0)
+
+    -- Optionally override slices with manually-entered "slice string".
+    if CustomSlices.isInputVisible() then
+        _state.tileLists = CustomSlices.readSlices() or nil
+        if not _state.tileLists then
+            return 1 -- assume readSlices reported the error
+        end
+        CustomSlices.hideInput()
+    end
 
     -- Place slices.
     for i, tileList in ipairs(_state.tileLists) do
@@ -1988,6 +1999,114 @@ function Slice.placeTiles(tiles, homeSystemPosition, applyRotation)
         local rot = { x = 0, y = 180, z = 0 }
         SystemTiles.placeTile(tile, pos, rot)
     end
+end
+
+-------------------------------------------------------------------------------
+
+function _onCustomSlicesInput()
+end
+
+CustomSlices = {}
+
+function CustomSlices._getInputIndex()
+    for _, input in ipairs(self.getInputs() or {}) do
+        if input.input_function == '_onCustomSlicesInput' then
+            return input.index
+        end
+    end
+end
+
+function CustomSlices.toggleInput()
+    if CustomSlices.isInputVisible() then
+        CustomSlices.hideInput()
+    else
+        CustomSlices.showInput()
+    end
+end
+
+function CustomSlices.isInputVisible()
+    return CustomSlices._getInputIndex() and true or false
+end
+
+function CustomSlices.showInput()
+    assert(not CustomSlices.isInputVisible())
+    local hint = 'Enter slices as "# # # # # | # # # # # | ..." with [left, center, right, left equidistant, far] tile numbers for each slice, then click "setup"'
+    self.createInput({
+        input_function = '_onCustomSlicesInput',
+        function_owner = self,
+        label          = hint,
+        alignment      = 2, -- left
+        position       = { x = 0, y = 0.41, z = 0 },
+        rotation       = { x = 0, y = 0, z = 0 },
+        scale          = { x = 1, y = 1, z = 1 },
+        width          = 7000,
+        height         = 3500,
+        font_size      = 400,
+        tooltip        = hint,
+        value          = nil, -- Show label as "hint"
+    })
+end
+
+function CustomSlices.hideInput()
+    assert(CustomSlices.isInputVisible())
+    local index = assert(CustomSlices._getInputIndex())
+    self.removeInput(index)
+end
+
+function CustomSlices.readSlices()
+    local index = assert(CustomSlices._getInputIndex())
+    local input = assert(self.getInputs()[index + 1]) -- index is 0 based, lua is 1
+    local value = assert(input.value)
+
+    local legalTileSet = {}
+    for _, system in pairs(_systemHelper.systems()) do
+        local legal = true
+        local legal = legal and (system.tile < 1000)
+        local legal = legal and (not system.home)
+        local legal = legal and (not system.offMap)
+        local legal = legal and (not system.hyperlane)
+        if legal then
+            legalTileSet[system.tile] = true
+        end
+    end
+
+    local errors = {}
+    local tileSet = {}
+    local slices = {}
+    for slice in string.gmatch(value, '([^|]+)') do
+        local tiles = {}
+        for tile in string.gmatch(slice, '(%d+)') do
+            tile = tonumber(tile)
+            if not legalTileSet[tile] then
+                table.insert(errors, 'tile "' .. tile .. '" may not be used')
+            end
+            if tileSet[tile] then
+                table.insert(errors, 'tile "' .. tile .. '" used more than once')
+            end
+            tileSet[tile] = true
+            table.insert(tiles, tile)
+        end
+        if #tiles > 0 then
+            if #tiles ~= 5 then
+                table.insert(errors, 'slice "' .. slice .. '" does not contain 5 tiles')
+            end
+            table.insert(slices, tiles)
+        end
+    end
+    if #slices == 0 then
+        table.insert(errors, 'no slices')
+    elseif #slices > 9 then
+        table.insert(errors, 'too many slices')
+    end
+
+    if #errors > 0 then
+        local message = table.concat(errors, '\n')
+        broadcastToAll('Milty Draft error:\n' .. message, 'Red')
+        return false
+    end
+
+    broadcastToAll('Milty Draft using custom slices: "' .. value .. '"', 'Yellow')
+    return slices
 end
 
 -------------------------------------------------------------------------------
