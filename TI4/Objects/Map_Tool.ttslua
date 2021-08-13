@@ -231,7 +231,6 @@ function createInputs()
         input_function = 'onInputMapString',
         function_owner = self,
         value          = 0,
-        alignment      = 4,
         position       = {x=0, y=buttonY, z=-0.2},
         width          = 1250,
         height         = 250,
