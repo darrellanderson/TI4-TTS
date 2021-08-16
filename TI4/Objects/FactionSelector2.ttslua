@@ -106,26 +106,47 @@ function selectFaction(tokenName)
     end
 
     -- At this point not on the selector.  Try to draw the faction token (homebrew?).
+    local lookFor = faction.tokenName .. ' Faction Token'
     local bag = false
+    local tokenOnTable = false
     for _, object in ipairs(getAllObjects()) do
-        if object.type == 'Bag' and object.getName() == 'Pick a Faction to Play' then
+        local name = object.getName()
+        if object.type == 'Bag' and name == 'Pick a Faction to Play' then
             bag = object
             break
+        end
+        if name == lookFor then
+            tokenOnTable = object
         end
     end
     assert(bag, 'missing faction token bag')
     local zone = _zoneHelper.zoneFromPosition(self.getPosition())
     assert(zone, 'not in a player zone')
-    local lookFor = faction.tokenName .. ' Faction Token'
+    local zoneAttrs = _zoneHelper.zoneAttributes(zone)
+    local pos = {
+        x = zoneAttrs.center.x,
+        y = zoneAttrs.center.y + 3,
+        z = zoneAttrs.center.z
+    }
+    local rot = {
+        x = 0,
+        y = zoneAttrs.rotation.y,
+        z = 0
+    }
+
+    if tokenOnTable then
+        local collide = false
+        local fast = true
+        tokenOnTable.setPositionSmooth(pos, collide, fast)
+        tokenOnTable.setRotationSmooth(rot, collide, fast)
+        return true
+    end
+
     for _, entry in ipairs(bag.getObjects()) do
         if entry.name == lookFor then
             bag.takeObject({
-                position          = {
-                    x = zone.center.x,
-                    y = zone.center.y + 3,
-                    z = zone.center.z
-                },
-                rotation          = zone.rotation,
+                position          = pos,
+                rotation          = rot,
                 smooth            = true,
                 index             = entry.index,
             })
