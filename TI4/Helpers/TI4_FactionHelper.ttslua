@@ -2274,6 +2274,9 @@ function _applyContextMenuItems(object)
 
     -- Most heroes are manually handled, and even the automated ones could be manually handled.
     -- Offer a simple Purge option on all faction hero cards.
+    if not _heroNameSet then
+        _hasContextMenuItems(self) -- force build
+    end
     if _heroNameSet[name] then
         object.addContextMenuItem("Purge", function(clickingColor) _purgeHeroCard(object, clickingColor) end, false)
     end
