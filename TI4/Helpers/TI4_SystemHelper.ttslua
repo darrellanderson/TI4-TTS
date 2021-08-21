@@ -591,9 +591,8 @@ function systemFromPosition(position)
     })
     for _, hit in ipairs(hits) do
         local guid = hit.hit_object.getGUID()
-        local system = _systems[guid]
+        local system = systemFromGuid(guid)
         if system then
-            _fillMissingSystemData(guid, system)
             return system
         end
     end
@@ -685,8 +684,7 @@ function planetFromPosition(params)
     local exact = params.exact
     assert(type(systemGuid) == 'string')
     assert(type(position) == 'table' and type(position.x) == 'number')
-    local system = _systems[systemGuid]
-    _fillMissingSystemData(systemGuid, system)
+    local system = systemFromGuid(systemGuid)
     local best = false
     if system then
         local object = getObjectFromGUID(system.guid)
@@ -765,11 +763,10 @@ function wormholes(playerColor)
             local guid = object.getGUID()
             local name = object.getName()
 
-            local system = _systems[guid]
+            local system = systemFromGuid(guid)
             local nonSystemWormholes = objectNameToNonSystemWormholes[name]
 
             if system then
-                _fillMissingSystemData(guid, system)
                 for _, wormhole in ipairs(system.wormholes or {}) do
                     addGuid(wormhole, guid)
                 end
@@ -1033,6 +1030,7 @@ function injectSystem(system)
     system.guid = nil  -- force rebuild of any auto-generated fields
     system._homebrew = true
     _systems[guid] = system
+    _fillMissingSystemData(guid, system)
 end
 
 function injectResourceInfluenceModifier(params)
@@ -1750,7 +1748,7 @@ end
 
 function onClickDiplomacySystem(clickerColor, systemObject)
     assert(type(clickerColor) == 'string' and type(systemObject) == 'userdata')
-    local system = _systems[systemObject.getGUID()]
+    local system = systemFromGuid(systemObject.getGUID())
     printToAll(clickerColor .. ' applying Diplomacy to ' .. system.string)
     local colors = {}
     for _, faction in pairs(_factionHelper.allFactions()) do
@@ -1763,7 +1761,7 @@ end
 
 function onClickActivateSystem(clickerColor, systemObject)
     assert(type(clickerColor) == 'string' and type(systemObject) == 'userdata')
-    local system = _systems[systemObject.getGUID()]
+    local system = systemFromGuid(systemObject.getGUID())
     -- No need to announce, activateSystem will do that.
     if (not Turns.enable) or Turns.turn_color ~= clickerColor then
         printToColor('Activate system: ' .. clickerColor .. ' is not the active player, ignoring', clickerColor, 'Red')
@@ -1776,7 +1774,7 @@ end
 
 function onClickStrategyToken(clickerColor, systemObject)
     assert(type(clickerColor) == 'string' and type(systemObject) == 'userdata')
-    local system = _systems[systemObject.getGUID()]
+    local system = systemFromGuid(systemObject.getGUID())
     if _moveTokenFromCommandSheet(systemObject, clickerColor, 'strategy') then
         printToAll(clickerColor .. ' placing command token from strategy in ' .. system.string)
     end
@@ -1784,7 +1782,7 @@ end
 
 function onClickReinforcementsToken(clickerColor, systemObject)
     assert(type(clickerColor) == 'string' and type(systemObject) == 'userdata')
-    local system = _systems[systemObject.getGUID()]
+    local system = systemFromGuid(systemObject.getGUID())
     if _moveTokenFromReinforcements(systemObject, { clickerColor }) then
         printToAll(clickerColor .. ' placing command token from reinforcements in ' .. system.string)
     end
@@ -1792,7 +1790,7 @@ end
 
 function onClickOwnerToken(clickerColor, systemObject)
     assert(type(clickerColor) == 'string' and type(systemObject) == 'userdata')
-    local system = _systems[systemObject.getGUID()]
+    local system = systemFromGuid(systemObject.getGUID())
     _moveOwnerToken(systemObject, clickerColor)
     printToAll(clickerColor .. ' placing owner token in ' .. system.string)
 end
