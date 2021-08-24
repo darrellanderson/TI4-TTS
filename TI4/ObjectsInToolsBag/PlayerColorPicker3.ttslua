@@ -167,6 +167,20 @@ local _nextTint = false
 
 local _waitingForDele = {}
 
+function _reset()
+    SwapPlan = {}
+    Pack = {}
+    Rename = {}
+    Unpack = {}
+    _values = {}
+    _lastSwapTime = 0
+    _prevColor = false
+    _prevTint = false
+    _nextColor = false
+    _nextTint = false
+    _waitingForDele = {}
+end
+
 -------------------------------------------------------------------------------
 
 function onLoad(saveState)
@@ -649,6 +663,7 @@ function swapCoroutine()
         })
     end
 
+    _reset()
     return 1
 end
 
