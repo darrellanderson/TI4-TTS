@@ -67,6 +67,24 @@ local HYPERLANES = {
         { tile = 0, seat = 2, position = {-15.75,1.2,9.09}, rotation = {0,180,0} },
         { tile = 0, seat = 3, position = {15.75,1.2,9.09}, rotation = {0,180,0} },
     },
+    [4] = {
+        { tile = 88, position = {5.25,1.12,-9.1}, rotation = {0,180,0} },
+        { tile = 87, position = {-5.25,1.12,-9.1}, rotation = {0,180,0} },
+        { tile = 85, position = {0,1.12,-6.07}, rotation = {0,180,0} },
+        { tile = 84, position = {-5.25,1.12,-15.16}, rotation = {0,0,0} },
+        { tile = 86, position = {0,1.12,-18.19}, rotation = {0,180,0} },
+        { tile = 83, position = {5.25,1.12,-15.16}, rotation = {0,180,0} },
+        { tile = 85, position = {0,1.13,6.06}, rotation = {0,0,0} },
+        { tile = 88, position = {5.34,1.13,9.14}, rotation = {0,240,0} },
+        { tile = 83, position = {5.24,1.13,15.15}, rotation = {0,240,0} },
+        { tile = 86, position = {0,1.13,18.18}, rotation = {0,0,0} },
+        { tile = 84, position = {-5.25,1.13,15.15}, rotation = {0,120,0} },
+        { tile = 87, position = {-5.25,1.13,9.09}, rotation = {0,120,0} },
+        { tile = 0, seat = 1, position = {15.75,1.19,-9.09}, rotation = {0,180,0} },
+        { tile = 0, seat = 2, position = {-15.76,1.2,-9.1}, rotation = {0,180,0} },
+        { tile = 0, seat = 3, position = {-15.75,1.19,9.09}, rotation = {0,180,0} },
+        { tile = 0, seat = 4, position = {15.75,1.19,9.09}, rotation = {0,180,0} }
+    },
     [5] = {
         { tile = 88, position = {5.25,1.12,-9.1}, rotation = {0,180,0} },
         { tile = 87, position = {-5.25,1.12,-9.1}, rotation = {0,180,0} },
@@ -117,6 +135,7 @@ function onLoad(saveState)
     self.addContextMenuItem('Add 8p hyperlanes', function() setupGeneric(HYPERLANES[8]) end)
     self.addContextMenuItem('Add 7p hyperlanes', function() setupGeneric(HYPERLANES[7]) end)
     self.addContextMenuItem('Add 5p hyperlanes', function() setupGeneric(HYPERLANES[5]) end)
+    self.addContextMenuItem('Add 4p hyperlanes', function() setupGeneric(HYPERLANES[4]) end)
     self.addContextMenuItem('Add 3p hyperlanes', function() setupGeneric(HYPERLANES[3]) end)
     self.addContextMenuItem('Add 2p heads up', function() setupGeneric(HYPERLANES[2]) end)
     --self.addContextMenuItem('Print current', extractSetup)
