@@ -942,9 +942,11 @@ function injectCard(params)
     assert((not params.factionName) or type(params.factionName == 'string'), 'deckName')
 
     -- Make sure _cardNameToDeckAttributes exists.
-    _getDeckAttributes('bogus')
+    _getDeckAttributes('__bogus__')
 
-    _cardNameToDeckAttributes[params.cardName] = {
+    -- Link to deck, or to faction for those cards.
+    local deckAttributes = params.deckName and _getDeckAttributesByType(params.deckName)
+    _cardNameToDeckAttributes[params.cardName] = deckAttributes or {
         transform = {},
         deckName = params.deckName,
         factionName = params.factionName,
