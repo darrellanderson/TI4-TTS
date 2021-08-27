@@ -1,7 +1,7 @@
 --- Manage shared stategy card actions.
 -- @author GarnetBear did the original influence counting
 -- @author Darrell June 2020
--- include <~/CrLua/Objects/TI4_Helpers/TI4_StrategyCardHelper>
+-- include <~/TI4-TTS/TI4/Helpers/TI4_StrategyCardHelper>
 
 -- Users should copy this getHelperClient function, and in onLoad via:
 --
@@ -366,7 +366,11 @@ function _dealMinisterOfPolicyActionCard()
         local name = object.getName()
         local guid = object.getGUID()
         if name == 'Minister of Policy' and (not inHandGuidSet[guid]) and (not object.is_face_down) then
-            ministerOfPolicyColor = _zoneHelper.zoneFromPosition(object.getPosition())
+            -- Common practice is one on the laws mat, one in player area.
+            local zoneColor = _zoneHelper.zoneFromPosition(object.getPosition())
+            if zoneColor then
+                ministerOfPolicyColor = zoneColor
+            end
         end
         if name == 'Player Eliminated' then
             local color = _zoneHelper.zoneFromPosition(object.getPosition())
