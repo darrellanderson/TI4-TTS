@@ -1,0 +1,110 @@
+--- Slide command sheet (with tokens) or leader sheet (with leaders).
+-- @author Plat
+-- @author Darrell (tweaks)
+-- #include <~/TI4-TTS/TI4/ObjectsInToolsBag/SlidingCommandLeaderSheets>
+
+local EXTENDED_TAG = '__sliding_extended_true__'
+
+local LEADERSHEET_SLIDE_STATE = {
+    X_OFFSET = -3,
+    CAST_OFFSET = Vector(1.6, 1, 0),
+    CAST_SIZE = Vector(3.4, 2, 8),
+    LINK = function(object) return object.type == 'Card' end
+}
+
+local COMMAND_SLIDE_STATE = {
+    X_OFFSET = 2.3,
+    CAST_OFFSET = Vector(-1, 1, 0),
+    CAST_SIZE = Vector(5.5, 50, 8),
+    LINK = function(object) return string.match(object.getName(), 'Command Token') end
+}
+
+function onLoad(save_state)
+    local commandSheets, leaderSheets = _getCommandLeaderSheets()
+    for _, commandSheet in ipairs(commandSheets) do
+        local function doSlide()
+            toggleSheet(commandSheet, COMMAND_SLIDE_STATE)
+        end
+        commandSheet.addContextMenuItem('Toggle Reference', doSlide)
+    end
+    for _, leaderSheet in ipairs(leaderSheets) do
+        local function doSlide()
+            toggleSheet(leaderSheet, LEADERSHEET_SLIDE_STATE)
+        end
+        leaderSheet.addContextMenuItem('Toggle Reference', doSlide)
+    end
+end
+
+function _getCommandLeaderSheets()
+    local validColorSet = {}
+    for _, color in ipairs(Player.getColors()) do
+        validColorSet[color] = true
+    end
+
+    local commandSheets = {}
+    local leaderSheets = {}
+    for _, object in ipairs(getAllObjects()) do
+        local name = object.getName()
+        local color = string.match(name, '^Command Sheet %((.*)%)$')
+        if color and validColorSet[color] then
+            table.insert(commandSheets, object)
+        end
+        local color = string.match(name, '^Leader Sheet %((.*)%)$')
+        if color and validColorSet[color] then
+            table.insert(leaderSheets, object)
+        end
+    end
+
+    return commandSheets, leaderSheets
+end
+
+function toggleSheet(sheetObject, slideState)
+    -- Ignore if currently sliding.
+    if sheetObject.isSmoothMoving() then
+        return
+    end
+
+    -- Get the set of objects to slide.
+    local objects = { sheetObject }
+    local hits = Physics.cast({
+        origin = sheetObject.positionToWorld(slideState.CAST_OFFSET),
+        direction = Vector(0, 1, 0),
+        type = 3,
+        size = slideState.CAST_SIZE * self.getScale()
+    })
+    for _, hit in ipairs(hits) do
+        local object = hit.hit_object
+        if (object ~= sheetObject) and slideState.LINK(object) then
+            table.insert(objects, object)
+        end
+    end
+
+    -- Compute slide direction.
+    local x_offset = slideState.X_OFFSET
+    if sheetObject.hasTag(EXTENDED_TAG) then
+        x_offset = x_offset * -1
+        sheetObject.removeTag(EXTENDED_TAG)
+    else
+        sheetObject.addTag(EXTENDED_TAG)
+    end
+
+    -- Slide.
+    for _, object in ipairs(objects) do
+        local src = sheetObject.positionToLocal(object.getPosition())
+        local dst = sheetObject.positionToWorld(src + Vector(-x_offset, 0, 0))
+        local collide = false
+        local fast = false
+        object.setPositionSmooth(dst, collide, fast)
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)
