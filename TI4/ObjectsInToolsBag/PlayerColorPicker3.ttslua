@@ -152,6 +152,7 @@ local ANONYMOUS_FLAGSHIP_NAME = '$COLOR Flagship'
 local ANONYMOUS_PIECES_BAG_NAME = '$COLOR Box'
 local ANONYMOUS_HAND_BAG_NAME = '$COLOR Hand'
 
+-- "Objects" for organizing functions.
 local SwapPlan = {}
 local Pack = {}
 local Rename = {}
@@ -168,10 +169,6 @@ local _nextTint = false
 local _waitingForDele = {}
 
 function _reset()
-    SwapPlan = {}
-    Pack = {}
-    Rename = {}
-    Unpack = {}
     _values = {}
     _lastSwapTime = 0
     _prevColor = false
@@ -233,6 +230,7 @@ function onButtonClick(player, wha, id)
         _prevTint = false
         _nextColor = false
         _nextTint = false
+        resetUi()
         clearToggles()
         self.UI.show('swapColorsPanel')
     elseif id == 'cancel' then
@@ -662,6 +660,8 @@ function swapCoroutine()
             tint = swapPlan.nextTint
         })
     end
+
+    printToAll('Color switch complete', 'Yellow')
 
     _reset()
     return 1
