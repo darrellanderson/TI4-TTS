@@ -1,0 +1,2 @@
+- "Skilled Retreat" no longer says cannot move into a nebula.
+- Fix player color switcher repeat use.

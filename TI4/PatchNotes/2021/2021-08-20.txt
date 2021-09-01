@@ -1,0 +1,10 @@
+- Faction selector now finds faction tokens if unable to select from base/PoK set.
+- Fix faction injection error if done before mod is ready for it.
+- System injection now fully registers, fixing an "activate system" error.
+- Fix homebrew action card injection.
+- Fix player color switcher when swapping multiple times.
+- New 4p option on hyperlanes bag.
+- Moved "Blue Space Faction Pack" to google drive to reduce mod save size, non-host players can now save games.
+- Fix "Minister of Policy" sometimes not detecting a copy in a player area.
+- Fix some typos in the faction selector information.
+- New tool in tools bag to add right-click toggle to slide out reference sheets.
