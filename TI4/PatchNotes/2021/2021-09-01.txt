@@ -1,2 +1,4 @@
 - "Skilled Retreat" no longer says cannot move into a nebula.
 - Fix player color switcher repeat use.
+- Milty Draft Tool now allows 0s in slices to signal empty slots.
+- Removed a symbol from a white mech (testing sustain damage marking leftovers).
