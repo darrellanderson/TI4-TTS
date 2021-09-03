@@ -1319,11 +1319,13 @@ function SliceTokens.spawn(tiles, name, label, position, rotation)
     anchor.addAttachment(home)
 
     for i, tile in ipairs(tiles) do
-        local tilePos = Slice._getTilePosition(i, homePos, false)
-        local tileObject = SliceTokens._cloneSystemTile(tile, tilePos, spawnRotation)
-        tileObject.setScale(scale)
-        tileObject.addTag('DELETED_ITEMS_IGNORE')
-        anchor.addAttachment(tileObject)
+        if tile > 0 then
+            local tilePos = Slice._getTilePosition(i, homePos, false)
+            local tileObject = SliceTokens._cloneSystemTile(tile, tilePos, spawnRotation)
+            tileObject.setScale(scale)
+            tileObject.addTag('DELETED_ITEMS_IGNORE')
+            anchor.addAttachment(tileObject)
+        end
     end
 
     if label then
@@ -1813,7 +1815,13 @@ Slice = {
 
 --- Compute "R/I TECH LEGENDARY" label from a list of tile numbers.
 function Slice.getLabel(tiles)
-    return _systemHelper.summarizeTiles(tiles)
+    local valid = {}
+    for _, tile in ipairs(tiles) do
+        if tile > 0 then
+            table.insert(valid, tile)
+        end
+    end
+    return _systemHelper.summarizeTiles(valid)
 end
 
 --- Swap tiles so no anomalies are adjacent (in this slice).
@@ -1995,9 +2003,11 @@ function Slice.placeTiles(tiles, homeSystemPosition, applyRotation)
     assert(type(applyRotation) == 'boolean')
 
     for i, tile in ipairs(tiles) do
-        local pos = Slice._getTilePosition(i, homeSystemPosition, applyRotation)
-        local rot = { x = 0, y = 180, z = 0 }
-        SystemTiles.placeTile(tile, pos, rot)
+        if tile > 0 then
+            local pos = Slice._getTilePosition(i, homeSystemPosition, applyRotation)
+            local rot = { x = 0, y = 180, z = 0 }
+            SystemTiles.placeTile(tile, pos, rot)
+        end
     end
 end
 
@@ -2077,13 +2087,15 @@ function CustomSlices.readSlices()
         local tiles = {}
         for tile in string.gmatch(slice, '(%d+)') do
             tile = tonumber(tile)
-            if not legalTileSet[tile] then
-                table.insert(errors, 'tile "' .. tile .. '" may not be used')
+            if tile > 0 then
+                if not legalTileSet[tile] then
+                    table.insert(errors, 'tile "' .. tile .. '" may not be used')
+                end
+                if tileSet[tile] then
+                    table.insert(errors, 'tile "' .. tile .. '" used more than once')
+                end
+                tileSet[tile] = true
             end
-            if tileSet[tile] then
-                table.insert(errors, 'tile "' .. tile .. '" used more than once')
-            end
-            tileSet[tile] = true
             table.insert(tiles, tile)
         end
         if #tiles > 0 then
