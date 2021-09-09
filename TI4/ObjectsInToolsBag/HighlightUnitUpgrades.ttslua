@@ -1,5 +1,6 @@
 --- Draw lines on directionalisers (unit stands) to signal unit upgrads.
 -- @author Darrell
+-- #include <~/TI4-TTS/TI4/ObjectsInToolsBag/HighlightUnitUpgrades>
 
 function getHelperClient(helperObjectName)
     local function getHelperObject()
@@ -213,18 +214,15 @@ function _highlightUnitUpgradesCoroutine()
         local thickness = 1
         if directionaliser then
             local bounds = self.getBoundsNormalized()
-            local midY = directionaliser.getPosition().y + 0.22
-            local midZ = 1.2
+            local midY = 0.26
+            local dx = 1.2
             local lines = {}
             for _, unitPosition in ipairs(unitPositions or {}) do
-                local p0 = unitPosition
+                local p0 = directionaliser.positionToLocal(unitPosition)
                 local points = {
-                    { x = p0.x, y = midY, z = p0.z + midZ },
-                    { x = p0.x, y = midY, z = p0.z - midZ },
+                    { x = p0.x - dx, y = midY, z = p0.z },
+                    { x = p0.x + dx, y = midY, z = p0.z },
                 }
-                for i, point in ipairs(points) do
-                    points[i] = directionaliser.positionToLocal(point)
-                end
                 table.insert(lines, {
                     points = points,
                     thickness = thickness,
