@@ -341,3 +341,16 @@
 </Text>
 </Panel>
 </VerticalLayout>
+
+<!-- flash edge on chat -->
+<Panel
+    id="flashBorder"
+    active="false"
+    showAnimation="FadeIn"
+    hideAnimation="FadeOut"
+    animationDuration="0.1"
+    hideAnimationDelay="0.1"
+    >
+    <Panel width="30" color="red" rectAlignment="middleLeft" />
+    <Panel width="30" color="red" rectAlignment="middleRight" />
+</Panel>

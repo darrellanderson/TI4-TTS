@@ -939,7 +939,7 @@ function injectCard(params)
     assert(type(params) == 'table', 'params must be a table')
     assert(type(params.cardName == 'string'), 'params.cardName must be a string')
     assert((not params.deckName) or type(params.deckName == 'string'), 'deckName')
-    assert((not params.factionName) or type(params.factionName == 'string'), 'deckName')
+    assert((not params.factionName) or type(params.factionName == 'string'), 'factionName')
 
     -- Make sure _cardNameToDeckAttributes exists.
     _getDeckAttributes('__bogus__')
@@ -1202,6 +1202,11 @@ function deal(params)
     assert(type(params.count) == 'number' and params.count > 0)
 
     params.deckAttributes = assert(DECKS[params.deck], 'bad deck name')
+
+    if params.count > 9 then
+        printToColor('Attempted to deal too many cards, please wait a moment between number presses', params.color, 'Yellow')
+        return
+    end
 
     local deckWithoutS = string.match(params.deck, '^(.*)s$') or params.deck
     deckWithoutS = string.lower(deckWithoutS)
