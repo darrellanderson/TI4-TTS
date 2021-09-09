@@ -1,0 +1,30 @@
+--- Flash the screen when a player gets a !whisper.
+-- @author Darrell
+function doChatNotification(playerColor)
+    local uiElementId = 'flashBorder'
+    local function setVisibility(value)
+        -- Get visibility as a set.
+        local vis = UI.getAttribute(uiElementId, 'visibility') or ''
+        local visSet = {}
+        for color in string.gmatch(vis, '[^|]+') do
+            visSet[color] = true
+        end
+
+        -- Apply visibility.
+        visSet[playerColor] = value or nil
+
+        -- Recreate visibility string.
+        local visList = {}
+        for color, _ in pairs(visSet) do
+            table.insert(visList, color)
+        end
+        vis = table.concat(visList, '|')
+        local active = #visList > 0
+
+        -- Apply.
+        UI.setAttribute(uiElementId, 'visibility', vis)
+        UI.setAttribute(uiElementId, 'active', active)
+    end
+    setVisibility(true)
+    Wait.time(setVisibility, 0.2)  -- value is nil
+end
