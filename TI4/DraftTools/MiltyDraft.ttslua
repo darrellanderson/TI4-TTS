@@ -1338,7 +1338,7 @@ function SliceTokens.spawn(tiles, name, label, position, rotation)
             scale          = { x = 1, y = 1, z = 1 },
             width          = 0,
             height         = 0,
-            font_size      = 400,
+            font_size      = 600,
             font_color     = { r = 0, g = 0, b = 0 }
         })
 
@@ -1498,6 +1498,10 @@ function SeatTokens.moveToken(color, label, position, rotation)
     token.setScale({ x = 2.5, y = 0.5, z = 2.5 })
     if label then
         token.clearButtons()
+        local fontSize = 100
+        if string.len(label) < 4 then
+            fontSize = 300
+        end
         token.createButton({
             click_function = 'doNothing',
             function_owner = self,
@@ -1507,7 +1511,7 @@ function SeatTokens.moveToken(color, label, position, rotation)
             scale          = { x = 1, y = 1, z = 1 },
             width          = 0,
             height         = 0,
-            font_size      = 80,
+            font_size      = fontSize,
             font_color     = { r = 0, g = 0, b = 0 }
         })
     end
