@@ -1,30 +1,56 @@
 --- Flash the screen when a player gets a !whisper.
 -- @author Darrell
-function doChatNotification(playerColor)
-    local uiElementId = 'flashBorder'
-    local function setVisibility(value)
-        -- Get visibility as a set.
-        local vis = UI.getAttribute(uiElementId, 'visibility') or ''
-        local visSet = {}
-        for color in string.gmatch(vis, '[^|]+') do
-            visSet[color] = true
-        end
+local _chatNotificationQueue = {}
+function doChatNotification(srcColor, dstColor)
+    assert(type(srcColor) == 'string' and type(dstColor) == 'string')
 
-        -- Apply visibility.
-        visSet[playerColor] = value or nil
-
-        -- Recreate visibility string.
-        local visList = {}
-        for color, _ in pairs(visSet) do
-            table.insert(visList, color)
-        end
-        vis = table.concat(visList, '|')
-        local active = #visList > 0
-
-        -- Apply.
-        UI.setAttribute(uiElementId, 'visibility', vis)
-        UI.setAttribute(uiElementId, 'active', active)
+    -- Removed exisiting EOF.
+    local queueWasEmpty = (#_chatNotificationQueue) == 0
+    if not queueWasEmpty then
+        local entry = table.remove(_chatNotificationQueue)
+        assert(entry.eof, 'not eof')
     end
-    setVisibility(true)
-    Wait.time(setVisibility, 0.2)  -- value is nil
+
+    -- Queue new actions (shared element, do one color at a time).
+    table.insert(_chatNotificationQueue, {
+        srcColor = srcColor,
+        dstColor = dstColor,
+        show = true
+    })
+    table.insert(_chatNotificationQueue, {
+        hide = true
+    })
+    table.insert(_chatNotificationQueue, {
+        srcColor = srcColor,
+        dstColor = dstColor,
+        show = true
+    })
+    table.insert(_chatNotificationQueue, {
+        hide = true
+    })
+    table.insert(_chatNotificationQueue, {
+        eof = true -- hide finished when this comes up
+    })
+
+    local function serviceChatNotificationQueue()
+        local entry = table.remove(_chatNotificationQueue, 1)
+        if entry and entry.show then
+            UI.setAttribute('flashBorderLeft', 'color', srcColor)
+            UI.setAttribute('flashBorderRight', 'color', srcColor)
+            UI.setAttribute('flashBorder', 'visibility', dstColor)
+            UI.setAttribute('flashBorder', 'active', true)
+            UI.show('flashBorder')
+        elseif entry and entry.hide then
+            UI.hide('flashBorder')
+        elseif (not entry) or entry.eof then
+            UI.setAttribute('flashBorder', 'active', false)
+        end
+        if (#_chatNotificationQueue) > 0 then
+            local delay = UI.getAttribute('flashBorder', 'animationDuration') or 0.1
+            Wait.time(serviceChatNotificationQueue, tonumber(delay) * 1.5)
+        end
+    end
+    if queueWasEmpty then
+        serviceChatNotificationQueue()
+    end
 end

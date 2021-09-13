@@ -342,15 +342,14 @@
 </Panel>
 </VerticalLayout>
 
-<!-- flash edge on chat -->
+<!-- flash edge on chat (slide animations do not work, use fade) -->
 <Panel
     id="flashBorder"
     active="false"
     showAnimation="FadeIn"
     hideAnimation="FadeOut"
     animationDuration="0.1"
-    hideAnimationDelay="0.1"
     >
-    <Panel width="30" color="red" rectAlignment="middleLeft" />
-    <Panel width="30" color="red" rectAlignment="middleRight" />
+    <Panel id="flashBorderLeft" width="10" color="red" rectAlignment="middleLeft" />
+    <Panel id="flashBorderRight" width="10" color="red" rectAlignment="middleRight" />
 </Panel>
