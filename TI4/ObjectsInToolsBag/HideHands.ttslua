@@ -1,3 +1,5 @@
+-- DEPRECATED.  NOW THAT ONLY THE CORRECT HANDS EXIST (CREATE/DELETE FOR PLAYER
+-- COUNT), UNUSED HANDS IS ENABLED LEAVING CARDS HIDDEN ON PLAYER LEAVING.
 -- Place hidden zone over hands.
 -- @author Darrell
 -- #include <~/CrLua/Objects/TI4_HideHands>
