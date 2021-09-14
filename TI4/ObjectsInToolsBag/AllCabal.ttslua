@@ -37,9 +37,6 @@ local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
 local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
 local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
 
--- There's a bug with hero injection, until the mod updates work around it.
-local HERO_INJECTION_WORKAROUND = true
-
 _factionName = false
 _homeSystem = false
 _homeSystemNameSet = {}
@@ -48,7 +45,7 @@ _pendingDeleteSet = {}
 function onLoad(saveState)
     local names = {}
     for _, faction in pairs(_factionHelper.allFactions(true)) do
-        if (not faction.source) or faction.source == 'PoK' then
+        if (faction.source == 'base') or (faction.source == 'PoK') then
             table.insert(names, faction.tokenName)
         end
     end
@@ -226,11 +223,6 @@ function _rewriteFaction(faction, color)
     myFaction.frankenName = color
     myFaction.shortName = color
     myFaction.flagship = color .. ' Flagship'
-
-    if HERO_INJECTION_WORKAROUND then
-        myFaction.hero = color .. ' Hero'
-    end
-
     return myFaction
 end
 
@@ -303,12 +295,6 @@ function _rewriteBoxData(boxData, srcFaction, dstFaction)
     local tile = _findInContainedObjects(myData, srcFaction.tokenName .. ' Tile')
     tile.Nickname = dstFaction.tokenName .. ' Tile'
     _homeSystemNameSet[tile.Nickname] = true
-
-    if HERO_INJECTION_WORKAROUND then
-        local bag = _findInContainedObjects(myData, dstFaction.tokenName .. ' Leaders Bag')
-        local card = _findInContainedObjects(bag, srcFaction.hero)
-        card.Nickname = dstFaction.hero
-    end
 
     return myData
 end
