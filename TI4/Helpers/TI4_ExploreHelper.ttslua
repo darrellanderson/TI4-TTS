@@ -620,6 +620,7 @@ function checkCardForToken(object_spawned, planetName)
 
     local explorationBag = _getByName('Exploration Bag', 'Bag')
     local deltaY = 1
+    local result = false
     for _, entry in ipairs(explorationBag.getObjects()) do
         if tokensToRetrieveSet[entry.name] then
             -- Only get each token once.
@@ -652,9 +653,10 @@ function checkCardForToken(object_spawned, planetName)
             -- so it will get added to the hand rather than fall through it.
             token.use_hands = true
 
-            return true
+            result = true
         end
     end
+    return result
 end
 
 -------------------------------------------------------------------------------
