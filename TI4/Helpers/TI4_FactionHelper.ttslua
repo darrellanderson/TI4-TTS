@@ -1681,14 +1681,16 @@ function _carrionHeroAbilityCoroutine()
     end
     assert(factionTokenName and factionColor, 'Dimensional Anchor: Trying to invoke Hero Ability, but no faction with "It Feeds on Carrion" is at the table.')
 
-    --Find each dimensional tear token (Cabal only)
-    local dimensionalTearName = "Tear Token (Cabal)"
+    --Find each dimensional tear token (Cabal and Nekro)
     local dimTokenToPosition = {}
     local anyDimensionalTears = false
     for _, object in ipairs(getAllObjects()) do
-        if object.tag == 'Tile' and object.getName() == dimensionalTearName then
-            dimTokenToPosition[object.getGUID()] = object.getPosition()
-            anyDimensionalTears = true
+        if object.tag == 'Tile' then
+            local objname = object.getName()
+            if objname == 'Tear Token (Cabal)' or objname == 'Tear Token (Nekro)' then
+                dimTokenToPosition[object.getGUID()] = object.getPosition()
+                anyDimensionalTears = true
+            end
         end
     end
     coroutine.yield(0)
