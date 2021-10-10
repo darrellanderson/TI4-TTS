@@ -888,6 +888,8 @@ function FrankenBags.getDraftCandidates()
             local faction = name and _factionHelper.fromTokenName(name)
             if faction then
                 frankenNameSet[faction.frankenName or '-'] = true
+                frankenNameSet[faction.tokenName or '-'] = true
+                frankenNameSet[faction.name or '-'] = true
                 flagshipSet[faction.flagship or '-'] = true
                 for _, ability in ipairs(faction.abilities or {}) do
                     abilitySet[ability] = true
@@ -980,8 +982,12 @@ function FrankenBags.fillSourceBagsFromSelf()
             isFrankenName = isFrankenName or string.match(name, '^Commodity Tiles')
             if isFrankenName then
                 for _, entry in ipairs(object.getObjects()) do
-                    local prefix = string.match(entry.name, '^([^ ]*) ')
-                    if candidates.frankenNameSet[prefix] then
+                    local frankenName = false
+                    frankenName = frankenName or string.match(entry.name, '^(.*) Starting Units$')
+                    frankenName = frankenName or string.match(entry.name, '^(.*) Fleet$')
+                    frankenName = frankenName or string.match(entry.name, '^(.*) Starting Tech$')
+                    frankenName = frankenName or string.match(entry.name, '^(.*) Commodities$')
+                    if candidates.frankenNameSet[frankenName] then
                         local dstName = assert(string.match(name, '^(.*) %(.*%)$'))
                         moveTileToDst(entry.name, entry.guid, dstName)
                     end
