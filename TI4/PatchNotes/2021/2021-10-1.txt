@@ -1,0 +1,19 @@
+v44
+- Include Nekro dimensional tears for Vuil'raith hero (thanks BradleySigma).
+- Fix a Franken Box bug that could cause setup to fail.
+- Add a few checks to make it easier to mix homebrew with Franken.
+
+Steps to add DS Franken:
+
+The Franken box already knows to look for "(X) Faction Pack" named items during the "gather draft items" step, so having the franken box AND ds box on the table at the same time when selecting that option automatically grabs the DS faction components.
+
+For the Franken bits create the following six bags and drop them inside the Franken box:
+
+1. "Starting Units (DS)"
+2. "Starting Techs (DS)"
+3. "Flagships (DS)"
+4. "Faction Abilities (DS)"
+5. "Commodity Tiles (DS)"
+6. "Base Unit Tiles (DS)"
+
+At that point you're done, unless any items need to be added to the undraftable set.  If the DS box is on the table the Franken setup will include those factions, pulling the linked components from the above bags you created.

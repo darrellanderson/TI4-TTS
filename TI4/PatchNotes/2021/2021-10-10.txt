@@ -1,0 +1,4 @@
+v45:
+- Milty Draft Tool now accepts "url" style custom strings naming slices, labels, and factions (thanks Wekker).
+- Milty Draft Tool has SCPT invitation "urls" available as right-click options.
+- Added Outposts homebrew expansion to Variants bag (thanks unfulvio).

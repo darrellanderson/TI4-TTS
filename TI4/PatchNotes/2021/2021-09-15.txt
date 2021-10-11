@@ -1,0 +1,6 @@
+- Increase text size on Milty Draft widgets.
+- Added "bag draft builder" configurable draft to tools bag (thanks Arinok + unknown original author).
+- "Highlight Unit Upgrades" now draws lines correctly when unit stand is rotated.
+- Prevent drawing more than 9 cards at a time from any deck.  If a player presses "1" then "1" again too quickly it will draw 11 vs 2.
+- Flash screen edges when receiving a !whisper.
+- Fix "all X faction" tool to include base game factions.
