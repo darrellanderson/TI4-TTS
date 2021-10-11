@@ -73,6 +73,15 @@ local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
 
 -------------------------------------------------------------------------------
 
+local PRESET_INPUTS = {
+    ['SCPT Invitational 1'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Clan of Saar|Nomad|Winnu|L1Z1X Mindnet|Ghosts of Creuss|Mahact Gene-Sorcerers|Xxcha Kingdom|Vuil'raith Cabal",
+    ['SCPT Invitational 2'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky  Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Embers of Muaat|Arborec|Yin Brotherhood|Naalu Collective|Mentak Coalition|Yssaril Tribes|Sardakk N'orr|Nekro Virus",
+    ['SCPT Invitational 3'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky  Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Argent Flight|Barony of Letnev|Empyrean|Titans of Ul|Universities of Jol-Nar|Emirates of Hacan|Federation of Sol|Naaz-Rokha Alliance",
+    ['SCPT Invitational 4'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky  Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Mahact Gene-Sorcerers|Ghosts of Creuss|Nomad|Naaz-Rokha Alliance|Titans of Ul|Argent Flight|Vuil'raith Cabal|Empyrean",
+    ['SCPT Invitational 5'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky  Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Winnu|Yssaril Tribes|Arborec|Nekro Virus|Embers of Muaat|Yin Brotherhood|Naalu Collective|Clan of Saar",
+    ['SCPT Invitational 6'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky  Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Barony of Letnev|L1Z1X Mindnet|Mentak Coalition|Federation of Sol|Emirates of Hacan|Universities of Jol-Nar|Xxcha Kingdom|Sardakk N'orr",
+}
+
 _config = {
     DEFAULT_SLICES = 7,
     DEFAULT_FACTIONS = 9,
@@ -131,18 +140,17 @@ local BUTTONS = {
     }
 }
 
--- Expose for outsiders to call, use tool values for build rules.
-function getSlices()
-    local slices = false
-    repeat
-        slices = VolverMilty.makeHands(_state.numSlices)
-    until slices
-    VolverMilty.addRedTiles(slices, 2)
-    for i, slice in ipairs(slices) do
-        slices[i] = Slice.randomizeAndFixAdjacentAnomalies(slice)
-    end
-    return slices
-end
+local LABEL_COLORS = {
+    Color.Red,
+    Color.Green,
+    Color.Orange,
+    Color.Pink,
+    Color.Yellow,
+    Color.Purple,
+    Color.Blue,
+    Color.White,
+    Color.Teal,
+}
 
 function onLoad(saveState)
     math.randomseed(os.time())
@@ -224,7 +232,18 @@ function onLoad(saveState)
     end
     self.addContextMenuItem('Look at me', lookAtMe)
 
-    self.addContextMenuItem('Input slices', CustomSlices.toggleInput)
+    self.addContextMenuItem('Input slices', CustomSetup.toggleInput)
+
+    for name, value in pairs(PRESET_INPUTS) do
+        local function setInput()
+            if not CustomSetup.isInputVisible() then
+                CustomSetup.showInput()
+            end
+            CustomSetup.setInputValue(value)
+            doSetup()
+        end
+        self.addContextMenuItem(name, setInput)
+    end
 end
 
 function onSave()
@@ -397,12 +416,16 @@ function setupCoroutine()
     coroutine.yield(0)
 
     -- Optionally override slices with manually-entered "slice string".
-    if CustomSlices.isInputVisible() then
-        _state.tileLists = CustomSlices.readSlices() or nil
+    local customSliceNames = {}
+    local factionNames = FactionTokens.randomFactionNames(_state.numFactions)
+    if CustomSetup.isInputVisible() then
+        _state.tileLists = CustomSetup.readSlices() or nil
         if not _state.tileLists then
             return 1 -- assume readSlices reported the error
         end
-        CustomSlices.hideInput()
+        customSliceNames = CustomSetup.readSliceLabels() or customSliceNames
+        factionNames = CustomSetup.readFactions() or factionNames
+        CustomSetup.hideInput()
     end
 
     -- Place slices.
@@ -410,8 +433,9 @@ function setupCoroutine()
         printToAll('Slice ' .. i .. ': ' .. table.concat(tileList, ', '), 'Yellow')
         local name = SliceTokens.getSliceName(i)
         local position = Position.draftSlice(i)
-        local label = name .. '\n' .. Slice.getLabel(tileList)
-        local slice = SliceTokens.spawn(tileList, name, label, position, self.getRotation())
+        local label = Slice.getSummary(tileList) .. '\n' .. (customSliceNames[i] or name)
+        local labelColor = LABEL_COLORS[i]
+        local slice = SliceTokens.spawn(tileList, name, label, labelColor, position, self.getRotation())
         local scale = slice.getScale()
         local s = 0.25
         slice.setScale({ x = scale.x * s, y = scale.y, z = scale.z * s })
@@ -436,13 +460,9 @@ function setupCoroutine()
     coroutine.yield(0)
 
     -- Add draft factions.
-    FactionTokens.shuffle()
-    local factionNames = {}
-    for i = 1, _state.numFactions do
+    for i, factionName in ipairs(factionNames) do
         local position = Position.draftFaction(i)
-        local token = FactionTokens.placeRandomToken(position, self.getRotation())
-        local factionName = assert(string.match(token.getName(), '^(.*) Faction Token$'))
-        table.insert(factionNames, factionName)
+        local token = FactionTokens.placeToken(factionName, position, self.getRotation())
         coroutine.yield(0)
     end
     coroutine.yield(0)
@@ -1280,7 +1300,7 @@ SliceTokens = {}
 
 --- Create a single object with the home system (grey) and slice tiles,
 -- merging tiles into it as child objects.  The overall slice has a safe guid.
-function SliceTokens.spawn(tiles, name, label, position, rotation)
+function SliceTokens.spawn(tiles, name, label, labelColor, position, rotation)
     assert(type(tiles) == 'table')
     assert(type(name) == 'string')
     assert(type(label) == 'string')
@@ -1333,15 +1353,14 @@ function SliceTokens.spawn(tiles, name, label, position, rotation)
             click_function = 'doNothing',
             function_owner = self,
             label          = label,
-            position       = { x = 0, y = 0.31, z = 6.06 },
+            position       = { x = 0, y = 0.31, z = 6.75 },
             rotation       = { x = 0, y = 0, z = 0 },
             scale          = { x = 1, y = 1, z = 1 },
             width          = 0,
             height         = 0,
             font_size      = 600,
-            font_color     = { r = 0, g = 0, b = 0 }
+            font_color     = labelColor or 'White',
         })
-
     end
 
     anchor.setPosition(position)
@@ -1370,7 +1389,7 @@ function SliceTokens._spawnHex(position, rotation, label)
         snap_to_grid      = false
     })
     hex.setCustomObject(params)
-    hex.setColorTint('Grey')
+    hex.setColorTint('Black')
     hex.use_grid = false
     hex.use_snap_points = false
     if label then
@@ -1564,19 +1583,43 @@ function FactionTokens._getBag()
     error('FactionTokens._getBag: missing "' .. FactionTokens.BAG_NAME .. '"')
 end
 
-function FactionTokens.shuffle()
+function FactionTokens.randomFactionNames(count)
+    assert(type(count) == 'number')
+    local candidates = {}
     local bag = FactionTokens._getBag()
-    bag.shuffle()
+    for _, entry in ipairs(bag.getObjects()) do
+        local factionName = string.match(entry.name, '^(.*) Faction Token*')
+        assert(_factionHelper.fromTokenName(factionName))
+        table.insert(candidates, factionName)
+    end
+
+    local result = {}
+    while #result < count do
+        local i = math.random(1, #candidates)
+        local factionName = table.remove(candidates, i)
+        table.insert(result, factionName)
+    end
+    return result
 end
 
-function FactionTokens.placeRandomToken(position, rotation)
+function FactionTokens.placeToken(factionName, position, rotation)
+    assert(type(factionName) == 'string')
+    local faction = assert(_factionHelper.fromTokenName(factionName))
+    local factionTokenName = faction.tokenName .. ' Faction Token'
+
     local bag = FactionTokens._getBag()
-    local token = bag.takeObject({
-        position          = position,
-        rotation          = rotation,
-        smooth            = true,
-    })
-    return token
+    for i, entry in ipairs(bag.getObjects()) do
+        if entry.name == factionTokenName then
+            local token = bag.takeObject({
+                index             = entry.index,
+                position          = position,
+                rotation          = rotation,
+                smooth            = true,
+            })
+            return token
+        end
+    end
+    error('FactionTokens.placeToken: missing token "' .. factionName .. '"')
 end
 
 function FactionTokens.getAll(includeInsideSelf)
@@ -1600,6 +1643,7 @@ function FactionTokens.stow()
     local bag = FactionTokens._getBag()
     for _, object in ipairs(FactionTokens.getAll(true)) do
         bag.putObject(object)
+        coroutine.yield(0) -- wait a moment to prevent deck from forming
     end
 end
 
@@ -1818,7 +1862,7 @@ Slice = {
 }
 
 --- Compute "R/I TECH LEGENDARY" label from a list of tile numbers.
-function Slice.getLabel(tiles)
+function Slice.getSummary(tiles)
     local valid = {}
     for _, tile in ipairs(tiles) do
         if tile > 0 then
@@ -2017,36 +2061,56 @@ end
 
 -------------------------------------------------------------------------------
 
-function _onCustomSlicesInput()
+function _onCustomSetupInput()
 end
 
-CustomSlices = {}
+CustomSetup = {}
 
-function CustomSlices._getInputIndex()
+function CustomSetup._getInputIndex()
     for _, input in ipairs(self.getInputs() or {}) do
-        if input.input_function == '_onCustomSlicesInput' then
+        if input.input_function == '_onCustomSetupInput' then
             return input.index
         end
     end
 end
 
-function CustomSlices.toggleInput()
-    if CustomSlices.isInputVisible() then
-        CustomSlices.hideInput()
+function CustomSetup._getInputValue(urlArg)
+    local index = assert(CustomSetup._getInputIndex())
+    local input = assert(self.getInputs()[index + 1]) -- index is 0 based, lua is 1
+    local value = assert(input.value)
+
+    -- If using url arg style, extract just the given url arg.
+    if urlArg then
+        value = string.match(value, urlArg .. '=([^&]*)')
+    end
+
+    return value
+end
+
+function CustomSetup.setInputValue(value)
+    local index = assert(CustomSetup._getInputIndex())
+    local input = assert(self.getInputs()[index + 1]) -- index is 0 based, lua is 1
+    input.value = value
+    self.editInput(input)
+end
+
+function CustomSetup.toggleInput()
+    if CustomSetup.isInputVisible() then
+        CustomSetup.hideInput()
     else
-        CustomSlices.showInput()
+        CustomSetup.showInput()
     end
 end
 
-function CustomSlices.isInputVisible()
-    return CustomSlices._getInputIndex() and true or false
+function CustomSetup.isInputVisible()
+    return CustomSetup._getInputIndex() and true or false
 end
 
-function CustomSlices.showInput()
-    assert(not CustomSlices.isInputVisible())
+function CustomSetup.showInput()
+    assert(not CustomSetup.isInputVisible())
     local hint = 'Enter slices as "# # # # # | # # # # # | ..." with [left, center, right, left equidistant, far] tile numbers for each slice, then click "setup"'
     self.createInput({
-        input_function = '_onCustomSlicesInput',
+        input_function = '_onCustomSetupInput',
         function_owner = self,
         label          = hint,
         alignment      = 2, -- left
@@ -2061,16 +2125,15 @@ function CustomSlices.showInput()
     })
 end
 
-function CustomSlices.hideInput()
-    assert(CustomSlices.isInputVisible())
-    local index = assert(CustomSlices._getInputIndex())
+function CustomSetup.hideInput()
+    assert(CustomSetup.isInputVisible())
+    local index = assert(CustomSetup._getInputIndex())
     self.removeInput(index)
 end
 
-function CustomSlices.readSlices()
-    local index = assert(CustomSlices._getInputIndex())
-    local input = assert(self.getInputs()[index + 1]) -- index is 0 based, lua is 1
-    local value = assert(input.value)
+function CustomSetup.readSlices()
+    -- Try url arg, failing that use the whole string.
+    local value = CustomSetup._getInputValue('slices') or CustomSetup._getInputValue(false)
 
     local legalTileSet = {}
     for _, system in pairs(_systemHelper.systems()) do
@@ -2123,6 +2186,71 @@ function CustomSlices.readSlices()
 
     broadcastToAll('Milty Draft using custom slices: "' .. value .. '"', 'Yellow')
     return slices
+end
+
+function CustomSetup.readFactions()
+    local value = CustomSetup._getInputValue('factions')
+    if not CustomSetup._getInputIndex() then
+        print('xxx no input')
+    end
+    if not value then
+        print('xxx no value')
+        return false
+    end
+
+    local errors = {}
+    local factionNames = {}
+    for factionName in string.gmatch(value, '([^|]+)') do
+        factionName = factionName:gsub("^%s*(.-)%s*$", "%1") -- trim
+        local faction = _factionHelper.fromTokenName(factionName)
+        if faction then
+            table.insert(factionNames, faction.tokenName)
+        else
+            table.insert(errors, 'bad faction name "' .. factionName .. '"')
+        end
+    end
+    if #factionNames == 0 then
+        table.insert(errors, 'no faction names')
+    elseif #factionNames > 9 then
+        table.insert(errors, 'too many faction names')
+    end
+
+    if #errors > 0 then
+        local message = table.concat(errors, '\n')
+        broadcastToAll('Milty Draft error:\n' .. message, 'Red')
+        return false
+    end
+
+    broadcastToAll('Milty Draft using custom factions: "' .. table.concat(factionNames, ', ') .. '"', 'Yellow')
+    return factionNames
+end
+
+function CustomSetup.readSliceLabels()
+    local value = CustomSetup._getInputValue('labels')
+    if not value then
+        return false
+    end
+
+    local errors = {}
+    local labels = {}
+    for label in string.gmatch(value, '([^|]+)') do
+        label = label:gsub("^%s*(.-)%s*$", "%1") -- trim
+        table.insert(labels, label)
+    end
+    if #labels == 0 then
+        table.insert(errors, 'no labels')
+    elseif #labels > 9 then
+        table.insert(errors, 'too many labels')
+    end
+
+    if #errors > 0 then
+        local message = table.concat(errors, '\n')
+        broadcastToAll('Milty Draft error:\n' .. message, 'Red')
+        return false
+    end
+
+    broadcastToAll('Milty Draft using custom slice labels: "' .. table.concat(labels, ', ') .. '"', 'Yellow')
+    return labels
 end
 
 -------------------------------------------------------------------------------
