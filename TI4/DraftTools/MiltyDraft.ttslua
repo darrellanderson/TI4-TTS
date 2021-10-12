@@ -2190,11 +2190,7 @@ end
 
 function CustomSetup.readFactions()
     local value = CustomSetup._getInputValue('factions')
-    if not CustomSetup._getInputIndex() then
-        print('xxx no input')
-    end
     if not value then
-        print('xxx no value')
         return false
     end
 
@@ -2235,6 +2231,7 @@ function CustomSetup.readSliceLabels()
     local labels = {}
     for label in string.gmatch(value, '([^|]+)') do
         label = label:gsub("^%s*(.-)%s*$", "%1") -- trim
+        label = label:gsub('\\n', '\n') -- undo TTS escape
         table.insert(labels, label)
     end
     if #labels == 0 then
