@@ -37,9 +37,9 @@ function doChatNotification(srcColor, dstColor)
         if entry and entry.show then
             UI.setAttribute('flashBorderLeft', 'color', srcColor)
             UI.setAttribute('flashBorderRight', 'color', srcColor)
-            UI.setAttribute('flashBorder', 'visibility', dstColor)
             UI.setAttribute('flashBorder', 'active', true)
             UI.show('flashBorder')
+            UI.setAttribute('flashBorder', 'visibility', dstColor) -- MUST be after active/show
         elseif entry and entry.hide then
             UI.hide('flashBorder')
         elseif (not entry) or entry.eof then
