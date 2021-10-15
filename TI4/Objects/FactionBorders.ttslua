@@ -14,19 +14,19 @@ local TAG = 'CrLua.Objects.ColorFactionMapTiles'
 local DEFAULT_CONFIG = {
     enabled = true,
     show = {
-        planet = false,
-        ground = true,
+        planet = true,
+        ground = false,
         space = true,
     },
     thickness = {
         planet = 0.1,
-        ground = 0.15,
-        space = 0.075
+        ground = 0.05,
+        space = 0.1
     },
     padding = {
         planet = 0,
-        ground = 0.1,
-        space = 0.4
+        ground = 0.4,
+        space = 0.07
     },
     updateBetweenTurns = false,
     invisibleToSet = {}
@@ -2337,4 +2337,3 @@ CrLua.lock()
 -- ############################################################################
 -- #### END #include <~/CrLua/Objects/TI4_Faction_Borders>
 -- ############################################################################
-
