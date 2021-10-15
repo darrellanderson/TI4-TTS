@@ -623,6 +623,40 @@ function finishCoroutine()
     DraftSelectionMats.stow()
     coroutine.yield(0)
 
+    -- Move cards along with players (PhilRoi feature request, not standard).
+    for srcColor, choices in pairs(colorToChoices) do
+        local srcPlayer = Player[srcColor]
+        local srcZoneAttrs = _zoneHelper.zoneAttributes(srcColor)
+        local dstColor = choices.seatColor
+        local dstZoneAttrs = dstColor and _zoneHelper.zoneAttributes(dstColor)
+        local srcPos = srcZoneAttrs and srcZoneAttrs.center
+        local dstPos = dstZoneAttrs and dstZoneAttrs.center
+        local dstRot = dstZoneAttrs and dstZoneAttrs.rotation
+        if srcPlayer and srcPos and dstPos and dstRot then
+            for i = 1, srcPlayer.getHandCount() do
+                for j, object in ipairs(srcPlayer.getHandObjects(i)) do
+                    -- Move out of hand instantly, then slide to dst.
+                    object.setPosition({
+                        x = srcPos.x,
+                        y = srcPos.y + 3 + j * 0.2,
+                        z = srcPos.z
+                    })
+                    object.setRotation({
+                        x = 0,
+                        y = dstRot.y,
+                        z = 180
+                    })
+                    coroutine.yield(0)
+                    object.setPositionSmooth({
+                        x = dstPos.x,
+                        y = dstPos.y + 3 + j * 0.2,
+                        z = dstPos.z
+                    }, false, false)
+                end
+            end
+        end
+    end
+
     -- Move players to their chosen seat.
     for _, choices in pairs(colorToChoices) do
         if choices.player then
@@ -631,6 +665,9 @@ function finishCoroutine()
             coroutine.yield(0)
         end
     end
+
+
+    -- Finish move players to chosen seat.
     for _, choices in pairs(colorToChoices) do
         if choices.player then
             choices.player.changeColor(choices.seatColor)
