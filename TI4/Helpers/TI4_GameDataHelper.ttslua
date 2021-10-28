@@ -45,7 +45,7 @@ local GAME_DATA_LOCALHOST_KEY = 'localhost'
 local MIN_PERIODIC_SECONDS = 30
 local MAX_PERIODIC_SECONDS = 3600
 local DEFAULT_KEY_PERIODIC_SECONDS = 45
-local DEFAULT_ANON_PERIODIC_SECONDS = 900
+local DEFAULT_ANON_PERIODIC_SECONDS = 600
 
 -- Remember opt-in across save/reload.
 local DEFAULT_STATE = {
@@ -54,17 +54,17 @@ local DEFAULT_STATE = {
 
 -- !gamedata registration for streamer overlay needs to be redone manually.
 _gameDataKey = false
-_timerPeriodicSeconds = false
 
 local _state = DEFAULT_STATE
-local _timerId = false  -- for regular gamedata updates
+local _anonymizedTimerId = false
+local _streamerTimerId = false
 local _analyticsTimerId = false
 
 -- Time based throttle for external pokes.
 local _triggerUploadGameDataWaitId = false
 
 -- Disable update when nothing changes.
-local _lastCrc = false
+local _lastCrc = {}
 
 -------------------------------------------------------------------------------
 
@@ -85,15 +85,16 @@ function addExtraData(params)
     _state.extraData[params.name] = params
 end
 
---- Expose method so outsiders can trigger an update.
+--- Expose method so outsiders can trigger anonymized data update.
 function triggerUploadGameData()
     if _triggerUploadGameDataWaitId then
         Wait.stop(_triggerUploadGameDataWaitId)
     end
     local function wrappedUploadGameData()
         _triggerUploadGameDataWaitId = false
-        _uploadGameData()
-        _uploadAnalytics()
+        _uploadAnonymizedGameData()
+        --_uploadStreamerGameData()
+        --_uploadAnalytics()
     end
     _triggerUploadGameDataWaitId = Wait.time(wrappedUploadGameData, 10)
 end
@@ -130,7 +131,6 @@ function asyncGatherDataCoroutine()
         isFranken = _factionHelper.isFrankenEnabled() and true or false,
         scoreboard = Score.getScoreboardPoints(),
         players = {},
-        periodicSeconds = _timerPeriodicSeconds,
     }
     local colorToPlayerResult = {}
     for _, color in ipairs(_zoneHelper.zones()) do
@@ -276,54 +276,57 @@ function asyncGatherDataCoroutine()
     coroutine.yield(0)
     coroutine.yield(0)
 
-    -- Get the round.
-    local round = result.round or 0
-    -- Reject if turns are not enabled (disabled when all have passed).
-    -- Otherwise reject if any players are missing a strategy card.
-    -- (Objective flipped but not yet started new round).
-    if not Turns.enable then
-        round = false
-    else
-        local requiredStrategyCardCount = (#result.players) < 5 and 2 or 1
-        for color, playerResult in pairs(colorToPlayerResult) do
-            local strategyCards = playerResult.strategyCards or {}
-            if (#strategyCards) < requiredStrategyCardCount then
-                round = false
-                break
+    -- Include per-round history of game?
+    if params.includeHistory then
+        -- Get the round.
+        local round = result.round or 0
+        -- Reject if turns are not enabled (disabled when all have passed).
+        -- Otherwise reject if any players are missing a strategy card.
+        -- (Objective flipped but not yet started new round).
+        if not Turns.enable then
+            round = false
+        else
+            local requiredStrategyCardCount = (#result.players) < 5 and 2 or 1
+            for color, playerResult in pairs(colorToPlayerResult) do
+                local strategyCards = playerResult.strategyCards or {}
+                if (#strategyCards) < requiredStrategyCardCount then
+                    round = false
+                    break
+                end
             end
         end
-    end
-    local prevRound = 0
-    if _state.gameDataHistory and (#_state.gameDataHistory) > 0 then
-        prevRound = _state.gameDataHistory[#_state.gameDataHistory].round
-    end
-    if round and prevRound and (round > prevRound) then
-        _state.gameDataHistory = _state.gameDataHistory or {}
-        -- Add the "pure" start-of-round data, before attaching the history entry.
-        local historyEntry = copyTable(result)
-        -- Remove some fields from the history.
-        historyEntry.isFranken = nil
-        historyEntry.isPoK = nil
-        historyEntry.mapString = nil
-        historyEntry.objectives = nil
-        historyEntry.setup = nil
-        historyEntry.scoreboard = nil
-        historyEntry.turn = nil
-        for _, playerResult in ipairs(historyEntry.players) do
-            playerResult.steamName = nil
-            playerResult.factionName = nil
-            playerResult.factionShort = nil
-            playerResult.team = nil
-            playerResult.active = nil
-            playerResult.strategyCardsFaceDown = nil
-            playerResult.technologies = #playerResult.technologies  -- same order as main list
-            playerResult.crc = nil
+        local prevRound = 0
+        if _state.gameDataHistory and (#_state.gameDataHistory) > 0 then
+            prevRound = _state.gameDataHistory[#_state.gameDataHistory].round
         end
-        table.insert(_state.gameDataHistory, historyEntry)
+        if round and prevRound and (round > prevRound) then
+            _state.gameDataHistory = _state.gameDataHistory or {}
+            -- Add the "pure" start-of-round data, before attaching the history entry.
+            local historyEntry = copyTable(result)
+            -- Remove some fields from the history.
+            historyEntry.isFranken = nil
+            historyEntry.isPoK = nil
+            historyEntry.mapString = nil
+            historyEntry.objectives = nil
+            historyEntry.setup = nil
+            historyEntry.scoreboard = nil
+            historyEntry.turn = nil
+            for _, playerResult in ipairs(historyEntry.players) do
+                playerResult.steamName = nil
+                playerResult.factionName = nil
+                playerResult.factionShort = nil
+                playerResult.team = nil
+                playerResult.active = nil
+                playerResult.strategyCardsFaceDown = nil
+                playerResult.technologies = #playerResult.technologies  -- same order as main list
+                playerResult.crc = nil
+            end
+            table.insert(_state.gameDataHistory, historyEntry)
+        end
+        result.history = _state.gameDataHistory or {}
+        coroutine.yield(0)
+        coroutine.yield(0)
     end
-    result.history = _state.gameDataHistory or {}
-    coroutine.yield(0)
-    coroutine.yield(0)
 
     -- Let objects add additional top-level (not in history) data.
     for name, params in pairs(_state.extraData or {}) do
@@ -348,10 +351,15 @@ function asyncGatherDataCoroutine()
     result.timestamp = nil
     result.crc = CRC32.hash(JSON.encode(result))
     result.timestamp = saveTimestamp
+    coroutine.yield(0)
+    coroutine.yield(0)
 
     local callbackObject = getObjectFromGUID(params.guid)
     if callbackObject then
-        callbackObject.call(params.callbackFunctionName, result)
+        callbackObject.call(params.callbackFunctionName, {
+            params = params,
+            data = result
+        })
     end
     return 1
 end
@@ -2118,10 +2126,8 @@ function onLoad(saveState)
     self.addContextMenuItem('Reset State', function() _state = DEFAULT_STATE end)
 
     -- If resuming a split game restart the game data service.
-    if _state._gamedataOptIn and not _timerId then
-        startPeriodicUpdates({
-            delay = DEFAULT_ANON_PERIODIC_SECONDS
-        })
+    if _state._gamedataOptIn then
+        startPeriodicUpdates({})
     end
 end
 
@@ -2153,14 +2159,10 @@ function onSetupHelperSetupFinished(params)
     end
 
     _state._gamedataOptIn = params.gamedataOptIn
-
     _state.setupTimestamp = math.floor(os.time() * 1000) / 1000
 
-    -- If opt-in and haven't already started (streamer) game data, start now.
-    if _state._gamedataOptIn and not _timerId then
-        startPeriodicUpdates({
-            delay = DEFAULT_ANON_PERIODIC_SECONDS
-        })
+    if _state._gamedataOptIn then
+        startPeriodicUpdates({})
     end
 end
 
@@ -2192,36 +2194,47 @@ function startPeriodicUpdates(params)
     assert((not params.key) or type(params.key) == 'string')
     assert((not params.delay) or (type(params.delay) == 'number'))
 
+    -- The params.delay is associated with streamer gamedata.
     _gameDataKey = params.key or false
     local delay = params.delay or DEFAULT_KEY_PERIODIC_SECONDS
     delay = math.max(delay, MIN_PERIODIC_SECONDS)
     delay = math.min(delay, MAX_PERIODIC_SECONDS)
     assert(type(delay) == 'number')
 
-    -- Stop any existing timer.
-    if _timerId then
-        Timer.destroy(_timerId)
-        _timerId = false
+    if _anonymizedTimerId then
+        Timer.destroy(_anonymizedTimerId)
+        _anonymizedTimerId = false
     end
-
-    -- Start a new timer.
-    _timerId = self.getGUID() .. '_periodicGameData'
-    _timerPeriodicSeconds = delay
+    _anonymizedTimerId = self.getGUID() .. '_anonymizedTimerId'
     Timer.create({
-        identifier = _timerId,
-        function_name = '_uploadGameData',
+        identifier = _anonymizedTimerId,
+        function_name = '_uploadAnonymizedGameData',
+        function_owner = self,
+        delay = DEFAULT_ANON_PERIODIC_SECONDS,
+        repetitions = 0,  -- until stopped
+    })
+    _uploadAnonymizedGameData()  -- do not wait for first timer, upload one now
+
+    if _streamerTimerId then
+        Timer.destroy(_streamerTimerId)
+        _streamerTimerId = false
+    end
+    _streamerTimerId = self.getGUID() .. '_streamerTimerId'
+    Timer.create({
+        identifier = _streamerTimerId,
+        function_name = '_uploadStreamerGameData',
         function_owner = self,
         delay = delay,
         repetitions = 0,  -- until stopped
     })
-    _uploadGameData()  -- do not wait for first timer, upload one now
+    _uploadStreamerGameData()  -- do not wait for first timer, upload one now
 
     -- Start analytics on a separate timer.
     if _analyticsTimerId then
         Timer.destroy(_analyticsTimerId)
         _analyticsTimerId = false
     end
-    _analyticsTimerId = self.getGUID() .. '_periodicAnalytics'
+    _analyticsTimerId = self.getGUID() .. '_analyticsTimerId'
     Timer.create({
         identifier = _analyticsTimerId,
         function_name = '_uploadAnalytics',
@@ -2235,49 +2248,75 @@ function startPeriodicUpdates(params)
 end
 
 function stopPeriodicUpdates()
+    -- Only stop the streamer updates.
     _gameDataKey = false
-    if _timerId then
-        Timer.destroy(_timerId)
-        _timerId = false
-    end
-    if _analyticsTimerId then
-        Timer.destroy(_analyticsTimerId)
-        _analyticsTimerId = false
+    if _streamerTimerId then
+        Timer.destroy(_streamerTimerId)
+        _streamerTimerId = false
     end
 end
 
 -------------------------------------------------------------------------------
 
-function _sendGameData()
-    if _gameDataKey then
-        -- ALWAYS send when game data key is present
-        return true
-    elseif _state._gamedataOptIn then
-        -- To help prevent curiosity and solo griefing corruption REQUIRE
-        -- multiple players before uploading vonulary anonymized game data.
-        local seated = getSeatedPlayers()
-        return seated and #seated > 1
+function _shouldUploadAnonymized()
+    if not _state._gamedataOptIn then
+        return false
     end
+    if _gameDataKey == GAME_DATA_LOCALHOST_KEY then
+        return true
+    end
+    -- To help prevent curiosity and solo griefing corruption REQUIRE
+    -- multiple players before uploading vonultary anonymized game data.
+    local seated = getSeatedPlayers() or {}
+    return #seated > 1
 end
 
-function _uploadGameData()
-    if not _sendGameData() then
+function _uploadAnonymizedGameData()
+    if not _shouldUploadAnonymized() then
         return
     end
     asyncGatherData({
         guid = self.getGUID(),
-        includeSteamNames = _gameDataKey and true or false,
-        callbackFunctionName = '_uploadGameDataCallback'
+        includeSteamNames = false,
+        includeHistory = true,
+        callbackFunctionName = '_uploadGameDataCallback',
+        crcKey = 'anonymized',
+        urlPath = '/posttimestamp',
+        urlArgs = {
+            timestamp = _state.setupTimestamp or 0,
+        },
     })
 end
 
-function _uploadGameDataCallback(data)
+function _uploadStreamerGameData()
+    -- ALWAYS send when game data key is present
+    if not _gameDataKey then
+        return
+    end
+    asyncGatherData({
+        guid = self.getGUID(),
+        includeSteamNames = true,
+        includeHistory = false,
+        callbackFunctionName = '_uploadGameDataCallback',
+        crcKey = 'streamer',
+        urlPath = '/postkey',
+        urlArgs = {
+            key = _gameDataKey, -- CAREFUL, passing key means record is ONLY in cache
+            timestamp = _state.setupTimestamp or 0,
+        },
+    })
+end
+
+function _uploadGameDataCallback(result)
+    local params = assert(result.params)
+    local data = assert(result.data)
+
     -- Suppress updates if nothing (other than timestamp) changed.
-    if data.crc then
-        if data.crc == _lastCrc then
+    if params.crcKey and data.crc then
+        if data.crc == _lastCrc[params.crcKey] then
             return
         end
-        _lastCrc = data.crc
+        _lastCrc[params.crcKey] = data.crc
     end
 
     local host = GAME_DATA_HOST
@@ -2285,27 +2324,32 @@ function _uploadGameDataCallback(data)
         host = GAME_DATA_LOCALHOST
     end
 
-    local urlArgs = {}
-    if _gameDataKey then
-        table.insert(urlArgs, 'key=' .. _gameDataKey)
-    end
-    table.insert(urlArgs, 'timestamp=' .. (_state.setupTimestamp or 0))
+    local path = params.urlPath or  '/data'
 
-    local url = host .. '/data'
-    if urlArgs then
-        url = url .. '?' .. table.concat(urlArgs, '&')
+    local args = {}
+    for k, v in pairs(params.urlArgs or {}) do
+        table.insert(args, k .. '=' .. v)
     end
+    args = table.concat(args, '&')
 
+    local url = host .. path .. '?' .. args
+
+    local method = 'POST'
+    local download = true -- handle the response text
+    local body = JSON.encode(data)
+    local headers = {
+        ['Request_Type'] = 'application/json',
+    }
     local function callback(result)
         if result.is_error then
-            print('!gamedata error: ' .. result.error)
+            --print('!gamedata error: ' .. result.error)
         end
     end
-    WebRequest.post(url, JSON.encode(data), callback)
+    WebRequest.custom(url, method, download, body, headers, callback)
 end
 
 function _uploadAnalytics()
-    if not _sendGameData() then
+    if not _shouldUploadAnonymized() then
         return
     end
     Analytics.report()
