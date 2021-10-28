@@ -1,0 +1,369 @@
+-- PhilRoi's World Charity Brawl extension to Milty Draft.
+--
+-- Extend Milty Draft Tool with:
+-- (9) Event cards.
+-- (Player#) Action cards.
+-- (Player#) Strategy Draft Order tokens.
+-- (2) Shadow Ban tokens.
+--
+-- During setup shuffle players, set draft order to be match seats from speaker.
+--
+-- #include <~/TI4-TTS/TI4/DraftTools/PTSD>
+-- @author Darrell
+
+local MILTY_STRING = '26 24 41 0 68|75 42 22 0 59|74 35 47 0 40|39 69 31 0 49|46 67 72 0 76|30 45 78 0 70|71 29 66 0 79|32 61 34 0 80 |28 48 43 0 27&map=-1 -1 -1 -1 -1 -1 -1 50 -1 64 -1 73 -1 62 -1 25 -1 65&factions='
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+local _setupHelper = getHelperClient('TI4_SETUP_HELPER')
+local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
+
+function onLoad(save_state)
+    math.randomseed(os.time())
+
+    local function drawAndAddSnapPoints()
+        MiltyExtension.draw()
+        MiltyExtension.addSnapPoints()
+    end
+    self.addContextMenuItem('Extend Milty Tool', drawAndAddSnapPoints)
+
+    self.addContextMenuItem('Setup draft', function() startLuaCoroutine(self, '_doSetupCoroutine') end)
+end
+
+function _getByName(tag, name)
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == tag and object.getName() == name then
+            return object
+        end
+    end
+    return false
+end
+
+-------------------------------------------------------------------------------
+
+function _doSetupCoroutine()
+    if _getByName('Generic', 'Game Setup Options') or (not _setupHelper.getPoK()) then
+        broadcastToAll('Please do setup with PoK enabled first', 'Red')
+        return 1
+    end
+    coroutine.yield(0)
+    local miltyDraftTool = MiltyExtension._getMiltyDraftTool()
+    if not miltyDraftTool then
+        broadcastToAll('Please place Milty Draft tool on table with room below it', 'Red')
+        return 1
+    end
+    coroutine.yield(0)
+
+    local numPlayers = #_zoneHelper.zones()
+
+    -- Get action cards.
+    local actionDeckGuid = assert(_deckHelper.getDeck('Actions'), 'missing Actions')
+    local actionDeck = assert(getObjectFromGUID(actionDeckGuid))
+    actionDeck.shuffle()
+    for i = 1, numPlayers do
+        local transform = MiltyExtension.getActionCardTransform(i)
+        actionDeck.takeObject({
+            position          = transform.pos,
+            rotation          = transform.rot,
+            smooth            = true,
+        })
+    end
+    coroutine.yield(0)
+
+    -- Pull items from self to add to draft.
+    local nextEventCardIndex = 1
+    local nextShadowBanIndex = 1
+    local stow = {}
+    for i, entry in ipairs(self.getObjects()) do
+        local object = self.takeObject({
+            position          = self.getPosition() + vector(0, 3 + i, 0),
+            smooth            = false,
+        })
+        local name = object.getName()
+        coroutine.yield(0)
+
+        local transform = false
+        if object.type == 'Card' then
+            transform = MiltyExtension.getEventCardTransform(nextEventCardIndex)
+            nextEventCardIndex = nextEventCardIndex + 1
+        elseif string.find(name, 'Draft Order Token') then
+            local index = string.match(name, 'Draft Order Token (%d+)')
+            index = index and tonumber(index)
+            if index and index <= numPlayers then
+                transform = MiltyExtension.getDraftOrderTokenTransform(index)
+            end
+        elseif name == 'Shadow Ban Token' then
+            transform = MiltyExtension.getShadowBanTransform(nextShadowBanIndex)
+            nextShadowBanIndex = nextShadowBanIndex + 1
+        end
+
+        if transform then
+            object.use_grid = false
+            object.use_snap_points = false
+            local collide = false
+            local fast = true
+            object.setPositionSmooth(transform.pos, collide, fast)
+            object.setRotationSmooth(transform.rot, collide, fast)
+        else
+            table.insert(stow, object)
+        end
+    end
+
+    for _, object in ipairs(stow) do
+        self.putObject(object)
+        coroutine.yield(0)
+    end
+
+    -- Shuffle players.
+    DraftOrder.shuffleSeats()
+    coroutine.yield(0)
+
+    -- Choose speaker and assign clockwise draft order.
+    local order = DraftOrder.getClockwiseOrderRandomStart()
+    DraftOrder.moveSpeakerToken(order[1])
+    coroutine.yield(0)
+
+    local miltyString = MILTY_STRING .. DraftOrder.encodeOrderForMiltyDraftTool(order)
+    miltyDraftTool.call('setCustomString', miltyString)
+    miltyDraftTool.call('doSetup')
+
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+MiltyExtension = {
+    _miltyDraftToolGuid = false,
+
+    PADDING = {  -- around edge of grid
+        x = 1,
+        z = 0.5
+    },
+    CARD_SIZE = {
+        x = 2,
+        z = 3
+    },
+    NUM_ROWS = 4,
+    NUM_COLS = 9,
+    LINE_THICKNESS = 0.1,
+}
+
+function MiltyExtension.getEventCardTransform(index)
+    local miltyDraftTool = assert(MiltyExtension._getMiltyDraftTool(), 'missing milty draft tool')
+    return {
+        pos = MiltyExtension.getSnapLocationWorld(1, index),
+        rot = { x = 0, y = miltyDraftTool.getRotation().y, z = 0 }
+    }
+end
+
+function MiltyExtension.getActionCardTransform(index)
+    local miltyDraftTool = assert(MiltyExtension._getMiltyDraftTool(), 'missing milty draft tool')
+    return {
+        pos = MiltyExtension.getSnapLocationWorld(2, index),
+        rot = { x = 0, y = miltyDraftTool.getRotation().y, z = 0 }
+    }
+end
+
+function MiltyExtension.getDraftOrderTokenTransform(index)
+    local miltyDraftTool = assert(MiltyExtension._getMiltyDraftTool(), 'missing milty draft tool')
+    return {
+        pos = MiltyExtension.getSnapLocationWorld(3, index),
+        rot = { x = 0, y = miltyDraftTool.getRotation().y, z = 0 }
+    }
+end
+
+function MiltyExtension.getShadowBanTransform(index)
+    local miltyDraftTool = assert(MiltyExtension._getMiltyDraftTool(), 'missing milty draft tool')
+    return {
+        pos = MiltyExtension.getSnapLocationWorld(4, index),
+        rot = { x = 0, y = miltyDraftTool.getRotation().y, z = 0 }
+    }
+end
+
+function MiltyExtension._getMiltyDraftTool()
+    local guid = MiltyExtension._miltyDraftToolGuid
+    local result = guid and getObjectFromGUID(guid)
+    if not result then
+        result = _getByName('Generic', 'Milty Draft Tool')
+        MiltyExtension._miltyDraftToolGuid = result and result.getGUID()
+    end
+    if not result then
+        broadcastToAll('Please place the Milty Draft Tool on the table', 'Red')
+    end
+    return result
+end
+
+function MiltyExtension.getSnapLocationLocal(row, col)
+    assert(type(row) == 'number' and type(col) == 'number')
+
+    local cardSize = MiltyExtension.CARD_SIZE
+    local padding = MiltyExtension.PADDING
+    local numCols = MiltyExtension.NUM_COLS
+
+    local miltyDraftTool = assert(MiltyExtension._getMiltyDraftTool(), 'missing milty draft tool')
+    local size = miltyDraftTool.getBounds().size
+
+    -- Relative to object.
+    local x0 = (((numCols - 1) * cardSize.x) + ((numCols - 2) * padding.x)) / 2
+    local z0 = (size.z / 2) + padding.z + (cardSize.z / 2) -- below
+    local x = x0 - (col - 1) * (cardSize.x + padding.x)
+    local z = z0 + (row - 1) * (cardSize.z + padding.z)
+
+    return { x = x, y = 0, z = z }
+end
+
+function MiltyExtension.getSnapLocationWorld(row, col)
+    assert(type(row) == 'number' and type(col) == 'number')
+
+    local miltyDraftTool = assert(MiltyExtension._getMiltyDraftTool(), 'missing milty draft tool')
+    local pos = MiltyExtension.getSnapLocationLocal(row, col)
+    return miltyDraftTool.positionToWorld(pos)
+end
+
+function MiltyExtension.draw()
+    local miltyDraftTool = assert(MiltyExtension._getMiltyDraftTool(), 'missing milty draft tool')
+
+    local idempotentTag = '__ptsd.MiltyExtension.draw__'
+    if miltyDraftTool.hasTag(idempotentTag) then
+        print('MiltyExtension.draw: already done')
+        return
+    end
+    miltyDraftTool.addTag(idempotentTag)
+
+    local cardSize = MiltyExtension.CARD_SIZE
+    local dx = cardSize.x / 2
+    local dz = cardSize.z / 2
+
+    local lines = {}
+    for row = 1, MiltyExtension.NUM_ROWS do
+        for col = 1, MiltyExtension.NUM_COLS do
+            local pos = MiltyExtension.getSnapLocationLocal(row, col)
+            table.insert(lines, {
+                color = 'White',
+                points = {
+                    { pos.x - dx, 0, pos.z - dz },
+                    { pos.x + dx, 0, pos.z - dz },
+                    { pos.x + dx, 0, pos.z + dz },
+                    { pos.x - dx, 0, pos.z + dz },
+                },
+                loop = true,
+                thickness = MiltyExtension.LINE_THICKNESS,
+            })
+        end
+    end
+    miltyDraftTool.setVectorLines(lines)
+end
+
+function MiltyExtension.addSnapPoints()
+    local miltyDraftTool = assert(MiltyExtension._getMiltyDraftTool(), 'missing milty draft tool')
+
+    local idempotentTag = '__ptsd.MiltyExtension.addSnapPoints__'
+    if miltyDraftTool.hasTag(idempotentTag) then
+        print('MiltyExtension.addSnapPoints: already done')
+        return
+    end
+    miltyDraftTool.addTag(idempotentTag)
+
+    local snapPoints = miltyDraftTool.getSnapPoints() or {}
+    for row = 1, MiltyExtension.NUM_ROWS do
+        for col = 1, MiltyExtension.NUM_COLS do
+            local pos = MiltyExtension.getSnapLocationLocal(row, col)
+            table.insert(snapPoints, {
+                position = { pos.x, 0, pos.z },
+                rotation = { 0, 0, 0 },
+                rotation_snap = true,
+            })
+        end
+    end
+    miltyDraftTool.setSnapPoints(snapPoints)
+end
+
+-------------------------------------------------------------------------------
+
+DraftOrder = {}
+
+function DraftOrder.shuffleSeats()
+    local zoneColorSet = {}
+    for _, zoneColor in ipairs(_zoneHelper.zones()) do
+        zoneColorSet[zoneColor] = true
+    end
+
+    local players = {}
+    local colors = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        if zoneColorSet[player.color] then
+            table.insert(players, player)
+            table.insert(colors, player.color)
+            player.changeColor('Grey')
+        end
+    end
+
+    for _, player in ipairs(players) do
+        local color = table.remove(colors, math.random(#colors))
+        player.changeColor(color)
+    end
+end
+
+function DraftOrder.getClockwiseOrderRandomStart()
+    local zones = _zoneHelper.zones()
+    local startIndex = math.random(#zones)
+    local result = {}
+    for i = 1, #zones do
+        local index = startIndex + i - 1
+        index = (index > #zones) and (index - #zones) or index -- mod with 1 start
+        local color = zones[index]
+        table.insert(result, color)
+    end
+    return result
+end
+
+function DraftOrder.encodeOrderForMiltyDraftTool(order)
+    return '&order=' .. table.concat(order, '|')
+end
+
+function DraftOrder.moveSpeakerToken(speakerColor)
+    local speakerToken = _getByName('Generic', 'Speaker Token')
+    if speakerToken then
+        local zoneAttrs = _zoneHelper.zoneAttributes(speakerColor)
+        local pos = {
+            x = zoneAttrs.center.x + 11 * (zoneAttrs.center.z < 0 and 1 or -1),
+            y = zoneAttrs.center.y + 5,
+            z = zoneAttrs.center.z + 6 * (zoneAttrs.center.z < 0 and 1 or -1)
+        }
+        local rot = {
+            x = 0,
+            y = zoneAttrs.rotation.y,
+            z = 0
+        }
+        local collide = false
+        local fast = false
+        speakerToken.setPositionSmooth(pos, collide, fast)
+        speakerToken.setRotationSmooth(rot, collide, fast)
+    end
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)

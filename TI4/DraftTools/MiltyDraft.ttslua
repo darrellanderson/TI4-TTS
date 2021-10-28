@@ -152,6 +152,15 @@ local LABEL_COLORS = {
     Color.Teal,
 }
 
+-- Expose a function for outside tools to set custom setups.
+function setCustomString(customString)
+    assert(type(customString) == 'string')
+    if not CustomSetup.isInputVisible() then
+        CustomSetup.showInput()
+    end
+    CustomSetup.setInputValue(customString)
+end
+
 function onLoad(saveState)
     math.randomseed(os.time())
 
@@ -381,10 +390,13 @@ end
 -------------------------------------------------------------------------------
 
 function setupCoroutine()
-    if not _setupHelper.getPoK() then
+    if _getByName('Generic', 'Game Setup Options') or (not _setupHelper.getPoK()) then
         broadcastToAll('Please do setup with PoK enabled first', 'Red')
         return 1
     end
+    coroutine.yield(0)
+
+    self.setLock(true)
 
     -- Put away any existing draft parts (start from scratch).
     SeatTokens.stow()
@@ -415,9 +427,17 @@ function setupCoroutine()
     end
     coroutine.yield(0)
 
+    -- Randomize turns (apply at end).
+    local order = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        table.insert(order, color)
+    end
+    order = assert(VolverMilty.permute(order))
+
     -- Optionally override slices with manually-entered "slice string".
     local customSliceNames = {}
     local factionNames = FactionTokens.randomFactionNames(_state.numFactions)
+    local mapString = false
     if CustomSetup.isInputVisible() then
         _state.tileLists = CustomSetup.readSlices() or nil
         if not _state.tileLists then
@@ -425,7 +445,19 @@ function setupCoroutine()
         end
         customSliceNames = CustomSetup.readSliceLabels() or customSliceNames
         factionNames = CustomSetup.readFactions() or factionNames
+        order = CustomSetup.readDraftOrder() or order
+        mapString = CustomSetup.readMapString()
         CustomSetup.hideInput()
+    end
+
+    -- Build map (custom setups, not normal).
+    if mapString then
+        local mapTool = _getByName('Tile', 'TI4 Map Tool')
+        if mapTool then
+            mapTool.call('setMapString', mapString)
+            mapTool.call('onButtonBuild')
+        end
+        coroutine.yield(0)
     end
 
     -- Place slices.
@@ -474,12 +506,6 @@ function setupCoroutine()
         coroutine.yield(0)
     end
 
-    -- Randomize turns.
-    local order = {}
-    for _, color in ipairs(_zoneHelper.zones()) do
-        table.insert(order, color)
-    end
-    order = assert(VolverMilty.permute(order))
     Turns.enable = false
     Turns.type = 2
     Turns.reverse_order = false
@@ -720,6 +746,7 @@ function finishCoroutine()
     -- Stow self.
     local toolsBag = _getByName('Bag', 'Tools and Helpers')
     if toolsBag then
+        self.setLock(false)
         toolsBag.putObject(self)
     end
 
@@ -2172,6 +2199,9 @@ function CustomSetup.readSlices()
     -- Try url arg, failing that use the whole string.
     local value = CustomSetup._getInputValue('slices') or CustomSetup._getInputValue(false)
 
+    -- Truncate at first &.
+    value = string.match(value, '^([^&]*)&') or value
+
     local legalTileSet = {}
     for _, system in pairs(_systemHelper.systems()) do
         local legal = true
@@ -2189,7 +2219,7 @@ function CustomSetup.readSlices()
     local slices = {}
     for slice in string.gmatch(value, '([^|]+)') do
         local tiles = {}
-        for tile in string.gmatch(slice, '(%d+)') do
+        for tile in string.gmatch(slice, '(%-?%d+)') do
             tile = tonumber(tile)
             if tile > 0 then
                 if not legalTileSet[tile] then
@@ -2242,9 +2272,8 @@ function CustomSetup.readFactions()
             table.insert(errors, 'bad faction name "' .. factionName .. '"')
         end
     end
-    if #factionNames == 0 then
-        table.insert(errors, 'no faction names')
-    elseif #factionNames > 9 then
+    -- Allow zero factions (must have &factions=) for external faction selection.
+    if #factionNames > 9 then
         table.insert(errors, 'too many faction names')
     end
 
@@ -2285,6 +2314,51 @@ function CustomSetup.readSliceLabels()
 
     broadcastToAll('Milty Draft using custom slice labels: "' .. table.concat(labels, ', ') .. '"', 'Yellow')
     return labels
+end
+
+function CustomSetup.readDraftOrder()
+    local value = CustomSetup._getInputValue('order')
+    if not value then
+        return false
+    end
+
+    local legalSet = {}
+    for _, color in ipairs(_zoneHelper.zones()) do
+        legalSet[color] = true
+    end
+
+    local seenSet = {}
+    local errors = {}
+    local order = {}
+    for color in string.gmatch(value, '([^|]+)') do
+        color = color:gsub("^%s*(.-)%s*$", "%1") -- trim
+        if seenSet[color] then
+            table.insert(errors, '"' .. color '" appears more than once')
+        elseif not legalSet[color] then
+            table.insert(errors, '"' .. color '" not a legal color')
+        else
+            table.insert(order, color)
+            seenSet[color] = true
+        end
+    end
+    if #order == 0 then
+        table.insert(errors, 'empty order')
+    elseif #order > 9 then
+        table.insert(errors, 'too many in order')
+    end
+
+    if #errors > 0 then
+        local message = table.concat(errors, '\n')
+        broadcastToAll('Milty Draft order= error:\n' .. message, 'Red')
+        return false
+    end
+
+    broadcastToAll('Milty Draft using custom draft order: "' .. table.concat(order, ', ') .. '"', 'Yellow')
+    return order
+end
+
+function CustomSetup.readMapString()
+    return CustomSetup._getInputValue('map')
 end
 
 -------------------------------------------------------------------------------
