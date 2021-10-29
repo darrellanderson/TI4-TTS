@@ -1,0 +1,9 @@
+TI4_PoK_46:
+- Fix !whisper side bar flash to only appear for the player receiving the whisper.
+- Faction borders now defaults to show planet circles and space areas.
+- Separate streamer from anonymized game data so backend can treat them differently.
+Milty Draft Tool:
+- Moves in-hand objects when moving players to final seats.
+- New "&map=" parameter to build partial map.
+- Empty "&factions=" parameter omits factions.
+- New "&order=" parameter to set draft order.
