@@ -69,6 +69,10 @@ function _doSetupCoroutine()
     end
     coroutine.yield(0)
 
+    -- Force it to be flat on the table.
+    miltyDraftTool.setRotation({ x = 0, y = miltyDraftTool.getRotation().y, z = 0 })
+    miltyDraftTool.setLock(true)
+
     local numPlayers = #_zoneHelper.zones()
 
     -- Get action cards.
@@ -160,7 +164,7 @@ MiltyExtension = {
     },
     NUM_ROWS = 4,
     NUM_COLS = 9,
-    LINE_THICKNESS = 0.1,
+    LINE_THICKNESS = 0.05,
 }
 
 function MiltyExtension.getEventCardTransform(index)
@@ -238,6 +242,9 @@ end
 function MiltyExtension.draw()
     local miltyDraftTool = assert(MiltyExtension._getMiltyDraftTool(), 'missing milty draft tool')
 
+    -- Force it to be flat on the table.
+    miltyDraftTool.setRotation({ x = 0, y = miltyDraftTool.getRotation().y, z = 0 })
+
     local idempotentTag = '__ptsd.MiltyExtension.draw__'
     if miltyDraftTool.hasTag(idempotentTag) then
         print('MiltyExtension.draw: already done')
@@ -250,16 +257,17 @@ function MiltyExtension.draw()
     local dz = cardSize.z / 2
 
     local lines = {}
+    local y = 0.01
     for row = 1, MiltyExtension.NUM_ROWS do
         for col = 1, MiltyExtension.NUM_COLS do
             local pos = MiltyExtension.getSnapLocationLocal(row, col)
             table.insert(lines, {
                 color = 'White',
                 points = {
-                    { pos.x - dx, 0, pos.z - dz },
-                    { pos.x + dx, 0, pos.z - dz },
-                    { pos.x + dx, 0, pos.z + dz },
-                    { pos.x - dx, 0, pos.z + dz },
+                    { pos.x - dx, y, pos.z - dz },
+                    { pos.x + dx, y, pos.z - dz },
+                    { pos.x + dx, y, pos.z + dz },
+                    { pos.x - dx, y, pos.z + dz },
                 },
                 loop = true,
                 thickness = MiltyExtension.LINE_THICKNESS,

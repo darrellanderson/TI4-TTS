@@ -396,6 +396,7 @@ function setupCoroutine()
     end
     coroutine.yield(0)
 
+    self.setRotation({ x = 0, y = self.getRotation().y, z = 0 })
     self.setLock(true)
 
     -- Put away any existing draft parts (start from scratch).
