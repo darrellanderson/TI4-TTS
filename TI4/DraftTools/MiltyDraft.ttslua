@@ -2201,7 +2201,10 @@ function CustomSetup.readSlices()
     local value = CustomSetup._getInputValue('slices') or CustomSetup._getInputValue(false)
 
     -- Truncate at first &.
-    value = string.match(value, '^([^&]*)&') or value
+    local startPos, endPos = string.find(value, '&')
+    if startPos then
+        value = string.sub(value, 1, startPos - 1)
+    end
 
     local legalTileSet = {}
     for _, system in pairs(_systemHelper.systems()) do
