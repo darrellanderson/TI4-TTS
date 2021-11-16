@@ -398,75 +398,6 @@ local _systems = {
     ['ca6044'] = { tile = 2034, planets = {{ name = 'A' }, { name = 'B' }} },
     ['517d73'] = { tile = 2035, planets = {{ name = 'A' }, { name = 'B' }} },
     ['8c22eb'] = { tile = 2036, planets = {{ name = 'A' }, { name = 'B' }} },
-
-    -- Tactic Blue homebrew factions
-    ['12d914'] = { tile = 3001, planets = {
-        { name = 'Nevermore', resources = 3, influence = 3 },
-    }},
-    ['975d0a'] = { tile = 3002, planets = {
-        { name = 'Arrakis', resources = 4, influence = 0 },
-    }},
-    ['2e10be'] = { tile = 3003, planets = {
-        { name = 'Khet', resources = 1, influence = 2 },
-        { name = 'Drakkol', resources = 3, influence = 0, position = { x = -0.75, z = 0.7 } },
-    }},
-    ['5dcca6'] = { tile = 3004, anomalies = { 'nebula' }, planets = {
-        { name = 'Rhune', resources = 3, influence = 4 },
-    }},
-    ['b69d23'] = { tile = 3005, planets = {
-        { name = 'Mandalore', resources = 3, influence = 2 },
-        { name = 'Concordia', resources = 1, influence = 1, position = { x = -0.75, z = 0.7 } },
-    }},
-    ['04c835'] = { tile = 3006, planets = {
-        { name = 'Refuge', resources = 1, influence = 3 },
-        { name = 'Kharak', resources = 1, influence = 0, position = { x = -0.75, z = 0.7 } },
-    }},
-    ['284942'] = { tile = 3007, planets = {
-        { name = 'Iodyn', resources = 1, influence = 1, position = { x = 1.35, z = -0.05 } },
-        { name = 'Kroll', resources = 0, influence = 1 },
-        { name = 'Cyrra', resources = 1, influence = 0 },
-    }},
-    ['dd9fd8'] = { tile = 3008, planets = {
-        { name = 'Klyutoss', resources = 2, influence = 5 },
-    }},
-    ['f67eca'] = { tile = 3009, planets = {
-        { name = 'Vorn', resources = 1, influence = 0 },
-        { name = 'Xyphen', resources = 3, influence = 1, position = { x = -0.75, z = 0.7 } },
-    }},
-    ['c3785f'] = { tile = 3010, planets = {
-        { name = 'Diphda', resources = 1, influence = 1, position = { x = 1.35, z = -0.05 } },
-        { name = 'Damocles', resources = 2, influence = 1 },
-        { name = 'Menkar', resources = 0, influence = 2 },
-    }},
-    ['108eb9'] = { tile = 3011, planets = {
-        { name = 'Ogdun', resources = 2, influence = 0 },
-        { name = 'Brthkul', resources = 1, influence = 2, position = { x = -0.75, z = 0.7 } },
-    }},
-    ['0db991'] = { tile = 3012, planets = {
-        { name = 'Pord', resources = 3, influence = 1 },
-    }},
-    ['7fe6fc'] = { tile = 3013, planets = {
-        { name = 'H-1', resources = 2, influence = 2 },
-        { name = 'H-2', resources = 2, influence = 0, position = { x = -0.75, z = 0.7 } },
-    }},
-    ['02254b'] = { tile = 3014, planets = {
-        { name = 'Gheldahr', resources = 5, influence = 0 },
-    }},
-    ['eab832'] = { tile = 3015, planets = {
-        { name = 'Kyr', resources = 1, influence = 0, position = { x = 1.35, z = -0.05 } },
-        { name = 'Pax', resources = 2, influence = 2 },
-        { name = 'Vess', resources = 1, influence = 0 },
-    }},
-    ['ff48e4'] = { tile = 3016, planets = {
-        { name = 'Sanctuary', resources = 4, influence = 2 },
-    }},
-    ['9e6138'] = { tile = 3017, planets = {
-        { name = 'Wod', resources = 3, influence = 1 },
-        { name = 'Lath', resources = 2, influence = 2, position = { x = -0.75, z = 0.7 } },
-    }},
-    ['6a667a'] = { tile = 3018, planets = {
-        { name = 'Cymiae', resources = 4, influence = 1 },
-    }},
 }
 
 local _nonPlanetResourceInfluenceCards = {
@@ -1705,6 +1636,7 @@ function _moveTokenFromCommandSheet(systemObject, color, section)
             y = p0.y + 3,
             z = p0.z
         }
+        -- Rotate if a stack?
         local collide = false
         local fast = false
         commandToken.setPositionSmooth(position, collide, fast)
