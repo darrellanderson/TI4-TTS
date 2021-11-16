@@ -1636,10 +1636,30 @@ function _moveTokenFromCommandSheet(systemObject, color, section)
             y = p0.y + 3,
             z = p0.z
         }
-        -- Rotate if a stack?
         local collide = false
         local fast = false
         commandToken.setPositionSmooth(position, collide, fast)
+
+        -- Rotate if a stack.
+        local hits = Physics.cast({
+            origin = { x = p0.x, y = p0.y, z = p0.z },
+            direction = { x = 0, y = -1, z = 0 },
+            type = 3, -- box
+            size = { 0.1, 5, 0.1 }
+        })
+        local count = 0
+        for _, hit in ipairs(hits) do
+            local hitName = hit.hit_object.getName()
+            if string.match(hitName, 'Command Token$') then
+                count = count + 1
+            end
+        end
+        local rotation = {
+            x = 0,
+            y = (count * 20) % 360,
+            z = 0
+        }
+        commandToken.setRotationSmooth(rotation, collide, fast)
     else
         broadcastToAll(color .. ' ' .. section .. ' pool is empty', 'Red')
         success = false
