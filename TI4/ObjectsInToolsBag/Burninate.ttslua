@@ -39,7 +39,7 @@ function onLoad(saveState)
         _burnNameSet[color .. ' PDS'] = true
         _burnNameSet[color .. ' War Sun'] = true
     end
-    for color, faction in pairs(_factionHelper.allFactions()) do
+    for color, faction in pairs(_factionHelper.allFactions(true)) do
         _burnNameSet[faction.flagship] = true
     end
 
