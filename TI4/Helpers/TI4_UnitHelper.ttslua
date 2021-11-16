@@ -209,7 +209,7 @@ local _unitOverrides = {
     ['Wrath of Kenara'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
     ["Y'sia Y'ssrila"] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 }, move = 2 },
     ['[0.0.1]'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 }, capacity = 5 },
-        -- PoK flagships
+    -- PoK flagships
     ['Quetzecoatl'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
     ['The Terror Between'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 }, bombardment = { dice = 1, hit = 5, extraDice = 0 } },
     ['Dynamo'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 } },
@@ -247,54 +247,6 @@ local _unitOverrides = {
 
     -- Codex.
     ['????_REDACTED_????'] = { override = 'Destroyer', antiFighterBarrage = { dice = 3, hit = 6 }, spaceCombat = { hit = 7 }, capacity = 1 },
-
-    -- Blue Space.
-    ['Battlecruiser I'] = { override = 'Cruiser', },
-    ['Battlecruiser II'] = { upgrade = 'Cruiser', spaceCombat = { hit = 6 } },
-    ['Lancer Dreadnought I'] = { override = 'Dreadnought', spaceCannon = { dice = 1, hit = 6, range = 0 } },
-    ['Lancer Dreadnought II'] = { upgrade = 'Dreadnought', spaceCannon = { hit = 4 }, move = 2 },
-    ['Wraith Corvette I'] = { override = 'Destroyer', antiFighterBarrage = { dice = 3 }, spaceCombat = { hit = 8 } },
-    ['Wraith Corvette II'] = { upgrade = 'Destroyer', antiFighterBarrage = { dice = 4, hit = 6 }, spaceCombat = { hit = 7 } },
-    ['Raid Shuttle I'] = { override = 'Carrier', },
-    ['Raid Shuttle II'] = { upgrade = 'Carrier', bombardment = { dice = 1, hit = 8 }, spaceCombat = { hit = 8 } },
-    ['Heavy Bomber I'] = { override = 'Fighter', bombardment = { dice = 1, hit = 9 }, spaceCombat = { hit = 8 } },
-    ['Heavy Bomber II'] = { upgrade = 'Fighter', bombardment = { dice = 1, hit = 8 }, spaceCombat = { hit = 7 } },
-    ['Ashkari I'] = { override = 'Infantry', groundCombat = { hit = 7 } },
-    ['Ashkari II'] = { upgrade = 'Infantry', groundCombat = { hit = 6 } },
-    ['Unholy Abominations I'] = { override = 'Infantry', groundCombat = { hit = 5 } },
-    ['Unholy Abominations II'] = { upgrade = 'Infantry', groundCombat = { hit = 4 } },
-    ['Tachyon Lance I'] = { override = 'PDS', spaceCannon = { hit = 5 } },
-    ['Tachyon Lance II'] = { upgrade = 'PDS', spaceCannon = { hit = 4, range = 1 } },
-    ['Perdition Array I'] = { override = 'PDS', spaceCannon = { hit = 5 } },
-    ['Perdition Array II'] = { upgrade = 'PDS', spaceCannon = { hit = 4, range = 1 } },
-    ['Planetary Fortress I'] = { override = 'Space Dock', planetaryShield = true },
-    ['Planetary Fortress II'] = { upgrade = 'Space Dock' },
-
-    -- Blue Space flagships.
-    ['Nightingale II'] = { override = 'Flagship', spaceCombat = { dice = 1, hit = 9 } },
-    ['Shai-Hulud'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 9 } },
-    ['Khage'] = { override = 'Flagship', bombardment = { dice = 3, hit = 5 }, spaceCombat = { dice = 3, hit = 5 } },
-    ['Richtyrian'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
-    ["Kyr'tsad"] = { override = 'Flagship', bombardment = { dice = 2, hit = 5 }, spaceCombat = { dice = 2, hit = 5 } },
-    ['Vox'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
-    ['Chogra Tuhn'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 5 } },
-    ["For'xdar"] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
-    ['Mho Rhodyn'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
-    ['Locus'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 9 } },
-    ["Gheld'atar"] = { override = 'Flagship', bombardment = { dice = 4, hit = 5 }, spaceCombat = { dice = 2, hit = 7 } },
-    ["Eru'ishon"] = { override = 'Flagship', spaceCombat = { dice = 1, hit = 7 } },
-    ['Regulus'] = { override = 'Flagship', spaceCombat = { dice = 1, hit = 5 } },
-    ["Noctul H'rgan"] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
-    ['Robotic Reprocessing Center'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
-    ['Advent Flagship'] = { override = 'Flagship' },
-    ['Coronata'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
-    ['Eradica'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 5 } },
-    ['Vasari Flagship'] = { override = 'Flagship' },
-    ['Vorastra'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
-    ['Kultorask'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 5 } },
-    ['Trader Flagship'] = { override = 'Flagship' },
-    ['Anklyon'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
-    ['Ragnarov'] = { upgrade = 'Flagship', spaceCombat = { dice = 2, hit = 5 } },
 }
 
 function getUnitOverrides()
@@ -382,10 +334,27 @@ local _flagshipModifiers = {
         apply = function(unitAttrs, params)
             local count = 1  -- only override if given opponent units
             if params.opponentUnitTypeToCount then
+
+                -- The NRA mech count as ships when in space.  The opponent
+                -- data is only a map from unit type to count, without positions
+                -- to do the check.
+
+                -- Get opponent unit attributes (franken friendly).
+                local colorToUnitOverrides = getColorToUnitOverrides()
+                local unitOverrides = params.opponentColor and colorToUnitOverrides[params.opponentColor]
+                local opponentUnitAttrs = getUnitAttributes(unitOverrides or {})
+
                 count = 0
                 local opponentUnitTypeToCount = params.opponentUnitTypeToCount or {}
-                for unitType, attr in pairs(unitAttrs) do
-                    if attr.ship and (unitType ~= 'Fighter') and attr.spaceCombat then
+                for unitType, attr in pairs(opponentUnitAttrs) do
+                    local include = attr.ship and (unitType ~= 'Fighter') and attr.spaceCombat
+                    -- NRA Mech are ships when not on planets.  The unit type to count
+                    -- table does not have position data, but the autofill tool already
+                    -- applied this restriction when finding units for space combat.
+                    if attr.spaceCombat and attr.spaceCombat.requireSpace then
+                        include = true
+                    end
+                    if include then
                         count = count + (opponentUnitTypeToCount[unitType] or 0)
                     end
                 end
