@@ -819,7 +819,11 @@ local _unitModifiers = {
         type = TYPE.ADJUST,
         isCombat = true,
         apply = function(unitAttrs)
-            unitAttrs['Fighter'].spaceCombat.hit = unitAttrs['Fighter'].spaceCombat.hit - 1
+            local attrs = unitAttrs['Fighter']
+            attrs.spaceCombat.hit = attrs.spaceCombat.hit - 1
+            if attrs.groundCombat then
+                attrs.groundCombat.hit = attrs.groundCombat.hit - 1
+            end
         end
     },
 
