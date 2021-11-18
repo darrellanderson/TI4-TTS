@@ -189,7 +189,7 @@ function createUi()
 
         _allPossibleUnitAttrs['Carrier']['sustainDamage'] = true  -- sol
         _allPossibleUnitAttrs['Infantry']['spaceCombat'] = {}  -- nekro flagship
-        _allPossibleUnitAttrs['Fighter']['spaceCombat'] = {}  -- naulo flagship
+        _allPossibleUnitAttrs['Fighter']['groundCombat'] = {}  -- naulo flagship
         _allPossibleUnitAttrs['Carrier']['disablePlanetaryShield'] = true -- 2Ram
         _allPossibleUnitAttrs['Destroyer']['disablePlanetaryShield'] = true -- 2Ram
         _allPossibleUnitAttrs['Cruiser']['disablePlanetaryShield'] = true -- 2Ram
