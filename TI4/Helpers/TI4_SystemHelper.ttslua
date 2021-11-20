@@ -1758,7 +1758,7 @@ function _addContextMenuItems(systemObject)
 end
 
 function onObjectSpawn(object)
-    if _systems[object.getGUID()] then
+    if _systems[object.getGUID()] and not _systems[object.getGUID()].hyperlane then
         _addContextMenuItems(object)
     end
 end
