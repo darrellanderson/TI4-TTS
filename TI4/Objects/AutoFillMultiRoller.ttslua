@@ -412,7 +412,7 @@ function getHexAndAdjacent(position, playerColor)
 
     -- Get this hex, and adjacent hexes.
     local hex = _systemHelper.hexFromPosition(position)
-    local adjacentHexes = _systemHelper.hexNeighbors(hex)
+    local adjacentHexes = _systemHelper.hexNeighborsWithHyperlanes(hex)
 
     -- Include through-wormhole.
     local adjacentWormholeHexes = _systemHelper.hexAdjacentWormholes({

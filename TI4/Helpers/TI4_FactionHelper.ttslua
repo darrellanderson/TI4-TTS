@@ -1469,7 +1469,7 @@ function _carrionHeroAbilityCoroutine()
     --Find set of hexes adjacent to above (including wormholes)
     local hexToNeighboringHexes = {}
     for _, hex in pairs(dimensionalTearToHex) do
-        local directlyAdjacentHexes = _systemHelper.hexNeighbors(hex)
+        local directlyAdjacentHexes = _systemHelper.hexNeighborsWithHyperlanes(hex)
         local wormholeAdjacentHexes = _systemHelper.hexAdjacentWormholes({hex = hex, playerColor = factionColor})
 
         local neighboringHexSet = {}
