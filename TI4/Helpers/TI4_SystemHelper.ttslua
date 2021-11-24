@@ -1597,13 +1597,14 @@ end
 -- @param scrHex (hex) : source hex
 -- @param hyperlaneSystem (system) : hyperlane system
 -- @return table : list of neighbor hex strings. Will not return hyperlanes hexes.
-function getHyperlaneNeighbors(srcHex, hyperlaneSystem)
+function getHyperlaneNeighbors(srcHex, hyperlaneSystem, visitedHexSet)
     local hyperlaneObj = getObjectFromGUID(hyperlaneSystem.guid)
     local hyperlaneHex = hexFromPosition(hyperlaneObj.getPosition())
     local hyperlaneNeighbors = hexNeighbors(hyperlaneHex)
+    visitedHexSet[srcHex] = true
 
-    local hyperlaneRotation = hyperlaneObj.getRotation()
-    local rotationOffset = math.floor(hyperlaneRotation.y / 60 + 0.5)
+    local hyperlaneRotation = hyperlaneObj.getRotation().y % 360
+    local rotationOffset = math.floor(hyperlaneRotation / 60 + 0.5)
     local idxSrc = 0
 
     -- Find on which side of the hyperlane the source hex is
@@ -1632,9 +1633,11 @@ function getHyperlaneNeighbors(srcHex, hyperlaneSystem)
             local neighborSystem = systemFromPosition(hexToPosition(connectedHex))
             -- if the connected hex is an hyperlane, keep processing the path
             if neighborSystem and neighborSystem.hyperlanes then
-                local allConnected = getHyperlaneNeighbors(hyperlaneHex, neighborSystem)
-                for _, allConnectedHex in pairs(allConnected) do
-                    table.insert(result, allConnectedHex)
+                if not visitedHexSet[connectedHex] then
+                    local allConnected = getHyperlaneNeighbors(hyperlaneHex, neighborSystem, visitedHexSet)
+                    for _, allConnectedHex in pairs(allConnected) do
+                        table.insert(result, allConnectedHex)
+                    end
                 end
             else
                 table.insert(result, connectedHex)
@@ -1654,7 +1657,7 @@ function hexNeighborsWithHyperlanes(hex)
     for _, neighborHex in pairs(allHexesNeighbors) do
         local neighborSystem = systemFromPosition(hexToPosition(neighborHex))
         if neighborSystem and neighborSystem.hyperlanes then
-            local allConnectedNeighbors = getHyperlaneNeighbors(hex, neighborSystem)
+            local allConnectedNeighbors = getHyperlaneNeighbors(hex, neighborSystem, {})
             for _, connectedHex in pairs(allConnectedNeighbors) do
                 table.insert(connectedNeighbors, connectedHex)
             end
@@ -1663,7 +1666,17 @@ function hexNeighborsWithHyperlanes(hex)
         end
     end
 
-    return connectedNeighbors
+    -- remove duplicates and self
+    local finalResult = {}
+    local hash = {}
+    for _,v in ipairs(connectedNeighbors) do
+        if not hash[v] and v ~= hex then
+            table.insert(finalResult, v)
+            hash[v] = true
+        end
+    end
+
+    return finalResult
 end
 
 -------------------------------------------------------------------------------
