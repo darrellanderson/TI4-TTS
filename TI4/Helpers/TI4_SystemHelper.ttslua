@@ -328,16 +328,46 @@ local _systems = {
         }
     },
 
-    -- Warp zone tiles
-    ['81a64a'] = { tile = 83, hyperlane = true },
-    ['bed0e0'] = { tile = 84, hyperlane = true },
-    ['a64a36'] = { tile = 85, hyperlane = true },
-    ['b34afa'] = { tile = 86, hyperlane = true },
-    ['3ccc62'] = { tile = 87, hyperlane = true },
-    ['ee4bf1'] = { tile = 88, hyperlane = true },
-    ['33e49a'] = { tile = 89, hyperlane = true },
-    ['7e7ee1'] = { tile = 90, hyperlane = true },
-    ['565980'] = { tile = 91, hyperlane = true },
+    -- Hyperlane tiles
+    -- hyperlanes is an array of 6 indices, representing hyperlane connexion. Indices are zero-based (0 to 6)
+    -- Using _fillMissingSystemData to automatically fill 'hyperlanes' with the right data depending if the tile is flipped or not
+    -- 0 is top right side, when the tile is rotated at -180° on Y axis (Y rotation of zero)
+    ['81a64a'] = { tile = 83, hyperlane = true, 
+        hyperlanes_faceUp = { {3}, {}, {}, {0}, {}, {} },
+        hyperlanes_faceDown = { {}, {5}, {4,5}, {}, {2}, {1,2} }
+    },
+    ['bed0e0'] = { tile = 84, hyperlane = true, 
+        hyperlanes_faceUp = { {}, {4}, {}, {}, {1}, {} },
+        hyperlanes_faceDown = { {2}, {}, {0,5}, {5}, {}, {2,3} }
+    },
+    ['a64a36'] = { tile = 85, hyperlane = true, 
+        hyperlanes_faceUp = { {}, {3}, {}, {1}, {}, {} },
+        hyperlanes_faceDown = { {}, {5}, {4,5}, {}, {2}, {1,2} }
+    },
+    ['b34afa'] = { tile = 86, hyperlane = true, 
+        hyperlanes_faceUp = { {}, {3}, {}, {1}, {}, {} }, 
+        hyperlanes_faceDown = { {2}, {}, {0,5}, {5}, {}, {2,3} }
+    },
+    ['3ccc62'] = { tile = 87, hyperlane = true, 
+        hyperlanes_faceUp = { {4}, {4}, {4}, {}, {0,1,2}, {} },
+        hyperlanes_faceDown = { {}, {}, {4,5}, {}, {2}, {2} }
+    },
+    ['ee4bf1'] = { tile = 88, hyperlane = true, 
+        hyperlanes_faceUp = { {2,3,4}, {}, {0}, {0}, {0}, {} },
+        hyperlanes_faceDown = { {}, {5}, {4,5}, {}, {2}, {1,2} }
+    },
+    ['33e49a'] = { tile = 89, hyperlane = true, 
+        hyperlanes_faceUp = { {2,4}, {}, {0,4}, {}, {0,2}, {} },
+        hyperlanes_faceDown = { {2}, {}, {0,5}, {}, {}, {2} }
+    },
+    ['7e7ee1'] = { tile = 90, hyperlane = true, 
+        hyperlanes_faceUp = { {4}, {3}, {}, {1}, {0}, {} },
+        hyperlanes_faceDown = { {2}, {}, {0,5}, {}, {}, {2} }
+    },
+    ['565980'] = { tile = 91, hyperlane = true, 
+        hyperlanes_faceUp = { {2}, {}, {0,5}, {5}, {}, {2,3} },
+        hyperlanes_faceDown = { {}, {}, {4,5}, {}, {2}, {2} }
+    },
 
     -- Phil's warp zones.
     ['3830ca'] = { tile = 1001, hyperlane = true }, -- A
@@ -346,20 +376,48 @@ local _systems = {
     ['902424'] = { tile = 1004, hyperlane = true }, -- B
     ['903187'] = { tile = 1005, hyperlane = true }, -- G
     ['507cb6'] = { tile = 1006, hyperlane = true }, -- G
-    ['35b72d'] = { tile = 1007, hyperlane = true },
-    ['b41a78'] = { tile = 1008, hyperlane = true },
-    ['1000e9'] = { tile = 1009, hyperlane = true },
-    ['9a71c7'] = { tile = 1010, hyperlane = true },
-    ['204530'] = { tile = 1011, hyperlane = true },
-    ['b74682'] = { tile = 1012, hyperlane = true },
-    ['1ffd34'] = { tile = 1013, hyperlane = true },
-    ['bdf753'] = { tile = 1014, hyperlane = true },
-    ['a35ea3'] = { tile = 1015, hyperlane = true },
-    ['613593'] = { tile = 1016, hyperlane = true },
-    ['2c5e05'] = { tile = 1017, hyperlane = true },
-    ['c131ce'] = { tile = 1018, hyperlane = true },
-    ['bb11c7'] = { tile = 1019, hyperlane = true },
-    ['34cbfd'] = { tile = 1020, hyperlane = true },
+    ['35b72d'] = { tile = 1007, hyperlane = true, hyperlanes = {
+        {3}, {}, {}, {0}, {}, {}
+    } },
+    ['b41a78'] = { tile = 1008, hyperlane = true, hyperlanes = {
+        {2}, {}, {0}, {}, {}, {}
+    } },
+    ['1000e9'] = { tile = 1009, hyperlane = true, hyperlanes = {
+        {2,4}, {}, {0,4}, {}, {0,2}, {}
+    } },
+    ['9a71c7'] = { tile = 1010, hyperlane = true, hyperlanes = {
+        {2}, {}, {0,5}, {5}, {}, {2,3}
+    } },
+    ['204530'] = { tile = 1011, hyperlane = true, hyperlanes = {
+        {2,3}, {}, {0}, {0,5}, {}, {3}
+    } },
+    ['b74682'] = { tile = 1012, hyperlane = true, hyperlanes = {
+        {2}, {}, {0}, {}, {}, {}
+    } },
+    ['1ffd34'] = { tile = 1013, hyperlane = true, hyperlanes = {
+        {3}, {3}, {}, {0,1,5}, {}, {3}
+    } },
+    ['bdf753'] = { tile = 1014, hyperlane = true, hyperlanes = {
+        {2,4}, {}, {0,4}, {}, {0,2}, {}
+    } },
+    ['a35ea3'] = { tile = 1015, hyperlane = true, hyperlanes = {
+        {2}, {}, {0}, {}, {}, {}
+    } },
+    ['613593'] = { tile = 1016, hyperlane = true, hyperlanes = {
+        {3}, {}, {}, {0}, {}, {}
+    } },
+    ['2c5e05'] = { tile = 1017, hyperlane = true, hyperlanes = {
+        {2}, {}, {0}, {5}, {}, {3}
+    } },
+    ['c131ce'] = { tile = 1018, hyperlane = true, hyperlanes = {
+        {3}, {}, {}, {0}, {}, {}
+    } },
+    ['bb11c7'] = { tile = 1019, hyperlane = true, hyperlanes = {
+        {3}, {3}, {}, {0,1,5}, {}, {3}
+    } },
+    ['34cbfd'] = { tile = 1020, hyperlane = true, hyperlanes = {
+        {2}, {}, {0}, {5}, {}, {3}
+    } },
 
     -- Pick-A-Planet systems.
     ['0dcdee'] = { tile = 2001, planets = {{ name = 'A' }} },
@@ -1535,6 +1593,89 @@ function hexAdjacentWormholes(params)
     return result
 end
 
+--- Get neighbors through an hyperlane system
+-- @param scrHex (hex) : source hex
+-- @param hyperlaneSystem (system) : hyperlane system
+-- @return table : list of neighbor hex strings. Will not return hyperlanes hexes.
+function getHyperlaneNeighbors(srcHex, hyperlaneSystem, visitedHexSet)
+    local hyperlaneObj = getObjectFromGUID(hyperlaneSystem.guid)
+    local hyperlaneHex = hexFromPosition(hyperlaneObj.getPosition())
+    local hyperlaneNeighbors = hexNeighbors(hyperlaneHex)
+    visitedHexSet[srcHex] = true
+
+    local hyperlaneRotation = hyperlaneObj.getRotation().y % 360
+    local rotationOffset = math.floor(hyperlaneRotation / 60 + 0.5)
+    local idxSrc = 0
+
+    -- Find on which side of the hyperlane the source hex is
+    for idx, value in pairs(hyperlaneNeighbors) do
+        if value and value == srcHex then
+            idxSrc = ((idx - 1 - rotationOffset) % 6) + 1
+        end
+    end
+
+    local result = {}
+    if idxSrc < 1 and idxSrc > 12 then
+        log("WARNING getHyperlaneNeighbors : source hex is not adjacent to hyperlane")
+        return result
+    end
+
+    -- get the list of hexes connected throuh the hyperlane
+    local connectedNeighborsIdx = hyperlaneSystem.hyperlanes[idxSrc]
+    for _, connectedNeighbor in pairs(connectedNeighborsIdx) do
+        local updatedIdx = (connectedNeighbor + rotationOffset) % 6 + 1
+        local connectedHex = hyperlaneNeighbors[updatedIdx]
+
+        if connectedHex ~= hyperlaneHex then
+            local neighborSystem = systemFromPosition(hexToPosition(connectedHex))
+            -- if the connected hex is an hyperlane, keep processing the path
+            if neighborSystem and neighborSystem.hyperlanes then
+                if not visitedHexSet[connectedHex] then
+                    local allConnected = getHyperlaneNeighbors(hyperlaneHex, neighborSystem, visitedHexSet)
+                    for _, allConnectedHex in pairs(allConnected) do
+                        table.insert(result, allConnectedHex)
+                    end
+                end
+            else
+                table.insert(result, connectedHex)
+            end
+        end
+    end
+    return result
+end
+
+--- Get all adjacent hexes, including hyperlane-connected hexes
+-- @param hex : hex encoded as string.
+-- @return table : list of neighbor hex strings.
+function hexNeighborsWithHyperlanes(hex)
+
+    local allHexesNeighbors = hexNeighbors(hex)
+    local connectedNeighbors = {}
+    for _, neighborHex in pairs(allHexesNeighbors) do
+        local neighborSystem = systemFromPosition(hexToPosition(neighborHex))
+        if neighborSystem and neighborSystem.hyperlanes then
+            local allConnectedNeighbors = getHyperlaneNeighbors(hex, neighborSystem, {})
+            for _, connectedHex in pairs(allConnectedNeighbors) do
+                table.insert(connectedNeighbors, connectedHex)
+            end
+        else
+            table.insert(connectedNeighbors, neighborHex)
+        end
+    end
+
+    -- remove duplicates and self
+    local finalResult = {}
+    local hash = {}
+    for _,v in ipairs(connectedNeighbors) do
+        if not hash[v] and v ~= hex then
+            table.insert(finalResult, v)
+            hash[v] = true
+        end
+    end
+
+    return finalResult
+end
+
 -------------------------------------------------------------------------------
 
 local _activatedSystem = false
@@ -1758,7 +1899,7 @@ function _addContextMenuItems(systemObject)
 end
 
 function onObjectSpawn(object)
-    if _systems[object.getGUID()] then
+    if _systems[object.getGUID()] and not _systems[object.getGUID()].hyperlane then
         _addContextMenuItems(object)
     end
 end

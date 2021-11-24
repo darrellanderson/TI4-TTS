@@ -2113,7 +2113,7 @@ function _dumpUnits()
     end
     local hex = _systemHelper.hexFromPosition(getObjectFromGUID(system.guid).getPosition())
     local adjacentSet = {}
-    for _, adjacent in ipairs(_systemHelper.hexNeighbors(hex)) do
+    for _, adjacent in ipairs(_systemHelper.hexNeighborsWithHyperlanes(hex)) do
         adjacentSet[adjacent] = true
     end
     for _, adjacent in ipairs(_systemHelper.hexAdjacentWormholes({ hex = hex })) do
