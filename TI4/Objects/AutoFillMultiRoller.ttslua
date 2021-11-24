@@ -3,6 +3,7 @@
 -- TTS/TI4 by Darth Batman and Raptor1210.
 -- TI4 MultiRoller by the_Mantis and GarnetBear
 -- @author Darrell
+-- #include <~/TI4-TTS/TI4/Objects/AutoFillMultiRoller>
 --
 -- This script keeps track of the last activated system (command token dropped
 -- by the active player this turn), and fills the MultiRoller.
@@ -116,13 +117,11 @@ local _rollOnSelf = false
 -------------------------------------------------------------------------------
 
 function onLoad(save_state)
-    CrLua.Log.d(TAG, 'onLoad')
     --self.addContextMenuItem('Toggle roll nearby', function() _rollOnSelf = not _rollOnSelf end)
     Wait.frames(updateUi, 2)
 end
 
 function onSystemActivation(system)
-    CrLua.Log.d(TAG, 'onSystemActivation')
     _bombardmentPlasmaScoringOnPlanet = false
     updateUi()
 end
@@ -144,12 +143,18 @@ function updateColorToMultiRoller()
     end
 
     data.colorToMultiRoller = {}
-    for color, position in pairs(colorToPosition) do
-        local function distance(multiRoller)
-            return CrLua.Util.distanceSq(multiRoller.getPosition(), position)
+    for color, p0 in pairs(colorToPosition) do
+        local best = false
+        local bestDistanceSq = false
+        for _, multiRoller in ipairs(multiRollers) do
+            local p1 = multiRoller.getPosition()
+            local dSq = ((p1.x - p0.x) ^ 2) + ((p1.z - p0.z) ^ 2)
+            if (not bestDistanceSq) or (dSq < bestDistanceSq) then
+                best = multiRoller
+                bestDistanceSq = dSq
+            end
         end
-        local _, multiRoller = CrLua.Util.min(multiRollers, distance)
-        data.colorToMultiRoller[color] = multiRoller
+        data.colorToMultiRoller[color] = best
     end
 end
 
@@ -406,7 +411,6 @@ end
 
 --- Get the hex and adjacent hexes from a position.
 function getHexAndAdjacent(position, playerColor)
-    CrLua.Log.d(TAG, 'getHexAndAdjacent')
     assert(type(position) == 'table' and type(position.x) == 'number')
     assert(type(playerColor) == 'string')
 
@@ -424,13 +428,19 @@ function getHexAndAdjacent(position, playerColor)
     end
 
     -- Remove any duplicates.
-    adjacentHexes = CrLua.List.unique(adjacentHexes)
+    local uniq = {}
+    local seen = {}
+    for _, hex in ipairs(adjacentHexes) do
+        if not seen[hex] then
+            table.insert(uniq, hex)
+            seen[hex] = true
+        end
+    end
 
-    return hex, adjacentHexes
+    return hex, uniq
 end
 
 function getHexToUnits(units)
-    CrLua.Log.d(TAG, 'getHexToUnits')
     assert(type(units) == 'table')
 
     local hexToUnits = {}
@@ -448,7 +458,6 @@ end
 -------------------------------------------------------------------------------
 
 function rewritePositionAndHexForInArenaUnits(hex, units)
-    CrLua.Log.d(TAG, 'rewritePositionAndHexForInArenaUnits')
     assert(type(hex) == 'string' and type(units) == 'table')
 
     local arenaName = 'TI4 Auto-fill MultiRoller Arena'
@@ -473,7 +482,6 @@ function rewritePositionAndHexForInArenaUnits(hex, units)
         end
     end
     if not bbToArenaObject then
-        CrLua.Log.d(TAG, 'getArenaUnits: no arenas')
         return false
     end
 
@@ -500,7 +508,6 @@ function rewritePositionAndHexForInArenaUnits(hex, units)
 end
 
 function getOpponentColor(selfColor, activatingColor, unitsInHex)
-    CrLua.Log.d(TAG, 'getOpponentColor')
     assert(type(selfColor) == 'string' and type(activatingColor) == 'string' and type(unitsInHex) == 'table')
 
     -- If self is not the activating player, then activating player is enemy.
@@ -537,7 +544,6 @@ function autoFill(params)
 end
 
 function autoFillCoroutine()
-    CrLua.Log.d(TAG, 'autoFillCoroutine')
     local params = assert(table.remove(_autoFillQueue))
     assert(type(params.clickerColor) == 'string', 'clickerColor')
     assert(type(params.altClick) == 'boolean', 'altClick')
@@ -569,7 +575,6 @@ function autoFillCoroutine()
     end
 
     -- Get units in hex and adjacent (including wormholes) systems.
-    CrLua.Log.d(TAG, 'autoFillCoroutine: hexToUnits')
     local hex, adjacentHexes = getHexAndAdjacent(systemObject.getPosition(), params.clickerColor)
     coroutine.yield(0)
     local units = _unitHelper.getUnits()
@@ -625,7 +630,6 @@ function autoFillCoroutine()
     -- know opponent color (attributes may be slightly off, but good enough).
     local planet = false
     if params.planetIndex then
-        CrLua.Log.d(TAG, 'autoFillCoroutine: restricting to planet')
         if system and system.planets and #system.planets >= params.planetIndex then
             planet = system.planets[params.planetIndex].name
 
@@ -665,7 +669,6 @@ function autoFillCoroutine()
     local enemyColor = getOpponentColor(selfColor, activatingColor, hexToUnits[hex] or {})
 
     -- Split into self and enemy units.
-    CrLua.Log.d(TAG, 'autoFillCoroutine: split self/enemy')
     local adjacentHexSet = {}
     for _, adjacentHex in ipairs(adjacentHexes) do
         adjacentHexSet[adjacentHex] = true
@@ -692,7 +695,6 @@ function autoFillCoroutine()
     coroutine.yield(0)
 
     -- Is bombardment allowed?
-    CrLua.Log.d(TAG, 'autoFillCoroutine: checking planetary shield')
     local planetaryShield = false
     if enemyColor then
         local unitTypeToAttrs = assert(getUnitAttrs(hexToUnits[hex] or {}, enemyColor, selfColor))
@@ -775,7 +777,6 @@ function autoFillCoroutine()
     end
 
     -- Now get just the units that matter for the combat type.
-    CrLua.Log.d(TAG, 'autoFillCoroutine: getting fill units')
     local fillUnitTypeToCount = {}
     local adjacentUnitTypeToCount = {}
     if autofillTypeAttributes == AUTOFILL_TYPE.SPACE_CANNON_OFFENSE then
@@ -917,7 +918,6 @@ function autoFillCoroutine()
         table.insert(extraUnitModifiers, 'Nebula Defence')
     end
 
-    CrLua.Log.d(TAG, 'autoFillCoroutine: assembling message')
     local prefix = { 'AutoFill ' .. autofillTypeAttributes.name }
     if planet then
         table.insert(prefix, '(' .. planet .. ')')
@@ -972,7 +972,6 @@ function autoFillCoroutine()
     end
     printToAll(message, params.clickerColor)
 
-    CrLua.Log.d(TAG, 'autoFillCoroutine: injecting MR')
     local doClick = not params.altClick
     multiRoller.call('inject', {
         clickerColor = params.clickerColor,
@@ -991,25 +990,12 @@ function autoFillCoroutine()
 end
 
 -------------------------------------------------------------------------------
-
-#include <~/CrLua/CrLua>
-#include <~/CrLua/LockGlobals>
-
-#include <~/CrLua/TTS/Object>
-#include <~/CrLua/TTS/Player>
-
-#include <~/CrLua/List>
-#include <~/CrLua/LockTable>
-#include <~/CrLua/Log>
-#include <~/CrLua/Util>
-
---CrLua.Log.setLogLevel(CrLua.Log.LOG_LEVEL.DEBUG)
---#include <~/CrLua/UnitTest>
---CrLua.UnitTest.runTests(TAG, CrLua, true)
-
-CrLua.assertRequired({
-    'TTS.Object',
-    'TTS.Player',
-    'List',
-    'Log' })
-CrLua.lock()
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)
