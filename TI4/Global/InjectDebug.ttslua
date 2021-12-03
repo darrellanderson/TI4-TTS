@@ -1,0 +1,107 @@
+-- Experimental: inject debug support (e.g. check for bad state)
+-- Inject scripts is restricted to a repo subdirectory.
+-- Even still, be VERY CAREFUL with runtime script mutation!
+
+local orginalOnChat = onChat
+function onChat(message, srcPlayer)
+    if orginalOnChat and not orginalOnChat(message, srcPlayer) then
+        return false -- originial suppressed message
+    end
+
+    local DEBUG_CMD = '^debug'
+    local cmd = string.match(message, '^' .. DEBUG_CMD .. ' (.+)$')
+    if not cmd then
+        return true -- not a debug command, let the message pass
+    end
+
+    -- At this point this is a debug command.
+    local args = {}
+    for arg in string.gmatch(cmd, '%S+') do
+        table.insert(args, arg)
+    end
+    local path = table.remove(args, 1)
+    if not path then
+        return false -- malformed debug command?
+    end
+
+    -- Remove any existing debug object using this debug command.
+    local objectName = '__' .. DEBUG_CMD .. ':' .. path .. '__'
+    for _, object in ipairs(getAllObjects()) do
+        if object.getName() == objectName then
+            destroyObject(object)
+        end
+    end
+
+    -- Restrict what can be used as a debug.
+    local url = 'https://raw.githubusercontent.com/darrellanderson/TI4-TTS/main/Kruft/InjectDebug/' .. path .. '.ttslua'
+
+    -- Tell debug command about source, it can use or ignore it.
+    local paramsJson = JSON.encode({
+        path = path,
+        args = args,
+        srcPlayer = {
+            color = srcPlayer.color,
+            steam_name = srcPlayer.steam_name,
+            steam_id = srcPlayer.steam_id,
+        },
+    })
+
+    local function responseHandler(webRequest)
+        if (not webRequest) or (not webRequest.is_done) then
+            return
+        end
+        if webRequest.is_error then
+            srcPlayer.print(DEBUG_CMD .. ' webRequest error, error: ' .. (webRequest.error or '-'), 'Grey')
+            return
+        end
+        if (not webRequest.text) or (webRequest.text == '') then
+            srcPlayer.print(DEBUG_CMD .. ' webRequest error, empty response', 'Grey')
+            return
+        end
+        if webRequest.response_code ~= 200 then
+            srcPlayer.print(DEBUG_CMD .. ' webRequest error, response code: ' .. webRequest.response_code, 'Grey')
+            return
+        end
+        local script = webRequest.text
+
+        -- Spawn an object with the given script, pass args via extended save state json.
+        local debugObject = spawnObject({
+            type              = 'BlockSquare',
+            position          = { x = 0, y = -5, z = 0 },
+            rotation          = { x = 0, y = 0, z = 0 },
+            scale             = { x = 0.1, y = 0.1, z = 0.1 },
+            callback_function = nil,
+            sound             = false,
+            params            = nil,
+            snap_to_grid      = false,
+        })
+        debugObject.script_code = script
+        debugObject.script_state = paramsJson
+        debugObject.use_grid = false
+        debugObject.use_snap_points = false
+        debugObject.use_hands = false
+        debugObject.interactable = false
+        debugObject.addTag('DELETED_ITEMS_IGNORE')
+        debugObject.setName(objectName)
+        debugObject.setLock(true)
+        debugObject.reload() -- runs script
+
+        srcPlayer.print(DEBUG_CMD .. ' webRequest success, response code: ' .. webRequest.response_code, 'Grey')
+    end
+
+    srcPlayer.print(DEBUG_CMD .. ' sending request: ' .. path, 'Grey')
+    WebRequest.get(url, responseHandler)
+
+    return false
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)
