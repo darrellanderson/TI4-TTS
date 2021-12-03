@@ -1,0 +1,3 @@
+function onLoad(saveState)
+    print('InjectDebugTest: ' .. saveState)
+end
