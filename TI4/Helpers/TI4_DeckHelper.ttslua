@@ -1448,6 +1448,18 @@ end
 -------------------------------------------------------------------------------
 -- Add top/bottom context menu on Agenda cards to discard to top/bottom.
 
+-- Track top/bottom for agenda cards in the deck description.
+function onStrategyCardPlayed(strategyCardGuid)
+    local startegyCard = strategyCardGuid and getObjectFromGUID(strategyCardGuid)
+    if startegyCard and startegyCard.getName() == 'Politics' then
+        local agendaDeckGuid = getDeck('Agenda')
+        local agendaDeck = agendaDeckGuid and getObjectFromGUID(agendaDeckGuid)
+        if agendaDeck then
+            agendaDeck.setDescription('Politics played')
+        end
+    end
+end
+
 function isAgendaCard(cardName)
     assert(type(cardName) == 'string')
     assert(DECKS['Agenda'], 'No agenda deck??')
@@ -1476,6 +1488,15 @@ local function _putAgendaCard(cardObject, onTop)
         cardObject.setPositionSmooth(transform.position, collide, fast)
     end
     Wait.frames(finishPut, 2)
+
+    -- Add to Agenda deck description what happened.
+    local agendaDeckGuid = getDeck('Agenda')
+    local agendaDeck = agendaDeckGuid and getObjectFromGUID(agendaDeckGuid)
+    if agendaDeck then
+        local desc = agendaDeck.getDescription()
+        desc = desc .. '\nPut ' .. (onTop and 'top' or 'bottom')
+        agendaDeck.setDescription(desc)
+    end
 end
 
 local function _putAgendaTop(playerColor, card)
