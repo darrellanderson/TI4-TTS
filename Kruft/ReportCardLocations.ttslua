@@ -1,0 +1,87 @@
+-- Report guid -> location for all cards.
+-- Used to look at a missing/dup card issues.
+
+function onLoad(save_state)
+    self.addContextMenuItem('report', doReport)
+end
+
+function doReport()
+    local guidToData = {}
+    local function add(guid, name, pos)
+        local entry = guidToData[guid]
+        if not entry then
+            entry = {}
+            guidToData[guid] = entry
+        end
+        table.insert(entry, { name = name, pos = pos })
+    end
+
+    -- Get in-hand objects.
+    local inHandObjectSet = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        for i = 1, player.getHandCount() do
+            for _, object in ipairs(player.getHandObjects(i)) do
+                inHandObjectSet[object] = true
+                local guid = object.getGUID()
+                local name = object.getName()
+                local pos = 'hand (' .. player.color .. ')'
+                add(guid, name, pos)
+            end
+        end
+    end
+
+    -- Get on table first (will find in-hand cards).
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Card' and not inHandObjectSet[object] then
+            local guid = object.getGUID()
+            local name = object.getName()
+            local pos = 'table'
+            add(guid, name, pos)
+        end
+    end
+
+
+    -- Cards in decks.
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Deck' then
+            entries = object.getObjects()
+            numEntries = #entries
+            for i, entry in ipairs(entries) do
+                local guid = entry.guid
+                local name = entry.name
+                local pos = 'deck (' .. object.getName() .. ' ' .. i .. '/' .. numEntries .. ')'
+                add(guid, name, pos)
+            end
+        end
+    end
+
+    -- Get guids in sort order.
+    local guids = {}
+    for guid, _ in pairs(guidToData) do
+        table.insert(guids, guid)
+    end
+    table.sort(guids)
+
+    local message = {}
+    table.insert(message, '\n')
+    table.insert(message, '--BEGIN--')
+    for _, guid in ipairs(guids) do
+        local entries = guidToData[guid]
+        local numEntries = #entries
+        for _, entry in ipairs(entries) do
+            local output = {
+                guid,
+                numEntries,
+                assert(entry.name),
+                assert(entry.pos)
+            }
+            table.insert(message, (table.concat(output, ', ')))
+        end
+    end
+    table.insert(message, '--END--')
+    table.insert(message, '\n')
+    table.insert(message, 'Use "chat_copy" from the console to extract.')
+
+    -- Error dumps the message to the console, where it can be copied.
+    error(table.concat(message, '\n'))
+end
