@@ -1,0 +1,7 @@
+v48:
+- Fix a long-standing bug where auto-dealing beyond the last card might not restore it with shuffled discard.
+- Reject hover+# card requests when player does not have a hand (e.g. observer in a player seat).
+- Rework card dealing TTS bug workaround to be a lot simpler, speed up dealing a little.
+- Add some sanity checking to make sure workaround is working.
+- Fix Franken with Discordant Stars to move extra hero to the heroes bag.
+- Added Somberlord to credits (back of setup tile).

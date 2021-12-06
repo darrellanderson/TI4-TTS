@@ -1,0 +1,9 @@
+v47:
+- Add SCPT Invitational Finals to Milty Tool.
+- Fix Burninate not recognizing flagships if added before unpacking factions.
+- Prophecy of Ixth now grants +1 to fighter ground combat (with Matriarch).
+- Salai Sai Corian now counts NRA mech in space as ships.
+- Rotate command tokens when multiple players activate the same system via right-click menu.
+- Roller now shows Fighter ground combat value when paired with Matriarch (thanks Somberlord).
+- Fixed a map image (thanks Somberlord).
+- Adjacency checks now follow hyperlanes (thanks Somberlord).
