@@ -1,0 +1,471 @@
+-- Validate card spawns are draws from source deck.
+-- Useful for looking into bad game state reports.
+--
+-- Report:
+-- - Card spawn not drawn from a deck or bag.
+-- - Card delete not added to a deck or bag.
+-- - Legal card spawn but a copy already exists.
+--
+-- @author darrell
+
+function getHelperClient(helperObjectName)
+    local function getHelperObject()
+        for _, object in ipairs(getAllObjects()) do
+            if object.getName() == helperObjectName then return object end
+        end
+        error('missing object "' .. helperObjectName .. '"')
+    end
+    local helperObject = false
+    local function getCallWrapper(functionName)
+        helperObject = helperObject or getHelperObject()
+        if not helperObject.getVar(functionName) then error('missing ' .. helperObjectName .. '.' .. functionName) end
+        return function(parameters) return helperObject.call(functionName, parameters) end
+    end
+    return setmetatable({}, { __index = function(t, k) return getCallWrapper(k) end })
+end
+local _deckHelper = getHelperClient('TI4_DECK_HELPER')
+local _gameDataHelper = getHelperClient('TI4_GAME_DATA_HELPER')
+
+local _actionCardNameSet = false
+local _verifyCallbackQueue = {}
+
+local _guidEnteringContainerSet = {}
+local _guidLeavingContainerSet = {}
+local _dealHackNameSet = {} -- deal deletes then respawns
+local _deletedItemsBagGuid = false
+
+local _state = {
+    reportTo = nil,
+    reportHook = nil,
+}
+
+-------------------------------------------------------------------------------
+
+-- Is this an action card card name?
+-- @param name (string) : card name.
+-- @return true is a card name.
+local function isActionCardName(name)
+    assert(type(name) == 'string')
+    if not _actionCardNameSet then
+        _actionCardNameSet = {}
+        local cardNames = _deckHelper.getCardsWithSource({ deckName = 'Actions' })
+        assert(cardNames and (#cardNames) > 0, 'empty cardNames')
+        for _, cardName in ipairs(cardNames) do
+            _actionCardNameSet[cardName] = true
+        end
+    end
+    return _actionCardNameSet[name]
+end
+
+-- Get map from name to how many copies are found.
+-- @return (table) : map from card name (string) to count (number).
+local function getActionCardNameToCount()
+    local result = {}
+    isActionCardName('bogus') -- make sure set exists
+    for name, _ in pairs(_actionCardNameSet) do
+        result[name] = 0
+    end
+    for _, object in ipairs(getAllObjects()) do
+        if object.type == 'Deck' or object.type == 'Bag' then
+            for i, entry in ipairs(object.getObjects()) do
+                local name = entry.name
+                if result[name] then
+                    result[name] = result[name] + 1
+                end
+            end
+        elseif object.type == 'Card' then
+            local name = object.getName()
+            if result[name] then
+                result[name] = result[name] + 1
+            end
+        end
+    end
+    return result
+end
+
+-- Look for missing or duplicate cards.
+-- @param callback (function) : called with a string summary (even if no errors).
+local function verifyCardsAsync(callback)
+    assert(type(callback) == 'function')
+    table.insert(_verifyCallbackQueue, callback)
+    startLuaCoroutine(self, '_verifyCardsCoroutine')
+end
+
+function _verifyCardsCoroutine()
+    local callback = table.remove(_verifyCallbackQueue)
+    if not callback then
+        return
+    end
+
+    -- Collect just the non-one location sets.
+    local nameToLocations = false
+    for name, count in pairs(getActionCardNameToCount()) do
+        if count == 0 then
+            nameToLocations = nameToLocations or {}
+            nameToLocations[name] = {}
+        elseif count > 1 then
+            nameToLocations = nameToLocations or {}
+            nameToLocations[name] = getLocations(name, false)
+            coroutine.yield(0)
+        end
+    end
+
+    -- Format error message.
+    local message = {}
+    table.insert(message, 'Verify action cards ')
+    if not nameToLocations then
+        table.insert(message, 'no errors')
+    else
+        local errors = {}
+        for name, locations in pairs(nameToLocations) do
+            local index = (#errors) + 1
+            if #locations == 0 then
+                table.insert(errors, '> (' .. index .. ') MISSING "' .. name .. '"')
+            else
+                table.insert(errors, '> (' .. index .. ') DUPLICATE "' .. name .. '" (' .. (#locations) .. '):\n> ' .. table.concat(locations, '\n> ') )
+            end
+        end
+        table.insert(message, (#errors) .. ' errors:\n' .. table.concat(errors, '\n'))
+    end
+    message = table.concat(message, '')
+
+    callback(message)
+    return 1
+end
+
+-------------------------------------------------------------------------------
+
+-- Get locations for the given object name.
+-- @param name (string) : object name.
+-- @param excludeObject (TTS Object or false) : do not find this object.
+-- @return (table) : list of location strings.
+function getLocations(name, excludeObject)
+    assert(type(name) == 'string')
+    assert((not excludeObject) or type(excludeObject) == 'userdata')
+
+    -- Remember in-hand objects.
+    local guidToHandColor = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        for i = 1, player.getHandCount() do
+            for _, object in ipairs(player.getHandObjects(i)) do
+                guidToHandColor[object.getGUID()] = player.color
+            end
+        end
+    end
+
+    local result = {}
+
+    -- Get containers, and cards on table (including hands).
+    for _, object in ipairs(getAllObjects()) do
+        if object.type == 'Deck' or object.type == 'Bag' then
+            for i, entry in ipairs(object.getObjects()) do
+                if entry.name == name then
+                    local guid = entry.guid
+                    local loc = object.type
+                    local size = object.getQuantity()
+                    table.insert(result, '@' .. guid .. ':' .. loc .. '[' .. i .. '/' .. size .. ']')
+                end
+            end
+        elseif (object.type) == 'Card' and (object.getName() == name) and (object ~= excludeObject) then
+            local guid = object.getGUID()
+            local hand = guidToHandColor[guid]
+            local loc = hand and ('Hand[' .. hand .. ']') or 'Table'
+            table.insert(result, '@' .. guid .. ':' .. loc)
+        end
+    end
+
+    return (#result > 0) and result
+end
+
+-------------------------------------------------------------------------------
+
+-- Is this location very close to the deleted items bag in XZ space?
+-- If yes, objects there may have been created by it for storing a copy.
+-- @param position (table or vector) : in-game position.
+-- @return (true if near).
+function isNearDeletedItems(position)
+    assert(type(position.x) == 'number')
+    local deletedItemsBag = _deletedItemsBagGuid and getObjectFromGUID(_deletedItemsBagGuid)
+    if not deletedItemsBag then
+        for _, candidateObject in ipairs(getAllObjects()) do
+            if candidateObject.type == 'Bag' and candidateObject.getName() == 'TI4 Deleted Items' then
+                deletedItemsBag = candidateObject
+                _deletedItemsBagGuid = deletedItemsBag.getGUID()
+                break
+            end
+        end
+    end
+    if deletedItemsBag then
+        local p0 = deletedItemsBag.getPosition()
+        local p1 = position
+        local dSq = ((p1.x - p0.x) ^ 2) + ((p1.z - p0.z) ^ 2)
+        return dSq < 1
+    end
+end
+
+-- Get pointer nearest position.
+-- @param position (table or vector) : in-game position.
+-- @return (Player).
+function getClosestPointer(position)
+    assert(type(position.x) == 'number')
+    local p0 = position
+    local best = false
+    local bestDistanceSq = false
+    for _, player in ipairs(Player.getPlayers()) do
+        local p1 = player.getPointerPosition() -- can be missing!
+        if p1 then
+            local dSq = ((p1.x - p0.x) ^ 2) + ((p1.z - p0.z) ^ 2)
+            if (not bestDistanceSq) or (dSq < bestDistanceSq) then
+                best = player
+                bestDistanceSq = dSq
+            end
+        end
+    end
+    return best
+end
+
+-------------------------------------------------------------------------------
+
+local function report(message)
+    assert(type(message) == 'string')
+
+    if _state.reportTo then
+        local reportToPlayer = false
+        for _, player in ipairs(Player.getPlayers()) do
+            if player.steam_id == _state.reportTo then
+                reportToPlayer = player
+            end
+        end
+        for _, player in ipairs(Player.getSpectators()) do
+            if player.steam_id == _state.reportTo then
+                reportToPlayer = player
+            end
+        end
+        if reportToPlayer then
+            reportToPlayer.broadcast(message, 'Orange')
+        end
+    end
+
+    if _state.reportHook then
+        local timestamp = _gameDataHelper.getGameDataTimestamp() or 0
+        message = '<' .. timestamp .. '|' .. os.date() .. '> ' .. message
+        WebRequest.post(_state.reportHook, {content=message}, function() end)
+    end
+end
+
+-------------------------------------------------------------------------------
+
+local function unexpectedSpawn(object)
+    assert(type(object) == 'userdata')
+
+    local guid = object.getGUID()
+    local name = object.getName()
+    local message = { 'unexpected spawn: "' .. name .. '"@' .. guid }
+
+    local closestPointer = getClosestPointer(object.getPosition())
+    if closestPointer then
+        local color = closestPointer.color
+        local name = closestPointer.steam_name
+        table.insert(message, 'closest pointer: ' .. color .. ' (' .. name .. ')')
+    end
+
+    local others = getLocations(name, object)
+    if others then
+        assert(type(others) == 'table')
+        local count = #others
+        local others = table.concat(others, ', ')
+        table.insert(message, 'other copies (' .. count .. '): ' .. others)
+    end
+
+    report(table.concat(message, '\n> '))
+end
+
+local function unexpectedDestroy(object)
+    assert(type(object) == 'userdata')
+
+    local guid = object.getGUID()
+    local name = object.getName()
+    local message = { 'unexpected destroy: "' .. name .. '"@' .. guid }
+
+    local closestPointer = getClosestPointer(object.getPosition()) or '-'
+    if closestPointer then
+        local color = closestPointer.color
+        local name = closestPointer.steam_name
+        table.insert(message, 'closest pointer: ' .. color .. ' (' .. name .. ')')
+    end
+
+    local others = getLocations(name, object)
+    if others then
+        assert(type(others) == 'table')
+        local count = #others
+        local others = table.concat(others, ', ')
+        table.insert(message, 'other copies (' .. count .. '): ' .. others)
+    end
+
+    report(table.concat(message, '\n> '))
+end
+
+local function unexpectedDuplicates(object, duplicates)
+    assert(type(object) == 'userdata')
+    assert(type(duplicates) == 'table')
+
+    local guid = object.getGUID()
+    local name = object.getName()
+    local message = { 'unexpected draw: "' .. name .. '"@' .. guid }
+
+    local closestPointer = getClosestPointer(object.getPosition())
+    if closestPointer then
+        local color = closestPointer.color
+        local name = closestPointer.steam_name
+        table.insert(message, 'closest pointer: ' .. color .. ' (' .. name .. ')')
+    end
+
+    local count = #duplicates
+    local others = table.concat(duplicates, ', ')
+    table.insert(message, 'other copies (' .. count .. '): ' .. others)
+
+    report(table.concat(message, '\n> '))
+end
+
+-------------------------------------------------------------------------------
+
+-- Called BEFORE onObjectSpawn!
+function onObjectLeaveContainer(container, leaveObject)
+    local guid = leaveObject.getGUID()
+    local name = leaveObject.getName()
+    if leaveObject.type == 'Card' and isActionCardName(name) then
+        _guidLeavingContainerSet[guid] = true
+    end
+end
+
+-- Called BEFORE onObjectDestroy!
+function onObjectEnterContainer(container, enterObject)
+    local guid = enterObject.getGUID()
+    local name = enterObject.getName()
+    if enterObject.type == 'Card' and isActionCardName(name) then
+        _guidEnteringContainerSet[guid] = true
+    end
+end
+
+function onObjectSpawn(object)
+    local guid = object.getGUID()
+    local name = object.getName()
+    if object.type == 'Card' and isActionCardName(name) then
+        if _guidLeavingContainerSet[guid] then
+            -- Normal spawn after removing from deck/bag.
+            _guidLeavingContainerSet[guid] = nil
+            -- Normal pull from container, but check for action card duplicates.
+            local duplicates = getLocations(name, object)
+            if duplicates then
+                unexpectedDuplicates(object, duplicates)
+            end
+        elseif _dealHackNameSet[name] then
+            -- Deal hack spawned this after deleting original.
+            _dealHackNameSet[name] = nil
+        elseif not isNearDeletedItems(object.getPosition()) then
+            -- Object appeared but not from a container.
+            unexpectedSpawn(object)
+        end
+    end
+end
+
+function onObjectDestroy(dyingObject)
+    local guid = dyingObject.getGUID()
+    local name = dyingObject.getName()
+    if dyingObject.type == 'Card' and isActionCardName(name) then
+        if _guidEnteringContainerSet[guid] then
+            -- Normal delete after adding to deck/bag.
+            _guidEnteringContainerSet[guid] = nil
+        elseif dyingObject.type == 'Card' and dyingObject.hasTag('DELETED_ITEMS_IGNORE') then
+            -- Yuck.  A card-dealing bug workaround deletes and clones cards.
+            _dealHackNameSet[name] = true
+        else
+            -- Object destroyed but not put into a container.
+            unexpectedDestroy(dyingObject)
+        end
+    end
+end
+
+-------------------------------------------------------------------------------
+
+-- Use a chat message to activate.
+function onChat(message, srcPlayer)
+    local ENABLE = ';m'
+    local VERIFY = ';v'
+
+    local enable = string.match(message, '^' .. ENABLE .. '[%s]*(.*)$')
+    if enable then
+        _state.reportTo = srcPlayer.steam_id
+        _state.reportHook = nil
+        if string.match(enable, '^https://discord.com/api/webhooks') then
+            _state.reportHook = enable
+        end
+
+        -- Report players for the log as well as confirming it is working.
+        local players = {}
+        for _, player in ipairs(Player.getPlayers()) do
+            table.insert(players, player.color .. ':"' .. player.steam_name .. '"')
+        end
+        for _, player in ipairs(Player.getSpectators()) do
+            table.insert(players, '*' .. player.color .. ':"' .. player.steam_name .. '"')
+        end
+        local message = ENABLE .. ' enabled, players: ' .. table.concat(players, ', ')
+        report(message)
+
+        return false -- suppress message
+    end
+
+    local verify = string.match(message, '^' .. VERIFY .. '[%s]*(.*)$')
+    if verify then
+        verifyCardsAsync(report)
+        return false -- suppress message
+    end
+
+
+    return true -- treat as a normal chat message
+end
+
+-------------------------------------------------------------------------------
+
+function onLoad(saveState)
+    self.setColorTint({ r = 0.25, g = 0.25, b = 0.25 })
+    self.setScale({ x = 2, y = 0.01, z = 2 })
+    self.setName('TI4_VERIFY_HELPER')
+    self.setDescription('PLEASE LEAVE ON TABLE! This object is only visible to the black (GM) player.')
+
+    -- Only the GM/black player can see this object.
+    local invisibleTo = {}
+    for _, color in ipairs(Player.getColors()) do
+        if color ~= 'Black' then
+            table.insert(invisibleTo, color)
+        end
+    end
+    self.setInvisibleTo(invisibleTo)
+
+    if saveState and string.len(saveState) > 0 then
+        _state = JSON.decode(saveState) or _state
+    end
+
+    local function verifyCardsWrapper(playerColor)
+        local function callback(message)
+            printToColor(message, playerColor, 'Orange')
+        end
+        verifyCardsAsync(callback)
+    end
+    self.addContextMenuItem('Verify Cards', verifyCardsWrapper)
+end
+
+function onSave()
+    return JSON.encode(_state or {})
+end
+
+-------------------------------------------------------------------------------
+-- Index is only called when the key does not already exist.
+local _lockGlobalsMetaTable = {}
+function _lockGlobalsMetaTable.__index(table, key)
+    error('Accessing missing global "' .. tostring(key or '<nil>') .. '", typo?', 2)
+end
+function _lockGlobalsMetaTable.__newindex(table, key, value)
+    error('Globals are locked, cannot create global variable "' .. tostring(key or '<nil>') .. '"', 2)
+end
+setmetatable(_G, _lockGlobalsMetaTable)
