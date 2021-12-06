@@ -172,6 +172,11 @@ local UNDRAFTABLE = {
     ['Zelian Asteroid Tile'] = {},
 }
 
+-- Remove this if/when a faction table supports multiple heroes.
+local HACK_OVERRIDE_LEADER_DST = {
+    ['Korela, The Lady'] = 'Heroes',
+}
+
 local function isUndraftable(objectName)
     assert(type(objectName) == 'string')
     return UNDRAFTABLE[objectName] and true
@@ -1128,7 +1133,11 @@ function FrankenBags._fillSourceBagsFromFactionBox(faction, factionBox)
                 local name = object.getName()
                 local overrides = _unitHelper.getUnitOverrides()
                 local override = overrides[name]
-                if override and override.override == 'Mech' then
+                if HACK_OVERRIDE_LEADER_DST[name] then
+                    local dst = HACK_OVERRIDE_LEADER_DST[name]
+                    object.setDescription(dst)
+                    return dst
+                elseif override and override.override == 'Mech' then
                     return 'Mechs'
                 elseif name == faction.commander then
                     object.setDescription('Commander')
