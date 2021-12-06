@@ -1203,6 +1203,17 @@ function deal(params)
 
     params.deckAttributes = assert(DECKS[params.deck], 'bad deck name')
 
+    local legalColorSet = {}
+    for _, player in ipairs(Player.getPlayers()) do
+        if player.getHandCount() > 0 then
+            legalColorSet[player.color] = true
+        end
+    end
+    if not legalColorSet[params.color] then
+        printToColor('Unable to deal to players without a hand', params.color, 'Yellow')
+        return
+    end
+
     if params.count > 9 then
         printToColor('Attempted to deal too many cards, please wait a moment between number presses', params.color, 'Yellow')
         return
@@ -1342,7 +1353,7 @@ function _dealHack(deck, count, playerColor)
     end
     local rotation = {
         x = 0,
-        y = zoneAttrs.rotation.y,
+        y = zoneAttrs and zoneAttrs.rotation.y or 0,
         z = deck.getRotation().z
     }
 
