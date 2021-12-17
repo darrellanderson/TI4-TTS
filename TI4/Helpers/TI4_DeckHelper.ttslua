@@ -137,7 +137,7 @@ local DECKS = {
         score = true,
         shuffleOnDiscard = true,
         cardNames = {
-            base = {
+            ['Base'] = {
                 ['Adapt New Strategies'] = { abbr = '2 FACTION TECH' },
                 ['Become the Gatekeeper'] = { abbr = 'ALPHA AND BETA' },
                 ['Control the Region'] = { abbr = '6 SYSTEMS' },
@@ -196,7 +196,7 @@ local DECKS = {
             }
         },
         cardNames = {
-            base = {
+            ['Base'] = {
                 'Anti-Intellectual Revolution',
                 'Archived Secret',
                 'Arms Reduction',
@@ -955,7 +955,7 @@ end
 
 --- Add a homebrew deck.
 function injectDeck(params)
-    local deckAttributes = _copyTable(params)
+    local deckAttributes = copyTable(params)
     _verifyDeck(params)
 
     DECKS[deckAttributes.deckName] = deckAttributes
