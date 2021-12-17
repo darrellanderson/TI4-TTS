@@ -74,13 +74,7 @@ local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
 -------------------------------------------------------------------------------
 
 local PRESET_INPUTS = {
-    ['SCPT Invitational 1'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Clan of Saar|Nomad|Winnu|L1Z1X Mindnet|Ghosts of Creuss|Mahact Gene-Sorcerers|Xxcha Kingdom|Vuil'raith Cabal",
-    ['SCPT Invitational 2'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky  Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Embers of Muaat|Arborec|Yin Brotherhood|Naalu Collective|Mentak Coalition|Yssaril Tribes|Sardakk N'orr|Nekro Virus",
-    ['SCPT Invitational 3'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky  Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Argent Flight|Barony of Letnev|Empyrean|Titans of Ul|Universities of Jol-Nar|Emirates of Hacan|Federation of Sol|Naaz-Rokha Alliance",
-    ['SCPT Invitational 4'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky  Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Mahact Gene-Sorcerers|Ghosts of Creuss|Nomad|Naaz-Rokha Alliance|Titans of Ul|Argent Flight|Vuil'raith Cabal|Empyrean",
-    ['SCPT Invitational 5'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky  Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Winnu|Yssaril Tribes|Arborec|Nekro Virus|Embers of Muaat|Yin Brotherhood|Naalu Collective|Clan of Saar",
-    ['SCPT Invitational 6'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky  Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Barony of Letnev|L1Z1X Mindnet|Mentak Coalition|Federation of Sol|Emirates of Hacan|Universities of Jol-Nar|Xxcha Kingdom|Sardakk N'orr",
-    ['SCPT Invitational F'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky  Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=Sol|Mentak|Arborec|Mahact|Vuil'raith|Letnev|Titans",
+    ['SCPT 2020 Invitation'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks",
 }
 
 _config = {
@@ -377,10 +371,6 @@ end
 
 function doFinish()
     _state.snakeTurns = false
-    _gameDataHelper.addExtraData({
-        name = 'MiltyDraft',
-        value = true
-    })
     startLuaCoroutine(self, 'finishCoroutine')
 end
 
@@ -568,6 +558,13 @@ function finishCoroutine()
     end
     coroutine.yield(0)
 
+    local allFactionTokenNames = {}
+    for _, object in ipairs(FactionTokens.getAll(true)) do
+        local factionTokenName = string.match(object.getName(), '^(.*) Faction Token$')
+        table.insert(allFactionTokenNames, factionTokenName)
+    end
+    coroutine.yield(0)
+
     for _, object in ipairs(FactionTokens.getAll(false)) do
         local zone = _zoneHelper.zoneFromPosition(object.getPosition())
         local choices = zone and colorToChoices[zone]
@@ -751,6 +748,51 @@ function finishCoroutine()
         self.setLock(false)
         toolsBag.putObject(self)
     end
+
+    -- Start timer.
+    local clock = false
+    for _, object in ipairs(getAllObjects()) do
+        if object.tag == 'Clock' then
+            clock = object
+        end
+    end
+    if clock then
+        clock.setLock(true)
+        clock.Clock.startStopwatch()
+        broadcastToAll('Draft complete, starting clock', 'Yellow')
+    end
+
+    -- Track game type.
+    _gameDataHelper.addExtraData({
+        name = 'MiltyDraft',
+        value = true
+    })
+
+    -- Track chosen slices.
+    local seatColorToSlices = {}
+    for _, choices in pairs(colorToChoices) do
+        seatColorToSlices[choices.seatColor] = table.concat(choices.sliceTiles, ',')
+    end
+    _gameDataHelper.addExtraData({
+        name = 'MiltySlices',
+        value = seatColorToSlices
+    })
+
+    -- Track unpicked factions.
+    local pickedSet = {}
+    local unpickedList = {}
+    for _, choices in pairs(colorToChoices) do
+        pickedSet[choices.factionTokenName] = true
+    end
+    for _, factionTokenName in ipairs(allFactionTokenNames) do
+        if not pickedSet[factionTokenName] then
+            table.insert(unpickedList, factionTokenName)
+        end
+    end
+    _gameDataHelper.addExtraData({
+        name = 'MiltyUnpickedFactions',
+        value = unpickedList
+    })
 
     return 1
 end
