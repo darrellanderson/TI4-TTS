@@ -2166,6 +2166,22 @@ function onSetupHelperSetupFinished(params)
     end
 end
 
+function _doNothingCallback()
+end
+
+function onPlaceTradeGoodsAndSetTurns()
+    -- Update data to capture start-of-round state.  Do not upload this data,
+    -- wait for the timer to go off.
+    if _state._gamedataOptIn or _gameDataKey then
+        asyncGatherData({
+            guid = self.getGUID(),
+            includeSteamNames = false,
+            includeHistory = true,
+            callbackFunctionName = '_doNothingCallback',
+        })
+    end
+end
+
 function onPlayerTurnStart(player_color_start, player_color_previous)
     if (_state._gamedataOptIn or _gameDataKey) and (not _state.mapString) then
         local hasScore = false
@@ -2324,7 +2340,7 @@ function _uploadGameDataCallback(result)
         host = GAME_DATA_LOCALHOST
     end
 
-    local path = params.urlPath or  '/data'
+    local path = params.urlPath or '/data'
 
     local args = {}
     for k, v in pairs(params.urlArgs or {}) do
