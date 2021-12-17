@@ -215,6 +215,22 @@ function placeTradeGoodsAndSetTurns(obj, playerClickerColor, altClick)
     Turns.order = turnOrder
     Turns.turn_color = turnOrder[1]
     Turns.enable = true
+
+    -- Tell any interested parties.
+    local informObjects = {}
+    for _, object in ipairs(getAllObjects()) do
+        if object.getVar('onPlaceTradeGoodsAndSetTurns') then
+            table.insert(informObjects, object)
+        end
+    end
+    for i, object in ipairs(informObjects) do
+        local function delayedInform()
+            if object then
+                object.call('onPlaceTradeGoodsAndSetTurns')
+            end
+        end
+        Wait.frames(delayedInform, i)
+    end
 end
 
 function dealActionCards(obj, playerClickerColor, altClick)
