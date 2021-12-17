@@ -494,11 +494,14 @@ function setupGameCoroutine()
 
     setupPoK(_config.usePoK)
     coroutine.yield(0)
+    coroutine.yield(0)
 
     setupCodex1(_config.useCodex1)
     coroutine.yield(0)
+    coroutine.yield(0)
 
     setupCodex2(_config.useCodex2)
+    coroutine.yield(0)
     coroutine.yield(0)
 
     _setupHelper.setup({
@@ -646,7 +649,7 @@ function setupPoK(usePoK)
         -- Remove other objects.  Only do this for the "final" setup.
         if not _config.isRightClick then
             local removeNameSet = {
-                ['Exploration Mat'] = true,
+                --['Exploration Mat'] = true,
                 ['Exploration Bag'] = true,
                 ['Frontier Tokens Bag'] = true,
                 ['Mallice Tile'] = true,
@@ -1039,6 +1042,7 @@ function _removeCards(containerName, deckName, sourceName)
                 createDeck.setName(sourceName .. ' ' .. deckName)
             end
             container.putObject(createDeck)
+            coroutine.yield(0)
         end
     end
 end
