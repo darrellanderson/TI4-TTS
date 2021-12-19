@@ -1,0 +1,9 @@
+v49:
+- Fix homebrew deck injection (thanks Mobious46).
+- Setup without PoK or Codex2 no longer leaves Codex2 relic cards on the table.
+- Opt-in stats now update per-round snapshots after "place trade goods and set turns" click.
+- Milty draft stats now include:
+- - Picked slices in seat order.
+- - Unpicked factions.
+- - Name of right-click menu preset draft choice, when used.
+- Milty draft presets may now include a duration, starts the clock when draft finishes.
