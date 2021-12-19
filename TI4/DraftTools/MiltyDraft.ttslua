@@ -74,7 +74,18 @@ local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
 -------------------------------------------------------------------------------
 
 local PRESET_INPUTS = {
-    ['SCPT 2020 Invitation'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks",
+    ['SCPT 2021 Invitation'] = "slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks",
+    --['SCPT 2022 Test'] = "clock=28800&slices=66,34,47,62,41|29,67,48,22,61|65,69,39,20,80|35,45,26,19,78|73,40,21,60,68|23,63,79,49,37|72,42,59,77,25|64,76,24,46,44&labels=Gravity's Hope's End|Feelin' Lucky Punk?|Intolerable Cruelty|Lump a Coal|Children at Play.|Highway to Meercatol|Gotcha Sumthin|Rigel Rocks&factions=sets:SCPT2022",
+}
+
+-- Specify "&factions=sets:SCPT2022" to choose from predefined sets.
+local FACTION_SETS = {
+    ['SCPT2022'] = {
+        "Arborec|Argent|Creuss|Empyrean|Hacan|Jol-Nar|L1Z1X|Letnev",
+        "Arborec|Argent|Creuss|Empyrean|Hacan|Jol-Nar|L1Z1X|Letnev",
+        "Arborec|Argent|Creuss|Empyrean|Hacan|Jol-Nar|L1Z1X|Letnev",
+        "Arborec|Argent|Creuss|Empyrean|Hacan|Jol-Nar|L1Z1X|Letnev",
+    }
 }
 
 _config = {
@@ -240,6 +251,7 @@ function onLoad(saveState)
 
     for name, value in pairs(PRESET_INPUTS) do
         local function setInput()
+            _state.preset = name
             if not CustomSetup.isInputVisible() then
                 CustomSetup.showInput()
             end
@@ -439,6 +451,7 @@ function setupCoroutine()
         factionNames = CustomSetup.readFactions() or factionNames
         order = CustomSetup.readDraftOrder() or order
         mapString = CustomSetup.readMapString()
+        _state.clock = CustomSetup.readClock()
         CustomSetup.hideInput()
     end
 
@@ -750,17 +763,22 @@ function finishCoroutine()
     end
 
     -- Start timer.
-    local clock = false
-    for _, object in ipairs(getAllObjects()) do
-        if object.tag == 'Clock' then
-            clock = object
+    if _state.clock then
+        assert(type(_state.clock) == 'number')
+        local clock = false
+        for _, object in ipairs(getAllObjects()) do
+            if object.tag == 'Clock' then
+                clock = object
+            end
+        end
+        if clock then
+            clock.setLock(true)
+            clock.Clock.setValue(_state.clock)
+            clock.Clock.pauseStart()
+            broadcastToAll('Starting clock', 'Yellow')
         end
     end
-    if clock then
-        clock.setLock(true)
-        clock.Clock.startStopwatch()
-        broadcastToAll('Draft complete, starting clock', 'Yellow')
-    end
+    coroutine.yield(0)
 
     -- Track game type.
     _gameDataHelper.addExtraData({
@@ -768,15 +786,17 @@ function finishCoroutine()
         value = true
     })
 
-    -- Track chosen slices.
-    local seatColorToSlices = {}
-    for _, choices in pairs(colorToChoices) do
-        seatColorToSlices[choices.seatColor] = table.concat(choices.sliceTiles, ',')
+    -- Track other data.  Do not touch 'MiltyDraft=boolean' as tools may use it.
+    local extras = {}
+
+    -- Track chosen slices in seat order.
+    local pickedSlices = {}
+    for i, color in ipairs(_zoneHelper.zones()) do
+        local choices = assert(colorToChoices[color])
+        local value = table.concat(choices.sliceTiles, ',')
+        table.insert(pickedSlices, value)
     end
-    _gameDataHelper.addExtraData({
-        name = 'MiltySlices',
-        value = seatColorToSlices
-    })
+    extras.pickedSlices = pickedSlices
 
     -- Track unpicked factions.
     local pickedSet = {}
@@ -789,9 +809,17 @@ function finishCoroutine()
             table.insert(unpickedList, factionTokenName)
         end
     end
+    extras.unpickedFactions = unpickedList
+
+    -- Was this a right-click menu preset?
+    if _state.preset then
+        assert(type(_state.preset) == 'string')
+        extras.preset = _state.preset
+    end
+
     _gameDataHelper.addExtraData({
-        name = 'MiltyUnpickedFactions',
-        value = unpickedList
+        name = 'MiltyDraftData',
+        value = extras
     })
 
     return 1
@@ -2308,6 +2336,20 @@ function CustomSetup.readFactions()
         return false
     end
 
+    -- Allow "sets:SCPT2022" to choose from predefined sets.
+    local setsName = string.match(value, '^sets:(.*)$')
+    if setsName then
+        local sets = FACTION_SETS[setsName]
+        if not sets then
+            local message = 'unknown sets: name "' .. setsName .. '"'
+            broadcastToAll('Milty Draft error:\n' .. message, 'Red')
+            return false
+        end
+        broadcastToAll('Milty Draft selecting factions from "' .. setsName .. '" collection', 'Yellow')
+        value = sets[math.random(#sets)]
+        assert(type(value) == 'string')
+    end
+
     local errors = {}
     local factionNames = {}
     for factionName in string.gmatch(value, '([^|]+)') do
@@ -2406,6 +2448,11 @@ end
 
 function CustomSetup.readMapString()
     return CustomSetup._getInputValue('map')
+end
+
+function CustomSetup.readClock()
+    local value = CustomSetup._getInputValue('clock')
+    return value and tonumber(value)
 end
 
 -------------------------------------------------------------------------------
