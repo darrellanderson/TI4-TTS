@@ -375,6 +375,7 @@ function setupCoroutine()
 
     local factionSets = assert(config.factionSets)
     _state.factionsIndex = math.random(#factionSets)
+    printToAll('Using faction set #' .. _state.factionsIndex .. ' / ' .. (#factionSets), 'Yellow')
     local factionNames = factionSets[_state.factionsIndex]
     _state.factionNames = assert(CustomSetup.readFactions(factionNames))
 
@@ -436,7 +437,6 @@ function setupCoroutine()
         coroutine.yield(0)
     end
     coroutine.yield(0)
-    printToAll('Factions #' .. _state.factionsIndex .. ': ' .. table.concat(factionNames, ', '), 'Yellow')
 
     -- Create draft selection mats.
     for _, color in ipairs(_zoneHelper.zones()) do
@@ -689,11 +689,12 @@ function finishCoroutine()
     coroutine.yield(0)
 
     -- Stow self.
-    local toolsBag = _getByName('Bag', 'Tools and Helpers')
-    if toolsBag then
-        self.setLock(false)
-        toolsBag.putObject(self)
-    end
+    --local toolsBag = _getByName('Bag', 'Tools and Helpers')
+    --if toolsBag then
+    --    self.setLock(false)
+    --    toolsBag.putObject(self)
+    --end
+    --coroutine.yield(0)
 
     -- Start timer.
     if _state.clock then
@@ -1603,11 +1604,11 @@ function CustomSetup.readSlices(value)
 
     if #errors > 0 then
         local message = table.concat(errors, '\n')
-        broadcastToAll('Milty Draft error:\n' .. message, 'Red')
+        broadcastToAll('Draft error:\n' .. message, 'Red')
         return false
     end
 
-    broadcastToAll('Milty Draft using custom slices: "' .. value .. '"', 'Yellow')
+    broadcastToAll('Draft using custom slices: "' .. value .. '"', 'Yellow')
     return slices
 end
 
@@ -1630,11 +1631,11 @@ function CustomSetup.readFactions(value)
 
     if #errors > 0 then
         local message = table.concat(errors, '\n')
-        broadcastToAll('Milty Draft error:\n' .. message, 'Red')
+        broadcastToAll('Draft error:\n' .. message, 'Red')
         return false
     end
 
-    broadcastToAll('Milty Draft using custom factions: "' .. table.concat(factionNames, ', ') .. '"', 'Yellow')
+    broadcastToAll('Draft using custom factions: "' .. table.concat(factionNames, ', ') .. '"', 'Yellow')
     return factionNames
 end
 
@@ -1654,11 +1655,11 @@ function CustomSetup.readSliceLabels(value)
 
     if #errors > 0 then
         local message = table.concat(errors, '\n')
-        broadcastToAll('Milty Draft error:\n' .. message, 'Red')
+        broadcastToAll('Draft error:\n' .. message, 'Red')
         return false
     end
 
-    broadcastToAll('Milty Draft using custom slice labels: "' .. table.concat(labels, ', ') .. '"', 'Yellow')
+    broadcastToAll('Draft using custom slice labels: "' .. table.concat(labels, ', ') .. '"', 'Yellow')
     return labels
 end
 
