@@ -1988,15 +1988,36 @@ end
 
 Slice = {
     -- Slice is a mini-map string with tiles in this order.
-    OFFSETS = {
+    OFFSETS = { -- the default for most players
         { name = 'leftOfHome', x = -1, z = 0.5 },
         { name = 'frontOfHome', x = 0, z = 1 },
         { name = 'rightOfHome', x = 1, z = 0.5 },
         { name = 'leftEquidistant', x = -1, z = 1.5 },
         { name = 'frontFurther', x = 0, z = 2 },
+    },
+    -- TODO: implement the following offsets
+    OFFSETS_HYPER = { -- for any player with a ring of hyperlanes replacing the slice to their left
+        { name = 'leftOfHome', x = -1, z = 0.5 },
+        { name = 'frontOfHome', x = 0, z = 1 },
+        { name = 'rightOfHome', x = 1, z = 0.5 },
+        { name = 'leftEquidistant', x = -2, z = 2 },
+        { name = 'frontFurther', x = 0, z = 2 },
+    },
+    OFFSETS_7C_8CG = { -- for the seven and eight player maps, for the players that have 83B/85B where the frontOfHome tile would usually be
+        { name = 'leftOfHome', x = -1, z = 0.5 },
+        { name = 'frontOfHome', x = 1, z = 1.5 },
+        { name = 'rightOfHome', x = 1, z = 0.5 },
+        { name = 'leftEquidistant', x = 0, z = 2 },
+        { name = 'frontFurther', x = 1, z = 2.5 },
+    },
+    OFFSETS_7E = { -- for the seven player map; for the player that has 88B where the leftEquidistant tile would usually be
+        { name = 'leftOfHome', x = -1, z = 0.5 },
+        { name = 'frontOfHome', x = 0, z = 1 },
+        { name = 'rightOfHome', x = 1, z = 0.5 },
+        { name = 'leftEquidistant', x = -1, z = 2.5 },
+        { name = 'frontFurther', x = 0, z = 2 },
     }
 }
-
 --- Compute "R/I TECH LEGENDARY" label from a list of tile numbers.
 function Slice.getSummary(tiles)
     local valid = {}
