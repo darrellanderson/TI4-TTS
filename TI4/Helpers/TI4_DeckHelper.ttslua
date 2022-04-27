@@ -181,6 +181,11 @@ local DECKS = {
                 ['Stake Your Claim'] = { abbr = 'SHARE SYSTEM' },
                 ['Strengthen Bonds'] = { abbr = 'PROM NOTE' },
             },
+            ['Codex3'] = {
+                 'Fight with Precision Ω',
+                 'Make an Example of Their World Ω',
+                 'Turn Their Fleets to Dust Ω',
+            }
         },
     },
     ['Agenda'] = {
@@ -562,6 +567,14 @@ local DECKS = {
                 'Derelict Vessel (2)',
                 ['Mirage (Exploration)'] = { purge = true },
             },
+            ['Codex3'] = {
+                 'Dead World',
+                 'Minor Entropic Field',
+                 'Entropic Field',
+                 'Major Entropic Field',
+                 'Keleres Ship (1)',
+                 'Keleres Ship (2)'
+            }
         },
     },
     ['Relics'] = {

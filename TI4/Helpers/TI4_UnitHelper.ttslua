@@ -218,6 +218,8 @@ local _unitOverrides = {
     ['Memoria I'] = { override = 'Flagship', antiFighterBarrage = { dice = 3, hit = 8 }, spaceCombat = { dice = 2, hit = 7 } },
     ['Memoria II'] = { upgrade = 'Flagship', antiFighterBarrage = { dice = 3, hit = 5 }, spaceCombat = { dice = 2, hit = 5 }, capacity = 6 },
     ['Ouranos'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 } },
+    -- Codex 3
+    ['Artemiris'] = { override = 'Flagship', spaceCombat = { dice = 2, hit = 7 }, capacity = 6 },
 
     -- PoK Mechs
     ['Letani Behemoth'] = { override = 'Mech', production = 2, planetaryShield = true },
@@ -233,6 +235,7 @@ local _unitOverrides = {
     ['Moll Terminus']  = { override = 'Mech' },
     ['Ember Colossus'] = { override = 'Mech' },
     ['Iconoclast'] = { override = 'Mech' },
+    ['Iconoclast Ω'] = { override = 'Mech' },
     ['Eidolon'] = { override = 'Mech', spaceCombat = {dice = 2, hit = 8, requireSpace = true }, groundCombat = { dice = 2, hit = 6, requireGround = true } },
     ['Mordred'] = { override = 'Mech' },
     ['Quantum Manipulator'] = { override = 'Mech' },
@@ -244,6 +247,7 @@ local _unitOverrides = {
     ['Indomitus'] = { override = 'Mech', spaceCannon = { dice = 1, hit = 8, range = 1 } },
     ["Moyin's Ashes"] = { override = 'Mech' },
     ['Blackshade Infiltrator'] = { override = 'Mech' },
+    ['Omniopiares'] = { override = 'Mech' },
 
     -- Codex.
     ['????_REDACTED_????'] = { override = 'Destroyer', antiFighterBarrage = { dice = 3, hit = 6 }, spaceCombat = { hit = 7 }, capacity = 1 },

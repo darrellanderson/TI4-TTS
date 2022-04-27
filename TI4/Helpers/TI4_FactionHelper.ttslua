@@ -38,6 +38,68 @@ local _systemHelper = getHelperClient('TI4_SYSTEM_HELPER')
 local _unitHelper = getHelperClient('TI4_UNIT_HELPER')
 local _zoneHelper = getHelperClient('TI4_ZONE_HELPER')
 
+function _exportFaction(f)
+    local function scrub(s)
+        if type(s) ~= 'string' then
+            return
+        end
+        s = string.gsub(s, '[^%w %(%)]', '')
+        s = string.lower(s):gsub(' ', '_')
+        while(string.match(s, '^_')) do
+            s = s:sub(2)
+        end
+        while(string.match(s, '_$')) do
+            s = s:sub(1, -2)
+        end
+        s = s:gsub('__', '_')
+        return s
+    end
+    local function scrubList(tbl)
+        local result = {}
+        for _, v in ipairs(tbl) do
+            table.insert(result, scrub(v))
+        end
+        return result
+    end
+
+    local techs = {}
+    for _, v in ipairs(f.factionTech or {}) do
+        if not _unitHelper.getUnitOverrides()[v] then
+            table.insert(techs, v)
+        end
+    end
+
+    local units = { f.flagship }
+    for _, v in ipairs(f.units or {}) do
+        v = v:gsub(' I$', '')
+        v = v:gsub(' II$', ' 2')
+        table.insert(units, v)
+    end
+
+    local startingUnits = {}
+    for k, v in pairs(f.startingUnits) do
+        startingUnits[scrub(k)] = v
+    end
+
+    return {
+        faction = scrub(f.shortName or f.frankenName),
+        source = scrub(f.source),
+        abilities = scrubList(f.abilities),
+        commodities = f.commodities,
+        home = f.home,
+        leaders = {
+            agents = { 'UNKNOWN_XXX'},
+            commanders = { scrub(f.commander) },
+            heroes = { scrub(f.hero) },
+        },
+        promissoryNotes = scrubList(f.promissoryNotes),
+        techs = scrubList(techs),
+        units = scrubList(units),
+        startingTech = scrubList(f.startingTech),
+        startingUnits = startingUnits,
+    }
+end
+
 -- Per-faction attributes.  This helper will also add the following fields:
 -- - color (string) or nil if not in use.
 -- - commandSheetGuid (string) or nil if not in use.
@@ -482,6 +544,24 @@ local _factionAttributes = {
         commodities = 3,
         promissoryNotes = { 'Black Market Forgery' },
     },
+
+    ['The Council Keleres'] = {
+        source = 'Codex3',
+        tokenName = 'Keleres',
+        frankenName = 'Keleres',
+        home = -1,
+        startingUnits = { Infantry = 2, Fighter = 2, Carrier = 2, Cruiser = 1, Space_Dock = 1 },
+        startingTech = { },
+        factionTech = { "Supercharge", "Pre-Fab Arcologies" },
+        flagship = "Artemiris",
+        flagshipDescription = "",
+        abilities = { 'The Tribunii', 'Council Patronage', "Law's order" },
+        units = { 'Omniopiares' },
+        commander = 'Suffi An',
+        hero = '',
+        commodities = 2,
+        promissoryNotes = { '' },
+    }
 }
 
 local _colorToFaction = {}
@@ -2061,6 +2141,17 @@ function onLoad(saveState)
 
     self.addContextMenuItem('Verify Factions', verifyAllFactions)
     self.addContextMenuItem('Report Factions', reportFactions)
+
+    local function export()
+        local input = allFactions(true)
+        --local input = {_factionAttributes['The Arborec']}
+        local result = {}
+        for _, faction in pairs(input) do
+            table.insert(result, _exportFaction(faction))
+        end
+        error('\n' .. JSON.encode(result))
+    end
+    self.addContextMenuItem('export', export)
 
     -- Only the GM/black player can see this object.  Others can still interact!
     local invisibleTo = {}

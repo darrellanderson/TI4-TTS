@@ -1,0 +1,188 @@
+This document describes the content of a December 2020 game data record,
+walking through a real record.
+
+-------------------------------------------------------------------------------
+
+Players opt-in to "share anonymized game stats" at the start of the game.
+
+Stats capture the state of the table at the end of game, *as well as at the start of every round*.
+
+Top-level stats:
+
+```json
+"isPok" : true
+"round": 4,
+"scoreboard": 10,
+"setupTimestamp": 1639583227.987,
+"timestamp": 1639601239,
+```
+Lumping together some more obvious things.  Scoreboard is 10/14, setupTimestamp is when the game started and timestamp is the time the record got saved.
+
+```json
+"hexSummary": "3+3+3Gft;Gs2i,9+0+6R2c11f1t;Ri;Rps3i,14-3-3P3f1t;Pips;Pio,18+0+0Gct;Gm2i,19+2+4;G2i,23-2+0Pfht;Pmo,24-2+2Yy;Ypo,25+2-2*g;Wimo;,27+2+0Gcf;G2i;G2i,29-2-4;Pip;Pp2i,30+0+2R3f;R2i;Rs3i,31-1+1Ycfir;Y2m;Po,32-2+4;Yio;Yio,33+2+2G3r1t;Gio*j;Gs4i,34+3-1;Wo*z;Wm2i*i,36+1-5BtGtPtRtWfyYt;B2i;Wm*O,39-1-1Yyt*e;,40-1-5Bc2f*e;,41+1-3By*e,44-3+1*e,46+0-2Bd*e,47+1+3Ry,48+3+1*n,50+1-1Rcir*e,54+0-6Bhm4f1t*h;Bs2i,57-3+3Yy2r1t;Ys2p3i;Y2p,58+3-3Wdhy2f1t;Wips;W2i;Wm3i,62+0+4R2f;Rs2i*d,63-1-3Pcr2f;Pm2i,66-3-1;Pso,67+1+1Gd;Go*x,68-1+3Rch8f1t;R2m,74-1+5Ry;Ri;Ri,75+2-4Wc;W2i;W2i;Wip,76+0-4Bdmr4f1t*h;Bs2i;Bim;Bp2i*r,77+1+5Rdf,80-2-2*e,82+5-1W2y1t;W3i;;;",
+```
+Map state including all units, command and control tokens, and planet attachments.  The online map generator can draw a pretty picture.
+
+```json
+"mapString" : "44 47 22 41 40 24 19 21 32 45 50 39 38 34 43 29 49 28 0 42 26 0 23 20 0 27 37 0 48 25 0 35 36 0 46 30"
+```
+String used if building the map using the map tool.  May or may not be present for other map build methods.
+Milty draft games will start recording which player chose what slice via the "extra" field.
+
+-------------------------------------------------------------------------------
+
+```json
+"laws": [
+  "Mutiny",
+  "Committee Formation",
+  "Armed Forces Standardization",
+  "Colonial Redistribution",
+  "Seed of an Empire",
+  "Public Execution",
+  "Covert Legislation",
+  "Political Censure"
+],
+```
+Laws in play, in the order they were added.
+
+```json
+"objectives": {
+  "Actions": [
+    "Imperial Rider"
+  ],
+  "Agenda": [
+    "Mutiny",
+    "Seed of an Empire",
+    "Political Censure"
+  ],
+  "offBoardPublicObjectives": [],
+  "OTHER": [
+    "Support for the Throne (White)",
+    "Support for the Throne (Yellow)",
+    "Support for the Throne (Purple)",
+    "Support for the Throne (Red)"
+  ],
+  "Public Objectives I": [
+    "Push Boundaries",
+    "Intimidate Council",
+    "Explore Deep Space",
+    "Sway the Council",
+    "Diversify Research"
+  ],
+  "Relics": [
+    "Shard of the Throne"
+  ],
+  "Secret Objectives": [
+    "Forge an Alliance",
+    "Threaten Enemies",
+    "Spark a Rebellion",
+    "Stake Your Claim",
+    "Mechanize the Military",
+    "Turn Their Fleets to Dust",
+    "Brave the Void",
+    "Unveil Flagship",
+    "Establish a Perimeter",
+    "Form a Spy Network",
+    "Control the Region",
+    "Strengthen Bonds",
+    "Adapt New Strategies",
+    "Destroy Their Greatest Ship",
+    "Seize an Icon"
+  ]
+},
+```
+Currently available objectives, in order added.  (Who has scored what is in the per-player data.)
+
+-------------------------------------------------------------------------------
+
+```json
+"players": [
+  {
+    "active": true,
+    "alliances": [
+      "Purple",
+      "Red"
+    ],
+    "color": "White",
+    "commandTokens": {
+      "fleet": 3,
+      "strategy": 1,
+      "tactics": 2
+    },
+    "commodities": 0,
+    "custodiansPoints": 0,
+    "factionName": "Argent Flight",
+    "factionShort": "Argent",
+    "handSummary": {
+      "Actions": 3
+    },
+    "laws": [
+      "Mutiny"
+    ],
+    "leaders": {
+      "commander": "unlocked",
+      "hero": "purged"
+    },
+    "objectives": [
+      "Push Boundaries",
+      "Intimidate Council",
+      "Sway the Council",
+      "Mutiny",
+      "Forge an Alliance",
+      "Mechanize the Military"
+    ],
+    "planetTotals": {
+      "influence": {
+        "avail": 11,
+        "total": 16
+      },
+      "legendary": 1,
+      "resources": {
+        "avail": 7,
+        "total": 13
+      },
+      "techs": {
+        "blue": 2,
+        "green": 0,
+        "red": 0,
+        "yellow": 0
+      },
+      "traits": {
+        "cultural": 5,
+        "hazardous": 1,
+        "industrial": 2
+      }
+    },
+    "score": 6,
+    "strategyCards": [
+      "Diplomacy"
+    ],
+    "strategyCardsFaceDown": [
+      "Diplomacy"
+    ],
+    "technologies": [
+      "Sarween Tools",
+      "Plasma Scoring",
+      "Self Assembly Routines",
+      "Strike Wing Alpha II",
+      "PDS II",
+      "Predictive Intelligence",
+      "Gravity Drive"
+    ],
+    "tradeGoods": 4
+  },
+  ...
+]
+```
+
+-------------------------------------------------------------------------------
+
+The players array contains players in seat order (starting with the lower-right traditionally "White" seat then clockwise around the table).
+
+For each player it records whose alliance notes that player holds, card types in hand, laws in their play area, leader status, objectives scored, summary of planets held, current strategy card, technologies researched (in order), and trade goods.
+
+There is a `history` array that keeps the above game-state snapshot at the start of each round.
+
+Note that the per-round histories only keep a count of the number of technologies held.  In most situations that is correct, however the Jol-Nar hero or other situations where the technology set mutates doesn't get tracked.
+
+-------------------------------------------------------------------------------

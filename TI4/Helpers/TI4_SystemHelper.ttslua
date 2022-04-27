@@ -332,39 +332,39 @@ local _systems = {
     -- hyperlanes is an array of 6 indices, representing hyperlane connexion. Indices are zero-based (0 to 6)
     -- Using _fillMissingSystemData to automatically fill 'hyperlanes' with the right data depending if the tile is flipped or not
     -- 0 is top right side, when the tile is rotated at -180° on Y axis (Y rotation of zero)
-    ['81a64a'] = { tile = 83, hyperlane = true, 
+    ['81a64a'] = { tile = 83, hyperlane = true,
         hyperlanes_faceUp = { {3}, {}, {}, {0}, {}, {} },
         hyperlanes_faceDown = { {}, {5}, {4,5}, {}, {2}, {1,2} }
     },
-    ['bed0e0'] = { tile = 84, hyperlane = true, 
+    ['bed0e0'] = { tile = 84, hyperlane = true,
         hyperlanes_faceUp = { {}, {4}, {}, {}, {1}, {} },
         hyperlanes_faceDown = { {2}, {}, {0,5}, {5}, {}, {2,3} }
     },
-    ['a64a36'] = { tile = 85, hyperlane = true, 
+    ['a64a36'] = { tile = 85, hyperlane = true,
         hyperlanes_faceUp = { {}, {3}, {}, {1}, {}, {} },
         hyperlanes_faceDown = { {}, {5}, {4,5}, {}, {2}, {1,2} }
     },
-    ['b34afa'] = { tile = 86, hyperlane = true, 
-        hyperlanes_faceUp = { {}, {3}, {}, {1}, {}, {} }, 
+    ['b34afa'] = { tile = 86, hyperlane = true,
+        hyperlanes_faceUp = { {}, {3}, {}, {1}, {}, {} },
         hyperlanes_faceDown = { {2}, {}, {0,5}, {5}, {}, {2,3} }
     },
-    ['3ccc62'] = { tile = 87, hyperlane = true, 
+    ['3ccc62'] = { tile = 87, hyperlane = true,
         hyperlanes_faceUp = { {4}, {4}, {4}, {}, {0,1,2}, {} },
         hyperlanes_faceDown = { {}, {}, {4,5}, {}, {2}, {2} }
     },
-    ['ee4bf1'] = { tile = 88, hyperlane = true, 
+    ['ee4bf1'] = { tile = 88, hyperlane = true,
         hyperlanes_faceUp = { {2,3,4}, {}, {0}, {0}, {0}, {} },
         hyperlanes_faceDown = { {}, {5}, {4,5}, {}, {2}, {1,2} }
     },
-    ['33e49a'] = { tile = 89, hyperlane = true, 
+    ['33e49a'] = { tile = 89, hyperlane = true,
         hyperlanes_faceUp = { {2,4}, {}, {0,4}, {}, {0,2}, {} },
         hyperlanes_faceDown = { {2}, {}, {0,5}, {}, {}, {2} }
     },
-    ['7e7ee1'] = { tile = 90, hyperlane = true, 
+    ['7e7ee1'] = { tile = 90, hyperlane = true,
         hyperlanes_faceUp = { {4}, {3}, {}, {1}, {0}, {} },
         hyperlanes_faceDown = { {2}, {}, {0,5}, {}, {}, {2} }
     },
-    ['565980'] = { tile = 91, hyperlane = true, 
+    ['565980'] = { tile = 91, hyperlane = true,
         hyperlanes_faceUp = { {2}, {}, {0,5}, {5}, {}, {2,3} },
         hyperlanes_faceDown = { {}, {}, {4,5}, {}, {2}, {2} }
     },
@@ -464,6 +464,8 @@ local _nonPlanetResourceInfluenceCards = {
     { name = 'Core Mining', resources = 2, influence = 0 },
     { name = 'Senate Sanctuary', resources = 0, influence = 2 },
     { name = 'Terraforming Initiative', resources = 1, influence = 1 },
+
+    { name = 'Custodia Vigilia', resources = 2, influence = 3 },
 
     -- Attachment tokens are the new way to do things.
     -- { name = 'Rich World', resources = 1, influence = 0 },
