@@ -520,7 +520,7 @@ function placeTilesCoroutine()
         end
     end
 
-    printToAll('Builing map finished')
+    printToAll('Building map finished')
     return 1
 end
 

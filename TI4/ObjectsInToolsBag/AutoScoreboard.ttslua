@@ -1,0 +1,4 @@
+--- Compute score using game data.
+-- Need a token on an objective, or correct column of the secrets mat.
+-- Mutiny must be set to its result via right click.
+-- @author Darrell

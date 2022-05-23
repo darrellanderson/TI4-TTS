@@ -66,6 +66,10 @@ function onObjectSearchEnd(container)
 end
 
 function onObjectDestroy(dyingObject)
+    if dyingObject == nil then
+        return
+    end
+
     -- No regrets.
     if dyingObject == self or string.find(dyingObject.getName(), 'TI4 Deleted Items') then
         objectEnteredContainerSet[dyingObject] = nil

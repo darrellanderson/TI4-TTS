@@ -1,0 +1,15 @@
+--- Unpack a "color" box, using object data vs take.
+-- @author darrell
+
+-- Positions relative to a player zone.
+local UNPACK = {
+    ['Unit Stand'] = {
+        position = { x = 0, y = 0, z = 0 },
+        lock = true,
+    },
+    ['Dreadnought'] = {
+        parent = 'Unit Stand',
+        position = { x = 0, y = 0, z = 0 },
+        lock = true,
+    }
+}

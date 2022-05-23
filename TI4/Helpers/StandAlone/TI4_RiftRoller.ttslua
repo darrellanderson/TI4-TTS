@@ -75,7 +75,8 @@ function isGravRiftObject(object)
 end
 
 function applyGravityRiftGoodness(object)
-    object.addContextMenuItem('Roll Grav Rift', function(playerColor) rollRift(object, playerColor) end, true)
+    object.addContextMenuItem('Roll 1 Grav Rift', function(playerColor) rollRift(object, playerColor) end, true)
+    --object.addContextMenuItem('Roll ALL Grav Rift', function(playerColor) rollRift(object, playerColor) end, true)
 end
 
 -------------------------------------------------------------------------------

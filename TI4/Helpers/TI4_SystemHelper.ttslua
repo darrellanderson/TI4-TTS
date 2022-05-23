@@ -369,6 +369,21 @@ local _systems = {
         hyperlanes_faceDown = { {}, {}, {4,5}, {}, {2}, {2} }
     },
 
+    -- Keleres
+    ['d05172'] = { tile = 202, home = true, planets = {
+        { name = 'Moll Primus', resources = 4, influence = 1 },
+    }},
+    ['feae10'] = { tile = 214, home = true, planets = {
+        { name = 'Archon Ren', resources = 2, influence = 3 },
+        { name = 'Archon Tau', resources = 1, influence = 1 },
+    }},
+    ['badf4c'] = { tile = 258, home = true, planets = {
+        { name = 'Valk', resources = 2, influence = 0 },
+        { name = 'Ylir', resources = 0, influence = 2 },
+        { name = 'Avar', resources = 1, influence = 1 },
+    }},
+
+
     -- Phil's warp zones.
     ['3830ca'] = { tile = 1001, hyperlane = true }, -- A
     ['5dbaf9'] = { tile = 1002, hyperlane = true }, -- A

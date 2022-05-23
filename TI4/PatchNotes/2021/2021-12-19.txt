@@ -7,3 +7,7 @@ v49:
 - - Unpicked factions.
 - - Name of right-click menu preset draft choice, when used.
 - Milty draft presets may now include a duration, starts the clock when draft finishes.
+- Milty draft internal support for faction sets.
+
+TODO
+- Wekker's SCPT Tourney Result Code Generator
