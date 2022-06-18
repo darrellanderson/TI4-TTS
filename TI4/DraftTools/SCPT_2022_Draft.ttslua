@@ -86,6 +86,67 @@ local CONFIG = {
             "Arborec|Argent|Jol-Nar|Letnev|Nomad|Vuil'raith|Nekro",
             "Hacan|Mentak|Muaat|Naalu|Xxcha|Winnu|Yssaril",
         }
+    },
+    ['SCPT 2022 Semi-Final'] = {
+        slices = '35,39,34,45,61|41,26,30,46,73|72,79,32,22,66|21,40,69,48,38|49,25,70,67,28|23,64,33,50,65',
+        labels = "Public Domain Smooth|Mellon Tell Lodorture|In the Hall of the Asteroid King|Jeol Ir : The Entertainer|Rift of the Valkyries|Drunken Saudor",
+        clock = 28800,
+        factionSets = {
+            "Saar|Mentak|L1Z1X|Naaz-Rokha|Sol|Xxcha|Winnu",
+            "Yssaril|Empyrean|Sol|Yin|Nekro|Letnev|Creuss",
+            "Titans|Empyrean|Arborec|L1Z1X|Muaat|Naalu|Vuil'raith",
+            "Jol-Nar|Sardakk|Argent|Arborec|Mentak|Nekro|Yin",
+            "Nomad|Argent|Creuss|Hacan|Naaz-Rokha|Vuil'raith|Xxcha",
+            "Mahact|Winnu|Hacan|Letnev|Muaat|Naalu|Sardakk",
+        }
+    },
+    ['SCPT 2022 Semi 1'] = {
+        slices = '35,39,34,45,61|41,26,30,46,73|72,79,32,22,66|21,40,69,48,38|49,25,70,67,28|23,64,33,50,65',
+        labels = "Public Domain Smooth|Mellon Tell Lodorture|In the Hall of the Asteroid King|Jeol Ir : The Entertainer|Rift of the Valkyries|Drunken Saudor",
+        clock = 28800,
+        factionSets = {
+            "Saar|Mentak|L1Z1X|Naaz-Rokha|Sol|Xxcha|Winnu",
+        }
+    },
+    ['SCPT 2022 Semi 2'] = {
+        slices = '35,39,34,45,61|41,26,30,46,73|72,79,32,22,66|21,40,69,48,38|49,25,70,67,28|23,64,33,50,65',
+        labels = "Public Domain Smooth|Mellon Tell Lodorture|In the Hall of the Asteroid King|Jeol Ir : The Entertainer|Rift of the Valkyries|Drunken Saudor",
+        clock = 28800,
+        factionSets = {
+            "Yssaril|Empyrean|Sol|Yin|Nekro|Letnev|Creuss",
+        }
+    },
+    ['SCPT 2022 Semi 3'] = {
+        slices = '35,39,34,45,61|41,26,30,46,73|72,79,32,22,66|21,40,69,48,38|49,25,70,67,28|23,64,33,50,65',
+        labels = "Public Domain Smooth|Mellon Tell Lodorture|In the Hall of the Asteroid King|Jeol Ir : The Entertainer|Rift of the Valkyries|Drunken Saudor",
+        clock = 28800,
+        factionSets = {
+            "Titans|Empyrean|Arborec|L1Z1X|Muaat|Naalu|Vuil'raith",
+        }
+    },
+    ['SCPT 2022 Semi 4'] = {
+        slices = '35,39,34,45,61|41,26,30,46,73|72,79,32,22,66|21,40,69,48,38|49,25,70,67,28|23,64,33,50,65',
+        labels = "Public Domain Smooth|Mellon Tell Lodorture|In the Hall of the Asteroid King|Jeol Ir : The Entertainer|Rift of the Valkyries|Drunken Saudor",
+        clock = 28800,
+        factionSets = {
+            "Jol-Nar|Sardakk|Argent|Arborec|Mentak|Nekro|Yin",
+        }
+    },
+    ['SCPT 2022 Semi 5'] = {
+        slices = '35,39,34,45,61|41,26,30,46,73|72,79,32,22,66|21,40,69,48,38|49,25,70,67,28|23,64,33,50,65',
+        labels = "Public Domain Smooth|Mellon Tell Lodorture|In the Hall of the Asteroid King|Jeol Ir : The Entertainer|Rift of the Valkyries|Drunken Saudor",
+        clock = 28800,
+        factionSets = {
+            "Nomad|Argent|Creuss|Hacan|Naaz-Rokha|Vuil'raith|Xxcha",
+        }
+    },
+    ['SCPT 2022 Semi 6'] = {
+        slices = '35,39,34,45,61|41,26,30,46,73|72,79,32,22,66|21,40,69,48,38|49,25,70,67,28|23,64,33,50,65',
+        labels = "Public Domain Smooth|Mellon Tell Lodorture|In the Hall of the Asteroid King|Jeol Ir : The Entertainer|Rift of the Valkyries|Drunken Saudor",
+        clock = 28800,
+        factionSets = {
+            "Mahact|Winnu|Hacan|Letnev|Muaat|Naalu|Sardakk",
+        }
     }
 }
 
@@ -101,6 +162,30 @@ function doSetupSemiFinal(playerColor)
     doSetup('SCPT 2022 Semi-Final')
 end
 
+function doSetupSemi1(playerColor)
+    doSetup('SCPT 2022 Semi 1')
+end
+
+function doSetupSemi2(playerColor)
+    doSetup('SCPT 2022 Semi 2')
+end
+
+function doSetupSemi3(playerColor)
+    doSetup('SCPT 2022 Semi 3')
+end
+
+function doSetupSemi4(playerColor)
+    doSetup('SCPT 2022 Semi 4')
+end
+
+function doSetupSemi5(playerColor)
+    doSetup('SCPT 2022 Semi 5')
+end
+
+function doSetupSemi6(playerColor)
+    doSetup('SCPT 2022 Semi 6')
+end
+
 function doSetupFinal(playerColor)
     doSetup('SCPT 2022 Final')
 end
@@ -108,14 +193,13 @@ end
 -------------------------------------------------------------------------------
 
 local col0 = 0
-local dcol = 0
+local dcol = 1
 local row0 = 0
 local drow = 1
-
 local BUTTONS = {
     {
         row = row0 + drow * 0,
-        col = col0 + dcol * 0,
+        col = col0,
         id = 'setup',
         label = 'Setup\nQualifier',
         onClick = 'doSetupQualifier',
@@ -124,7 +208,7 @@ local BUTTONS = {
     },
     {
         row = row0 + drow * 1,
-        col = col0 + dcol * 1,
+        col = col0,
         id = 'setup',
         label = 'Setup\nPrelim',
         onClick = 'doSetupPrelim',
@@ -133,7 +217,7 @@ local BUTTONS = {
     },
     {
         row = row0 + drow * 2,
-        col = col0 + dcol * 2,
+        col = col0,
         id = 'setup',
         label = 'Setup\nSemi-Final',
         onClick = 'doSetupSemiFinal',
@@ -142,7 +226,7 @@ local BUTTONS = {
     },
     {
         row = row0 + drow * 3,
-        col = col0 + dcol * 3,
+        col = col0,
         id = 'setup',
         label = 'Setup\nFinal',
         onClick = 'doSetupFinal',
@@ -158,6 +242,60 @@ local BUTTONS = {
         tooltip = 'Move players to their drafted seats, factions, and slices (found in the drafting player\'s area)',
         confirm = true,
     },
+	{
+        row = row0 + drow * 4,
+        col = col0 + dcol * 0,
+        id = 'setup',
+        label = 'Setup\nSemis Game 1',
+        onClick = 'doSetupSemi1',
+        confirm = true,
+        hideOnSetup = true,
+	},
+	{
+        row = row0 + drow * 4,
+        col = col0 + dcol * 1,
+        id = 'setup',
+        label = 'Setup\nSemis Game 2',
+        onClick = 'doSetupSemi2',
+        confirm = true,
+        hideOnSetup = true,
+	},
+	{
+        row = row0 + drow * 4,
+        col = col0 + dcol * 2,
+        id = 'setup',
+        label = 'Setup\nSemis Game 3',
+        onClick = 'doSetupSemi3',
+        confirm = true,
+        hideOnSetup = true,
+	},
+	{
+        row = row0 + drow * 5,
+        col = col0 + dcol * 0,
+        id = 'setup',
+        label = 'Setup\nSemis Game 4',
+        onClick = 'doSetupSemi4',
+        confirm = true,
+        hideOnSetup = true,
+	},
+	{
+        row = row0 + drow * 5,
+        col = col0 + dcol * 1,
+        id = 'setup',
+        label = 'Setup\nSemis Game 5',
+        onClick = 'doSetupSemi5',
+        confirm = true,
+        hideOnSetup = true,
+	},
+	{
+        row = row0 + drow * 5,
+        col = col0 + dcol * 2,
+        id = 'setup',
+        label = 'Setup\nSemis Game 6',
+        onClick = 'doSetupSemi6',
+        confirm = true,
+        hideOnSetup = true,
+	},
 }
 
 local LABEL_COLORS = {
